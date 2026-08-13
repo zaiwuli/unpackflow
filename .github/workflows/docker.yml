@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   docker:
+    needs: smoke-test
     permissions:
       contents: read
       packages: write
@@ -49,3 +50,61 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+
+  smoke-test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build local smoke-test image
+        run: docker build -f init/docker/Dockerfile -t unpackflow-smoke .
+
+      - name: Start container
+        run: |
+          mkdir -p .smoke/downloads .smoke/output .smoke/cache .smoke/config
+          docker run -d --name unpackflow-smoke \
+            -p 5656:5656 \
+            -e UN_START_DELAY=1s \
+            -e UN_FOLDERS_INTERVAL=1s \
+            -v "$PWD/.smoke/downloads:/downloads" \
+            -v "$PWD/.smoke/output:/output" \
+            -v "$PWD/.smoke/cache:/cache" \
+            -v "$PWD/.smoke/config:/config" \
+            unpackflow-smoke
+
+      - name: Check health and UI
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:5656/health | grep -q '"status":"ok"'; then
+              curl --fail --silent http://127.0.0.1:5656/ | grep -q 'UnpackFlow'
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs unpackflow-smoke
+          exit 1
+
+      - name: Verify automatic ZIP extraction
+        run: |
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile('.smoke/downloads/delivery-test.zip', 'w') as archive:
+              archive.writestr('delivery-ok.txt', 'UnpackFlow delivery test')
+          PY
+          for attempt in $(seq 1 60); do
+            if find .smoke/output -type f -name delivery-ok.txt -print -quit | grep -q delivery-ok.txt; then
+              grep -R --fixed-strings 'UnpackFlow delivery test' .smoke/output
+              exit 0
+            fi
+            sleep 1
+          done
+          find .smoke -maxdepth 5 -type f -print
+          docker logs unpackflow-smoke
+          exit 1
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs unpackflow-smoke || true

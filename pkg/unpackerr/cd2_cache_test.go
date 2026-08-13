@@ -22,6 +22,38 @@ func TestArchiveVolumeGroupRAR(t *testing.T) {
 	}
 }
 
+func TestArchiveVolumeGroupOldRAR(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"release.rar", "release.r00", "release.r01"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, _, err := archiveVolumeGroup(filepath.Join(dir, "release.r00"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("wanted 3 old RAR volumes, got %d: %v", len(files), files)
+	}
+}
+
+func TestArchiveVolumeGroup7Zip(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"release.7z.001", "release.7z.002", "release.7z.003"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, _, err := archiveVolumeGroup(filepath.Join(dir, "release.7z.002"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("wanted 3 7z volumes, got %d: %v", len(files), files)
+	}
+}
+
 func TestCacheCloudDriveGroup(t *testing.T) {
 	sourceDir, cacheDir := t.TempDir(), t.TempDir()
 	source := filepath.Join(sourceDir, "sample.zip")

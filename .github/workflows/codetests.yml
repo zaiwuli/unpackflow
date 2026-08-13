@@ -21,8 +21,25 @@ jobs:
           go-version: stable
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check WebUI JavaScript
+        run: node --check pkg/unpackerr/webui/app.js
+
       - name: Test
-        run: go test ./...
+        run: go test ./... -count=1
 
       - name: Vet
         run: go vet ./...
+
+      - name: Race detector
+        run: go test ./pkg/clouddrive ./pkg/unpackerr -race -count=1
+
+      - name: Delivery regression tests
+        run: >-
+          go test ./pkg/unpackerr
+          -run 'TestLocalWatchedZipDetectionAndExtraction|TestCD2CacheThenRealZipExtraction|TestNotificationUsesGETAndEncodedText|TestUISettingsPersistAcrossRestart|TestDashboardPageContainsRequiredChineseViews'
+          -count=1 -v

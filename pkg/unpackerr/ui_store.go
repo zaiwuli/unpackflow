@@ -245,6 +245,12 @@ func (u *Unpackerr) saveNotification(s UINotification) error {
 }
 func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	u.uiStore.mu.Lock()
+	// The API intentionally never returns the CD2 token to the browser. An empty
+	// token submitted while editing another setting therefore means "keep the
+	// existing token", not "erase it".
+	if strings.TrimSpace(s.CD2Token) == "" {
+		s.CD2Token = u.uiStore.Overrides.CD2Token
+	}
 	u.uiStore.Overrides = s
 	u.uiStore.mu.Unlock()
 	return u.saveUIStore()

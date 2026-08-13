@@ -121,6 +121,41 @@ func runExtraction(t *testing.T, archivePath string, disableRecursion bool) *xtr
 	}
 }
 
+func runExtractionTo(t *testing.T, archivePath, outputPath string) *xtractr.Response {
+	t.Helper()
+	queue := xtractr.NewQueue(&xtractr.Config{
+		Parallel: 1,
+		Suffix:   suffix,
+		FileMode: defaultFileMode,
+		DirMode:  defaultDirMode,
+	})
+	t.Cleanup(func() { queue.Stop() })
+	callbacks := make(chan *xtractr.Response, updateChanBuf)
+	_, err := queue.Extract(&xtractr.Xtract{
+		Name:       archivePath,
+		Filter:     xtractr.Filter{Path: archivePath},
+		TempFolder: true,
+		ExtractTo:  outputPath,
+		CBChannel:  callbacks,
+		LogFile:    false,
+	})
+	if err != nil {
+		t.Fatalf("queue.Extract returned error: %v", err)
+	}
+	timeout := time.NewTimer(90 * time.Second)
+	defer timeout.Stop()
+	for {
+		select {
+		case resp := <-callbacks:
+			if resp.Done {
+				return resp
+			}
+		case <-timeout.C:
+			t.Fatal("timed out waiting for extraction callback")
+		}
+	}
+}
+
 func makeNestedZipFixture(t *testing.T) string {
 	t.Helper()
 

@@ -5,11 +5,6 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Asia/Shanghai}
-      UN_FOLDER_0_PATH: /downloads
-      UN_FOLDER_0_EXTRACT_PATH: /output
-      UN_FOLDER_0_MOVE_BACK: "true"
-      UN_FOLDER_0_DISABLE_LOG: "true"
-      UN_FOLDER_0_DELETE_ORIGINAL: "false"
     volumes:
       - /volume2/解压目录/监控目录:/downloads
       - /volume2/解压目录/输出目录:/output
