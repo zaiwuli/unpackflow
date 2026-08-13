@@ -1,7 +1,7 @@
 services:
-  archiveflow:
-    image: ghcr.io/zaiwuli/archiveflow:latest
-    container_name: archiveflow
+  unpackflow:
+    image: ghcr.io/zaiwuli/unpackflow:latest
+    container_name: unpackflow
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Asia/Shanghai}
@@ -10,7 +10,7 @@ services:
       - /volume2/解压目录/输出目录:/output
       - /volume2/解压目录/缓存目录:/cache
       - /volume1/CloudNAS/CloudDrive:/volume1/CloudNAS/CloudDrive
-      - /volume1/docker/archiveflow:/config
+      - /volume1/docker/unpackflow:/config
     ports:
       - 8066:5656
     healthcheck:

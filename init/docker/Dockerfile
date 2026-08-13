@@ -35,13 +35,13 @@ ARG COMMIT
 ARG VERSION
 ARG ITERATION
 ARG LICENSE=MIT
-ARG SOURCE_URL=https://github.com/zaiwuli/archiveflow
-ARG DESC=ArchiveFlow NAS archive extraction service
+ARG SOURCE_URL=https://github.com/zaiwuli/unpackflow
+ARG DESC=UnpackFlow NAS archive extraction service
 ARG VENDOR=zaiwuli
 ARG AUTHOR=zaiwuli
 # Build-time metadata as defined at https://github.com/opencontainers/image-spec/blob/master/annotations.md
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.title="ArchiveFlow" \
+      org.opencontainers.image.title="UnpackFlow" \
       org.opencontainers.image.documentation="https://unpackerr.zip" \
       org.opencontainers.image.description="${DESC}" \
       org.opencontainers.image.url="${SOURCE_URL}" \

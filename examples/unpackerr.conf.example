@@ -76,7 +76,7 @@ dir_mode = "0755"
 passwords = []
 
 [webserver]
-## ArchiveFlow's built-in Chinese WebUI is enabled by default.
+## UnpackFlow's built-in Chinese WebUI is enabled by default.
  enabled = true
  metrics = false
 ## This may be set to a port or an ip:port to bind a specific IP. 0.0.0.0 binds ALL IPs.

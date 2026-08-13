@@ -46,7 +46,7 @@ func (u *Unpackerr) loadUIStore() error {
 	if base == "." || base == "" {
 		base, _ = os.Getwd()
 	}
-	store := &UIStore{Path: filepath.Join(base, "archiveflow-ui.json")}
+	store := &UIStore{Path: filepath.Join(base, "unpackflow-ui.json")}
 	data, err := os.ReadFile(store.Path)
 	if err == nil {
 		if err = json.Unmarshal(data, store); err != nil {
@@ -55,7 +55,7 @@ func (u *Unpackerr) loadUIStore() error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("ui state: %w", err)
 	}
-	store.Path = filepath.Join(base, "archiveflow-ui.json")
+	store.Path = filepath.Join(base, "unpackflow-ui.json")
 	if len(store.Passwords) == 0 && len(u.Passwords) > 0 {
 		store.Passwords = append([]string(nil), u.Passwords...)
 	}
@@ -293,7 +293,7 @@ func formatUINotification(status ExtractStatus, item *Extract) string {
 	case DELETED:
 		icon, title = "\U0001f9f9", "\u4efb\u52a1\u6e05\u7406\u5b8c\u6210"
 	}
-	return fmt.Sprintf("%s ArchiveFlow %s\n--------------------\n\u23f1\ufe0f \u65f6\u95f4: %s\n\U0001f4c1 \u6765\u6e90: %s\n\U0001f194 \u4efb\u52a1: %s", icon, title, time.Now().Format("2006-01-02 15:04:05"), sourceName(item.App), item.Path)
+	return fmt.Sprintf("%s UnpackFlow %s\n--------------------\n\u23f1\ufe0f \u65f6\u95f4: %s\n\U0001f4c1 \u6765\u6e90: %s\n\U0001f194 \u4efb\u52a1: %s", icon, title, time.Now().Format("2006-01-02 15:04:05"), sourceName(item.App), item.Path)
 }
 func sortedPasswords(p []string) []string {
 	r := append([]string{}, p...)
