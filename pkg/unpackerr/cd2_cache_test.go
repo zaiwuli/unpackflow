@@ -158,7 +158,13 @@ func TestCacheCloudDriveGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != "sample.zip" {
+	foundArchive := false
+	for _, entry := range entries {
+		if entry.Name() == "sample.zip" && !entry.IsDir() {
+			foundArchive = true
+		}
+	}
+	if !foundArchive {
 		t.Fatalf("cache file was not created directly in cache root: %v", entries)
 	}
 	select {
@@ -168,6 +174,39 @@ func TestCacheCloudDriveGroup(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected cache-ready event")
+	}
+}
+
+func TestCacheStagingRootStaysInsideCacheMount(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	root := cacheStagingRoot(cacheDir)
+	if !sameOrChild(root, cacheDir) {
+		t.Fatalf("staging root escaped cache mount: %s", root)
+	}
+}
+
+func TestPromoteCachedFile(t *testing.T) {
+	dir := t.TempDir()
+	staged := filepath.Join(dir, "staged.7z")
+	target := filepath.Join(dir, "final.7z")
+	if err := os.WriteFile(staged, []byte("new archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("old archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := promoteCachedFile(staged, target); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "new archive" {
+		t.Fatalf("unexpected promoted content: %q", content)
+	}
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("staged file still exists: %v", err)
 	}
 }
 

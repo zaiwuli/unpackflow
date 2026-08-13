@@ -55,7 +55,7 @@ func (u *Unpackerr) validateCloudDriveCache() error {
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return fmt.Errorf("CloudDrive2 cache_dir: %w", err)
 	}
-	if err := os.MkdirAll(cacheDir+".staging", 0o755); err != nil {
+	if err := os.MkdirAll(cacheStagingRoot(cacheDir), 0o755); err != nil {
 		return fmt.Errorf("CloudDrive2 cache staging: %w", err)
 	}
 	cfg.CacheDir = cacheDir
@@ -106,6 +106,13 @@ func sameOrChild(child, parent string) bool {
 	child, parent = filepath.Clean(child), filepath.Clean(parent)
 	rel, err := filepath.Rel(parent, child)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// Keep staging inside CacheDir so Docker bind mounts cannot place staging and
+// the final cache on different filesystems. A sibling such as /cache.staging
+// lives on the container root filesystem when only /cache is mounted.
+func cacheStagingRoot(cacheDir string) string {
+	return filepath.Join(cacheDir, ".unpackflow-staging")
 }
 
 // cacheCloudDrivePaths copies a complete archive group off the mounted CloudDrive
@@ -282,7 +289,7 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	sum := sha256.Sum256([]byte(key))
 	taskID := fmt.Sprintf("%x", sum[:8])
 	finalDir := u.CloudDrive2.CacheDir
-	staging := filepath.Join(u.CloudDrive2.CacheDir+".staging", taskID)
+	staging := filepath.Join(cacheStagingRoot(u.CloudDrive2.CacheDir), taskID)
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
@@ -335,8 +342,7 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 		target := filepath.Join(finalDir, name)
 		staged := filepath.Join(staging, name)
 		if _, err := os.Stat(staged); err == nil {
-			_ = os.Remove(target)
-			if err := os.Rename(staged, target); err != nil {
+			if err := promoteCachedFile(staged, target); err != nil {
 				return err
 			}
 		} else if ok, verifyErr := sameFileMetadata(source, target); verifyErr != nil || !ok {
@@ -356,6 +362,41 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	u.cd2Resume.Store(filepath.Clean(primaryPath), struct{}{})
 	u.folders.InjectFileEvent(primaryPath, "cd2 cache ready")
 	u.Printf("CloudDrive2 cache ready: %d file(s) copied to %s", len(files), finalDir)
+	return nil
+}
+
+// promoteCachedFile normally performs an atomic rename. If the paths still
+// end up on different filesystems because of an unusual mount layout, copy to
+// a temporary file beside the target, verify it, and then atomically replace
+// the final cache file.
+func promoteCachedFile(staged, target string) error {
+	if err := os.Rename(staged, target); err == nil {
+		return nil
+	}
+	temporary := target + ".archiveflow-part"
+	_ = os.Remove(temporary)
+	if err := copyStableFileContext(context.Background(), staged, temporary, nil); err != nil {
+		return fmt.Errorf("缓存文件落盘失败：%w", err)
+	}
+	ok, err := sameFileMetadata(staged, temporary)
+	if err != nil || !ok {
+		_ = os.Remove(temporary)
+		if err != nil {
+			return fmt.Errorf("缓存文件落盘校验失败：%w", err)
+		}
+		return fmt.Errorf("缓存文件落盘校验失败：%s", filepath.Base(target))
+	}
+	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := os.Rename(temporary, target); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := os.Remove(staged); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return nil
 }
 
