@@ -94,6 +94,7 @@ func (u *Unpackerr) webRoutes() {
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/passwords"), u.passwordAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/notification"), u.notificationAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/notification/test"), u.notificationTestAPI)
+	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/clouddrive2/refresh"), u.cd2RefreshAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/settings"), u.settingsAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/history/delete"), u.historyAPI)
 

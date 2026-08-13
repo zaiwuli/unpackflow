@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Unpackerr/unpackerr/pkg/clouddrive"
 	"github.com/Unpackerr/unpackerr/pkg/ui"
 	flag "github.com/spf13/pflag"
 	"golift.io/cnfg"
@@ -71,6 +72,9 @@ type Unpackerr struct {
 	cd2Cache  sync.Map // cache archive path -> []mounted CloudDrive source files
 	cd2Copy   sync.Map // source group key -> struct{} while a cache copy is in progress
 	cd2Resume sync.Map // cached primary path -> struct{} after resume submission
+	cd2Tasks  sync.Map // group key -> *CD2Transfer while copying or verifying
+	cd2Mu     sync.RWMutex
+	cd2Client *clouddrive.Client
 }
 
 type fileDeleteReq struct {
@@ -142,6 +146,7 @@ func New() *Unpackerr {
 				CacheDir:         "",
 				CacheExtractPath: "/output",
 				CacheDeleteDelay: cnfg.Duration{Duration: time.Minute},
+				CopyTimeout:      cnfg.Duration{Duration: 24 * time.Hour},
 			},
 		},
 		Logger: &Logger{

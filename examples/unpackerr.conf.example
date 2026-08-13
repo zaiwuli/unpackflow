@@ -296,6 +296,7 @@ passwords = []
 # delete_source = false
 ## Delay before deleting a successful cache task when keep_cache is false.
 # cache_delete_delay = "1m"
+# copy_timeout = "24h"
 
 ##-WebUI-#########################################################################
 ## A lightweight Chinese status page is built in. It shows active extraction jobs, ##

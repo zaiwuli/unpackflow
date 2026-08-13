@@ -97,6 +97,7 @@ type CloudDriveConfig struct {
 	KeepCache        bool          `json:"keep_cache"        toml:"keep_cache"        xml:"keep_cache"        yaml:"keep_cache"`
 	DeleteSource     bool          `json:"delete_source"     toml:"delete_source"     xml:"delete_source"     yaml:"delete_source"`
 	CacheDeleteDelay cnfg.Duration `json:"cache_delete_delay" toml:"cache_delete_delay" xml:"cache_delete_delay" yaml:"cache_delete_delay"`
+	CopyTimeout      cnfg.Duration `json:"copy_timeout"       toml:"copy_timeout"       xml:"copy_timeout"       yaml:"copy_timeout"`
 }
 
 type FoldersConfig struct {

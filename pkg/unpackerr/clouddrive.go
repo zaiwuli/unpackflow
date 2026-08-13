@@ -41,6 +41,9 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 			}
 		},
 	}
+	u.cd2Mu.Lock()
+	u.cd2Client = monitor.Client
+	u.cd2Mu.Unlock()
 	go monitor.Run(context.Background())
 	u.Printf("CloudDrive2 监控已连接：%s", cfg.URL)
 	go u.cloudDriveFallbackScan(monitor.Client, cfg.WatchPath, cfg.PathOverrides)
@@ -74,7 +77,7 @@ func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval ti
 
 // cloudDriveFallbackScan compensates for delayed or missed change events. It
 // scans only the configured watch path after mapping it to the mounted path.
-func (u *Unpackerr) cloudDriveFallbackScan(client *clouddrive.Client, watchPath string, overrides []string) {
+func (u *Unpackerr) cloudDriveFallbackScan(client *clouddrive.Client, watchPath string, overrides []string) int {
 	// A user-provided direct mapping is the most reliable source inside a
 	// container. Use it without requiring CD2's mount-point API to succeed.
 	roots := clouddrive.MapCloudPathWithOverrides(watchPath, nil, overrides)
@@ -82,14 +85,15 @@ func (u *Unpackerr) cloudDriveFallbackScan(client *clouddrive.Client, watchPath 
 		mounts, err := client.GetMountPoints(context.Background())
 		if err != nil {
 			u.Errorf("CloudDrive2 补偿扫描读取挂载点失败：%v；请检查路径映射", err)
-			return
+			return 0
 		}
 		roots = clouddrive.MapCloudPathWithOverrides(watchPath, mounts, overrides)
 	}
 	if len(roots) == 0 {
 		u.Errorf("CloudDrive2 补偿扫描无法映射监控路径：%s", watchPath)
-		return
+		return 0
 	}
+	found := 0
 	for _, root := range roots {
 		root = filepath.Clean(root)
 		paths := make([]string, 0, 16)
@@ -120,12 +124,14 @@ func (u *Unpackerr) cloudDriveFallbackScan(client *clouddrive.Client, watchPath 
 			continue
 		}
 		if len(paths) > 0 {
+			found += len(paths)
 			u.Debugf("CloudDrive2 补偿扫描：在 %s 发现 %d 个压缩文件", root, len(paths))
 			u.cacheCloudDrivePaths(paths)
 		} else {
 			u.Debugf("CloudDrive2 补偿扫描：%s 暂无压缩文件", root)
 		}
 	}
+	return found
 }
 
 func (u *Unpackerr) cloudDriveRetryLoop() {

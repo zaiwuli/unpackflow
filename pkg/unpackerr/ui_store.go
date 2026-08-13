@@ -39,6 +39,7 @@ type UIOverrides struct {
 	KeepCache        *bool    `json:"keep_cache,omitempty"`
 	DeleteSource     *bool    `json:"delete_source,omitempty"`
 	CacheDeleteDelay string   `json:"cache_delete_delay,omitempty"`
+	CopyTimeout      string   `json:"copy_timeout,omitempty"`
 }
 
 func (u *Unpackerr) loadUIStore() error {
@@ -101,6 +102,11 @@ func (u *Unpackerr) loadUIStore() error {
 	if store.Overrides.CacheDeleteDelay != "" {
 		if d, e := time.ParseDuration(store.Overrides.CacheDeleteDelay); e == nil {
 			u.CloudDrive2.CacheDeleteDelay.Duration = d
+		}
+	}
+	if store.Overrides.CopyTimeout != "" {
+		if d, e := time.ParseDuration(store.Overrides.CopyTimeout); e == nil {
+			u.CloudDrive2.CopyTimeout.Duration = d
 		}
 	}
 	u.uiStore = store
@@ -199,6 +205,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		KeepCache:        &keepCache,
 		DeleteSource:     &deleteSource,
 		CacheDeleteDelay: u.CloudDrive2.CacheDeleteDelay.Duration.String(),
+		CopyTimeout:      u.CloudDrive2.CopyTimeout.Duration.String(),
 	}
 	if u.uiStore == nil {
 		return settings
@@ -241,6 +248,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.CacheDeleteDelay != "" {
 		settings.CacheDeleteDelay = overrides.CacheDeleteDelay
+	}
+	if overrides.CopyTimeout != "" {
+		settings.CopyTimeout = overrides.CopyTimeout
 	}
 	return settings
 }

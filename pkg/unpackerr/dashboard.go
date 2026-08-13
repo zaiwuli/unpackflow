@@ -36,6 +36,7 @@ type DashboardSnapshot struct {
 	Notification UINotification      `json:"notification"`
 	Settings     UIOverrides         `json:"settings"`
 	Logs         []DashboardLog      `json:"logs"`
+	Transfers    []CD2Transfer       `json:"transfers"`
 }
 
 type DashboardLog struct {
@@ -100,6 +101,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		Notification: u.notificationSettings(),
 		Settings:     u.uiSettings(),
 		Logs:         u.Logger.dashboardLogs(),
+		Transfers:    u.dashboardTransfers(),
 	}
 	for name, item := range u.Map {
 		source := sourceName(item.App)
@@ -146,6 +148,18 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		})
 	}
 	return snapshot
+}
+
+func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
+	items := make([]CD2Transfer, 0)
+	u.cd2Tasks.Range(func(_, value any) bool {
+		if transfer, ok := value.(*CD2Transfer); ok && transfer != nil {
+			items = append(items, *transfer)
+		}
+		return true
+	})
+	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+	return items
 }
 
 func dashboardPathPrefix(value, prefix string) bool {
@@ -238,6 +252,28 @@ func (u *Unpackerr) notificationTestAPI(w http.ResponseWriter, _ *http.Request, 
 	u.notifyUI(QUEUED, item)
 	u.writeJSON(w, map[string]any{"success": true, "message": "\u6d4b\u8bd5\u901a\u77e5\u5df2\u63d0\u4ea4"})
 }
+
+func (u *Unpackerr) cd2RefreshAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	u.cd2Mu.RLock()
+	client := u.cd2Client
+	u.cd2Mu.RUnlock()
+	if !u.CloudDrive2.Enabled || client == nil {
+		http.Error(w, "CloudDrive2 未启用或尚未连接", http.StatusBadRequest)
+		return
+	}
+	refreshPath := u.CloudDrive2.RefreshPath
+	if strings.TrimSpace(refreshPath) == "" {
+		refreshPath = "/"
+	}
+	if err := client.ForceRefresh(r.Context(), refreshPath); err != nil {
+		u.Errorf("CloudDrive2 手动刷新失败：%v", err)
+		http.Error(w, "CloudDrive2 刷新失败："+err.Error(), http.StatusBadGateway)
+		return
+	}
+	found := u.cloudDriveFallbackScan(client, u.CloudDrive2.WatchPath, u.CloudDrive2.PathOverrides)
+	u.Printf("CloudDrive2 手动刷新完成：发现 %d 个压缩文件", found)
+	u.writeJSON(w, map[string]any{"success": true, "found": found})
+}
 func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	var overrides UIOverrides
 	if err := json.NewDecoder(r.Body).Decode(&overrides); err != nil {
@@ -246,6 +282,13 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 	}
 	if overrides.Workers > 0 {
 		u.Parallel = overrides.Workers
+	}
+	if overrides.CopyTimeout != "" {
+		duration, err := time.ParseDuration(overrides.CopyTimeout)
+		if err != nil || duration <= 0 {
+			http.Error(w, "复制超时格式无效，例如：24h", http.StatusBadRequest)
+			return
+		}
 	}
 	if err := u.saveUIOverrides(overrides); err != nil {
 		http.Error(w, "\u4fdd\u5b58\u8bbe\u7f6e\u5931\u8d25", http.StatusInternalServerError)

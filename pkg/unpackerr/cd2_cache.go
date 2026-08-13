@@ -1,6 +1,7 @@
 package unpackerr
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -14,6 +15,19 @@ import (
 	"golift.io/cnfg"
 	"golift.io/xtractr"
 )
+
+type CD2Transfer struct {
+	Key       string    `json:"key"`
+	Path      string    `json:"path"`
+	State     string    `json:"state"`
+	Bytes     int64     `json:"bytes"`
+	Total     int64     `json:"total"`
+	StartedAt time.Time `json:"started_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Speed     int64     `json:"speed"`
+	ETA       int64     `json:"eta_seconds"`
+	Error     string    `json:"error,omitempty"`
+}
 
 var (
 	rawRARVolume   = regexp.MustCompile(`(?i)^(.*?)(?:\.part\d+\.rar|\.rar|\.r\d{2})$`)
@@ -55,6 +69,9 @@ func (u *Unpackerr) validateCloudDriveCache() error {
 	cfg.CacheExtractPath = extractPath
 	if cfg.CacheDeleteDelay.Duration <= 0 {
 		cfg.CacheDeleteDelay = cnfg.Duration{Duration: time.Minute}
+	}
+	if cfg.CopyTimeout.Duration <= 0 {
+		cfg.CopyTimeout.Duration = 24 * time.Hour
 	}
 
 	for _, folder := range u.Folders {
@@ -182,7 +199,74 @@ func archiveVolumeGroup(source string) ([]string, string, error) {
 		return nil, "", fmt.Errorf("archive source is unavailable: %s", source)
 	}
 	sort.Strings(files)
+	if err := validateVolumeSequence(files); err != nil {
+		return nil, "", err
+	}
 	return files, filepath.Join(dir, key), nil
+}
+
+func validateVolumeSequence(files []string) error {
+	if len(files) == 0 {
+		return nil
+	}
+	sevenPattern := regexp.MustCompile(`(?i)\.7z\.(\d{3})$`)
+	partPattern := regexp.MustCompile(`(?i)\.part(\d+)\.rar$`)
+	oldPattern := regexp.MustCompile(`(?i)\.r(\d{2})$`)
+	if hasVolumePattern(files, sevenPattern) {
+		return validateNumberedVolumes(files, sevenPattern, 1)
+	}
+	if hasVolumePattern(files, partPattern) {
+		return validateNumberedVolumes(files, partPattern, 1)
+	}
+	if hasVolumePattern(files, oldPattern) {
+		hasPrimary := false
+		oldFiles := make([]string, 0, len(files))
+		for _, file := range files {
+			name := strings.ToLower(filepath.Base(file))
+			if strings.HasSuffix(name, ".rar") && !partPattern.MatchString(name) {
+				hasPrimary = true
+			}
+			if oldPattern.MatchString(name) {
+				oldFiles = append(oldFiles, file)
+			}
+		}
+		if !hasPrimary {
+			return fmt.Errorf("压缩包缺少首卷：.rar")
+		}
+		return validateNumberedVolumes(oldFiles, oldPattern, 0)
+	}
+	return nil
+}
+
+func hasVolumePattern(files []string, pattern *regexp.Regexp) bool {
+	for _, file := range files {
+		if pattern.MatchString(filepath.Base(file)) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateNumberedVolumes(files []string, pattern *regexp.Regexp, start int) error {
+	numbers := make([]int, 0, len(files))
+	for _, file := range files {
+		match := pattern.FindStringSubmatch(filepath.Base(file))
+		if len(match) != 2 {
+			continue
+		}
+		number := 0
+		for _, digit := range match[1] {
+			number = number*10 + int(digit-'0')
+		}
+		numbers = append(numbers, number)
+	}
+	sort.Ints(numbers)
+	for index, number := range numbers {
+		if number != start+index {
+			return fmt.Errorf("压缩包缺少分卷：期望编号 %d，实际编号 %d", start+index, number)
+		}
+	}
+	return nil
 }
 
 func isDigits(value string) bool {
@@ -198,30 +282,68 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	sum := sha256.Sum256([]byte(key))
 	taskID := fmt.Sprintf("%x", sum[:8])
 	finalDir := u.CloudDrive2.CacheDir
-	staging := filepath.Join(u.CloudDrive2.CacheDir+".staging", taskID+fmt.Sprintf("-%d", time.Now().UnixNano()))
+	staging := filepath.Join(u.CloudDrive2.CacheDir+".staging", taskID)
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
-	success := false
-	defer func() {
-		if !success {
-			_ = os.RemoveAll(staging)
-		}
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), u.CloudDrive2.CopyTimeout.Duration)
+	defer cancel()
+	startedAt := time.Now()
+	totalBytes, existingBytes, err := cacheGroupSpace(files, staging)
+	if err != nil {
+		return err
+	}
+	if free, spaceErr := freeSpace(staging); spaceErr == nil && free < uint64(totalBytes-existingBytes) {
+		return fmt.Errorf("缓存空间不足：还需 %d 字节，可用 %d 字节", totalBytes-existingBytes, free)
+	}
+	u.cd2Tasks.Store(key, &CD2Transfer{Key: key, Path: files[0], State: "正在缓存", Bytes: existingBytes, Total: totalBytes, StartedAt: startedAt, UpdatedAt: startedAt})
+	defer u.cd2Tasks.Delete(key)
 
+	completedBefore := int64(0)
+	newBytesBefore := int64(0)
 	for _, source := range files {
-		if err := copyStableFile(source, filepath.Join(staging, filepath.Base(source))); err != nil {
+		target := filepath.Join(staging, filepath.Base(source))
+		initialDone := int64(0)
+		if info, statErr := os.Stat(target); statErr == nil {
+			initialDone = info.Size()
+		}
+		if err := copyStableFileContext(ctx, source, target, func(done, total int64) {
+			copied := completedBefore + done
+			elapsed := time.Since(startedAt).Seconds()
+			speed, eta := int64(0), int64(0)
+			if elapsed > 0 {
+				speed = int64(float64(newBytesBefore+max(done-initialDone, 0)) / elapsed)
+			}
+			if speed > 0 {
+				eta = (totalBytes - copied) / speed
+			}
+			u.cd2Tasks.Store(key, &CD2Transfer{Key: key, Path: source, State: "正在缓存", Bytes: copied, Total: totalBytes, StartedAt: startedAt, UpdatedAt: time.Now(), Speed: speed, ETA: eta})
+		}); err != nil {
 			return err
 		}
+		if info, statErr := os.Stat(source); statErr == nil {
+			completedBefore += info.Size()
+			newBytesBefore += max(info.Size()-initialDone, 0)
+		}
+	}
+	u.cd2Tasks.Store(key, &CD2Transfer{Key: key, Path: files[0], State: "正在校验", Bytes: totalBytes, Total: totalBytes, StartedAt: startedAt, UpdatedAt: time.Now()})
+	if err := verifyCopiedGroup(files, staging); err != nil {
+		return err
 	}
 	for _, source := range files {
 		name := filepath.Base(source)
-		if err := os.Rename(filepath.Join(staging, name), filepath.Join(finalDir, name)); err != nil {
-			return err
+		target := filepath.Join(finalDir, name)
+		staged := filepath.Join(staging, name)
+		if _, err := os.Stat(staged); err == nil {
+			_ = os.Remove(target)
+			if err := os.Rename(staged, target); err != nil {
+				return err
+			}
+		} else if ok, verifyErr := sameFileMetadata(source, target); verifyErr != nil || !ok {
+			return fmt.Errorf("缓存最终落盘不完整：%s", name)
 		}
 	}
 	_ = os.Remove(staging)
-	success = true
 	primary := archivePrimary(files)
 	for _, source := range files {
 		cached := filepath.Join(finalDir, filepath.Base(source))
@@ -235,6 +357,165 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	u.folders.InjectFileEvent(primaryPath, "cd2 cache ready")
 	u.Printf("CloudDrive2 cache ready: %d file(s) copied to %s", len(files), finalDir)
 	return nil
+}
+
+func cacheGroupSpace(sources []string, staging string) (total, existing int64, err error) {
+	for _, source := range sources {
+		info, statErr := os.Stat(source)
+		if statErr != nil {
+			return 0, 0, statErr
+		}
+		total += info.Size()
+		if cached, cachedErr := os.Stat(filepath.Join(staging, filepath.Base(source))); cachedErr == nil {
+			candidate := min(cached.Size(), info.Size())
+			if candidate > 0 {
+				match, matchErr := samePrefix(source, filepath.Join(staging, filepath.Base(source)), candidate)
+				if matchErr != nil {
+					return 0, 0, matchErr
+				}
+				if match {
+					existing += candidate
+				}
+			}
+		}
+	}
+	return total, existing, nil
+}
+
+func copyStableFileContext(ctx context.Context, source, target string, progress func(int64, int64)) error {
+	before, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := out.Seek(0, io.SeekEnd); err != nil {
+		_ = out.Close()
+		return err
+	}
+	done, _ := out.Seek(0, io.SeekCurrent)
+	if done > before.Size() {
+		done = 0
+	}
+	if done > 0 {
+		match, matchErr := samePrefix(source, target, done)
+		if matchErr != nil {
+			_ = out.Close()
+			return matchErr
+		}
+		if !match {
+			done = 0
+		}
+	}
+	if done == 0 {
+		if err := out.Truncate(0); err != nil {
+			_ = out.Close()
+			return err
+		}
+	}
+	_, _ = in.Seek(done, io.SeekStart)
+	_, _ = out.Seek(done, io.SeekStart)
+	buf := make([]byte, 1024*1024)
+	for done < before.Size() {
+		select {
+		case <-ctx.Done():
+			_ = out.Close()
+			return ctx.Err()
+		default:
+		}
+		n, readErr := in.Read(buf)
+		if n > 0 {
+			if _, err := out.Write(buf[:n]); err != nil {
+				_ = out.Close()
+				return err
+			}
+			done += int64(n)
+			if progress != nil {
+				progress(done, before.Size())
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = out.Close()
+			return readErr
+		}
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	after, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		return fmt.Errorf("源文件复制期间发生变化：%s", source)
+	}
+	if err := os.Chtimes(target, before.ModTime(), before.ModTime()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func samePrefix(source, target string, size int64) (bool, error) {
+	sourceFile, err := os.Open(source)
+	if err != nil {
+		return false, err
+	}
+	defer sourceFile.Close()
+	targetFile, err := os.Open(target)
+	if err != nil {
+		return false, err
+	}
+	defer targetFile.Close()
+	sourceHash, targetHash := sha256.New(), sha256.New()
+	if _, err := io.CopyN(sourceHash, sourceFile, size); err != nil {
+		return false, err
+	}
+	if _, err := io.CopyN(targetHash, targetFile, size); err != nil {
+		return false, err
+	}
+	return string(sourceHash.Sum(nil)) == string(targetHash.Sum(nil)), nil
+}
+
+func verifyCopiedGroup(sources []string, staging string) error {
+	for _, source := range sources {
+		ok, err := sameFileMetadata(source, filepath.Join(staging, filepath.Base(source)))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("缓存校验失败：%s", filepath.Base(source))
+		}
+	}
+	return nil
+}
+
+func sameFileMetadata(source, target string) (bool, error) {
+	s, err := os.Stat(source)
+	if err != nil {
+		return false, err
+	}
+	t, err := os.Stat(target)
+	if err != nil {
+		return false, err
+	}
+	return s.Size() == t.Size() && s.ModTime().Equal(t.ModTime()), nil
 }
 
 func (u *Unpackerr) queueCD2Retry(groupKey string, files []string, copyErr error) {

@@ -33,6 +33,7 @@ function fillForms(data) {
   $('keep-cache').checked = !!(data.settings && data.settings.keep_cache);
   $('delete-source').checked = !!(data.settings && data.settings.delete_source);
   $('cache-delete-delay').value = (data.settings && data.settings.cache_delete_delay) || '1m';
+  $('copy-timeout').value = (data.settings && data.settings.copy_timeout) || '24h';
 }
 
 function renderStatus(data) {
@@ -46,8 +47,22 @@ function renderStatus(data) {
   renderList($('folders'), data.folders, folder => '<div class="compact-item">' + esc(folder.path) + '<small>' + esc(folder.extract_path || '\u539f\u76ee\u5f55\u8f93\u51fa') + ' · ' + folder.tracked + '</small></div>', zh.noFolders);
   renderList($('history'), data.history, item => '<div class="compact-item"><div>' + esc(item.path) + '<small>' + esc(item.source) + ' · ' + esc(item.completed_at) + '</small></div><div><button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button><button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
   renderList($('logs'), data.logs, item => '<article class="log-item ' + (item.level === '\u9519\u8bef' ? 'log-error' : '') + '"><time>' + esc(item.time) + '</time><span>' + esc(item.level) + '</span><p>' + esc(item.message) + '</p></article>', zh.noLogs);
+  renderList($('transfers'), data.transfers, item => '<div class="compact-item"><div>' + esc(item.path) + '<small>' + esc(item.state) + ' · ' + formatBytes(item.bytes) + ' / ' + formatBytes(item.total) + ' · ' + formatBytes(item.speed) + '/s' + (item.eta_seconds ? ' · 预计 ' + formatDuration(item.eta_seconds) : '') + '</small><div class="copy-bar"><i style="width:' + Math.min(100, item.total ? item.bytes * 100 / item.total : 0) + '%"></i></div></div></div>', '暂无复制任务');
   renderList($('password-list'), data.passwords, (password, index) => '<div class="compact-item">' + esc(password) + '<button data-remove-password="' + index + '" type="button">\u5220\u9664</button></div>', zh.noPasswords);
   $('cd2-status').textContent = data.clouddrive2.enabled ? '\u5df2\u542f\u7528 · ' + (data.clouddrive2.url || '') : '\u672a\u542f\u7528';
+}
+
+function formatBytes(value) {
+  if (!value) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let n = Number(value), i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i ? 1 : 0) + ' ' + units[i];
+}
+function formatDuration(seconds) {
+  if (seconds < 60) return Math.max(1, Math.round(seconds)) + ' 秒';
+  if (seconds < 3600) return Math.ceil(seconds / 60) + ' 分钟';
+  return (seconds / 3600).toFixed(1) + ' 小时';
 }
 
 async function load(includeForms) {
@@ -73,6 +88,17 @@ document.querySelectorAll('.tab').forEach(button => button.addEventListener('cli
 }));
 
 $('refresh').addEventListener('click', () => load(false));
+$('cd2-refresh').addEventListener('click', async () => {
+  $('cd2-refresh').disabled = true;
+  $('refresh-message').textContent = '正在刷新 CD2…';
+  try {
+    const response = await fetch('api/clouddrive2/refresh', {method: 'POST'});
+    const data = await response.json().catch(() => ({}));
+    $('refresh-message').textContent = response.ok ? '刷新完成，发现 ' + (data.found || 0) + ' 个压缩文件' : (data.error || '刷新失败');
+    load(false);
+  } catch (_) { $('refresh-message').textContent = '刷新失败'; }
+  $('cd2-refresh').disabled = false;
+});
 $('password-form').addEventListener('submit', async event => {
   event.preventDefault();
   const password = $('password-input').value.trim();
@@ -111,7 +137,7 @@ $('settings-save').addEventListener('click', async () => {
     watch_path: $('watch-path').value.trim(), refresh_interval: $('refresh-interval').value.trim(),
     refresh_path: $('refresh-path').value.trim(), path_overrides: $('path-overrides').value.split(',').map(item => item.trim()).filter(Boolean),
     cache_dir: $('cache-dir').value.trim(), cache_extract_path: $('cache-extract-path').value.trim(),
-    keep_cache: $('keep-cache').checked, delete_source: $('delete-source').checked, cache_delete_delay: $('cache-delete-delay').value.trim(),
+    keep_cache: $('keep-cache').checked, delete_source: $('delete-source').checked, cache_delete_delay: $('cache-delete-delay').value.trim(), copy_timeout: $('copy-timeout').value.trim(),
   };
   const response = await fetch('api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   $('settings-message').textContent = response.ok ? zh.restart : zh.saveFailed;
