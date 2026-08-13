@@ -251,8 +251,13 @@ func (u *Unpackerr) pendingCD2ForPath(path string) (PendingCD2, bool) {
 }
 
 func (u *Unpackerr) hasPendingCD2Files(files []string) bool {
+	_, ok := u.pendingCD2ForFiles(files)
+	return ok
+}
+
+func (u *Unpackerr) pendingCD2ForFiles(files []string) (PendingCD2, bool) {
 	if u.state == nil {
-		return false
+		return PendingCD2{}, false
 	}
 	wanted := make(map[string]struct{}, len(files))
 	for _, file := range files {
@@ -272,8 +277,9 @@ func (u *Unpackerr) hasPendingCD2Files(files []string) bool {
 			}
 		}
 		if matched {
-			return true
+			pending.Files = append([]string(nil), pending.Files...)
+			return pending, true
 		}
 	}
-	return false
+	return PendingCD2{}, false
 }

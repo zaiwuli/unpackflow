@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestCopyStableFileResumesPartialFile(t *testing.T) {
@@ -229,5 +230,22 @@ func TestDeleteCachedSourceUsesProvidedGroupAfterPendingRemoval(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("source %s still exists: %v", path, err)
 		}
+	}
+}
+
+func TestPendingCD2ForFilesReturnsMatchingRetry(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "release.7z.001")
+	second := filepath.Join(dir, "release.7z.002")
+	u := New()
+	u.state = &ProcessingState{
+		Processed: map[string]ProcessedSource{},
+		Pending: map[string]PendingCD2{
+			"copy|release": {Key: "copy|release", Files: []string{first, second}, NextAttempt: time.Now().Add(time.Minute)},
+		},
+	}
+	pending, ok := u.pendingCD2ForFiles([]string{second, first})
+	if !ok || pending.Key != "copy|release" {
+		t.Fatalf("matching retry not found: %#v, %v", pending, ok)
 	}
 }
