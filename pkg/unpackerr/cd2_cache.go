@@ -102,7 +102,6 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) {
 			u.Debugf("CloudDrive2 补扫跳过非压缩文件：%s", source)
 			continue
 		}
-		u.Printf("CloudDrive2 准备复制：%s", source)
 		files, groupKey, err := archiveVolumeGroup(source)
 		if err != nil {
 			u.Errorf("CloudDrive2 cache scan failed for %s: %v", source, err)
@@ -116,16 +115,15 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) {
 			u.Errorf("CloudDrive2 文件状态读取失败，继续尝试复制：%v", err)
 		}
 		if version.Key != "" && u.wasProcessed(version) {
-			u.Printf("CloudDrive2 压缩包已有成功记录，跳过：%s", source)
+			u.Debugf("CloudDrive2 压缩包已有成功记录，跳过：%s", source)
 			continue
 		}
 		if u.hasPendingCD2Files(files) {
-			u.Printf("CloudDrive2 已有相同任务在处理中：%s", source)
 			u.Debugf("CloudDrive2 压缩包正在处理，跳过重复事件: %s", source)
 			continue
 		}
 		if _, loaded := u.cd2Copy.LoadOrStore(groupKey, struct{}{}); loaded {
-			u.Printf("CloudDrive2 已有相同复制任务运行：%s", source)
+			u.Debugf("CloudDrive2 已有相同复制任务运行：%s", source)
 			continue
 		}
 		u.Printf("CloudDrive2 已提交复制任务：%d 个文件，来源 %s", len(files), source)

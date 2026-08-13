@@ -3,6 +3,7 @@ package clouddrive
 import (
 	"context"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -151,9 +152,21 @@ func applyMatchingOverride(value string, overrides []string) (string, bool) {
 			continue
 		}
 		source := strings.TrimRight(cleanPath(parts[0]), "/")
-		target := strings.TrimRight(cleanPath(parts[1]), "/")
+		target := strings.TrimSpace(parts[1])
+		target = strings.ReplaceAll(target, "\\", "/")
+		// Keep Windows drive prefixes intact. Calling cleanPath on "G:/..."
+		// would turn it into "/G:/...", which filepath cannot open on Windows.
+		if len(target) >= 2 && target[1] == ':' {
+			target = strings.TrimRight(target, "/")
+		} else {
+			target = strings.TrimRight(cleanPath(target), "/")
+		}
 		if value == source || strings.HasPrefix(value, source+"/") {
-			return path.Clean(target + strings.TrimPrefix(value, source)), true
+			mapped := target + strings.TrimPrefix(value, source)
+			if len(target) >= 2 && target[1] == ':' {
+				return filepath.Clean(filepath.FromSlash(mapped)), true
+			}
+			return path.Clean(mapped), true
 		}
 	}
 	return "", false

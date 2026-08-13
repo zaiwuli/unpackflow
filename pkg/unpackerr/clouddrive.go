@@ -120,7 +120,7 @@ func (u *Unpackerr) cloudDriveFallbackScan(client *clouddrive.Client, watchPath 
 			continue
 		}
 		if len(paths) > 0 {
-			u.Printf("CloudDrive2 补偿扫描：在 %s 发现 %d 个压缩文件", root, len(paths))
+			u.Debugf("CloudDrive2 补偿扫描：在 %s 发现 %d 个压缩文件", root, len(paths))
 			u.cacheCloudDrivePaths(paths)
 		} else {
 			u.Debugf("CloudDrive2 补偿扫描：%s 暂无压缩文件", root)

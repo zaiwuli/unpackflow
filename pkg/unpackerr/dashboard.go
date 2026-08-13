@@ -102,9 +102,13 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		Logs:         u.Logger.dashboardLogs(),
 	}
 	for name, item := range u.Map {
+		source := sourceName(item.App)
+		if _, ok := u.cd2Cache.Load(filepath.Clean(name)); ok || dashboardPathPrefix(name, u.CloudDrive2.CacheDir) {
+			source = "CloudDrive2"
+		}
 		task := DashboardTask{
 			Name:    name,
-			Source:  sourceName(item.App),
+			Source:  source,
 			Status:  statusName(item.Status),
 			Updated: item.Updated.Format("2006-01-02 15:04:05"),
 			Retries: item.Retries,
