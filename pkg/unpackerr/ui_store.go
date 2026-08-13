@@ -295,31 +295,43 @@ func (u *Unpackerr) notifyUI(status ExtractStatus, item *Extract) {
 func (u *Unpackerr) notifyEvent(icon, title, source, task string) {
 	s := u.notificationSettings()
 	if !s.Enabled || s.URL == "" {
+		u.Debugf("通知未发送：通知功能未启用或通知地址为空（%s）", title)
 		return
 	}
 	message := formatNotificationMessage(icon, title, source, task)
 	go func() {
 		parsed, err := url.Parse(s.URL)
 		if err != nil {
-			u.Errorf("\u901a\u77e5\u5730\u5740\u65e0\u6548: %v", err)
+			u.Errorf("通知地址无效：%v", err)
 			return
 		}
 		query := parsed.Query()
 		query.Set("text", message)
 		parsed.RawQuery = query.Encode()
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, parsed.String(), nil)
-		if err != nil {
-			return
+		client := &http.Client{Timeout: 10 * time.Second}
+		var lastError error
+		for attempt := 1; attempt <= 3; attempt++ {
+			req, requestErr := http.NewRequestWithContext(context.Background(), http.MethodGet, parsed.String(), nil)
+			if requestErr != nil {
+				u.Errorf("创建通知请求失败：%v", requestErr)
+				return
+			}
+			res, requestErr := client.Do(req)
+			if requestErr == nil {
+				_ = res.Body.Close()
+				if res.StatusCode >= 200 && res.StatusCode < 300 {
+					u.Printf("通知已发送：%s（%s）", title, source)
+					return
+				}
+				lastError = fmt.Errorf("HTTP %s", res.Status)
+			} else {
+				lastError = requestErr
+			}
+			if attempt < 3 {
+				time.Sleep(time.Duration(attempt) * time.Second)
+			}
 		}
-		res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
-		if err != nil {
-			u.Errorf("\u53d1\u9001\u901a\u77e5\u5931\u8d25: %v", err)
-			return
-		}
-		defer res.Body.Close()
-		if res.StatusCode < 200 || res.StatusCode >= 300 {
-			u.Errorf("\u53d1\u9001\u901a\u77e5\u5931\u8d25: HTTP %s", res.Status)
-		}
+		u.Errorf("发送通知失败（已重试 3 次）：%s：%v", title, lastError)
 	}()
 }
 func formatUINotification(status ExtractStatus, item *Extract) string {

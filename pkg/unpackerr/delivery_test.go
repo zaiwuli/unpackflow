@@ -414,6 +414,41 @@ func TestNotificationEventIsSentImmediately(t *testing.T) {
 	}
 }
 
+func TestCD2DiscoverySubmitsCopyAndSendsNotification(t *testing.T) {
+	t.Parallel()
+
+	requestReceived := make(chan *http.Request, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived <- r.Clone(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	sourceDir, cacheDir := t.TempDir(), t.TempDir()
+	source := filepath.Join(sourceDir, "cd2-notify.zip")
+	createZipFixture(t, source, "notify.txt", "notification")
+	u := New()
+	u.ConfigFile = filepath.Join(t.TempDir(), "unpackerr.conf")
+	u.uiStore = &UIStore{Path: filepath.Join(t.TempDir(), "unpackflow-ui.json"), Notification: UINotification{Enabled: true, URL: server.URL}}
+	u.state = &ProcessingState{Path: filepath.Join(t.TempDir(), "state.json"), Processed: map[string]ProcessedSource{}, Pending: map[string]PendingCD2{}}
+	u.CloudDrive2.CacheDir = cacheDir
+	u.CloudDrive2.CopyTimeout.Duration = time.Minute
+	u.folders = &Folders{Config: []*FolderConfig{{Path: cacheDir}}, Events: make(chan *eventData, 1), Folders: map[string]*Folder{}}
+
+	if submitted := u.cacheCloudDrivePaths([]string{source}); submitted != 1 {
+		t.Fatalf("expected one CD2 copy task, got %d", submitted)
+	}
+	select {
+	case request := <-requestReceived:
+		text := request.URL.Query().Get("text")
+		if !strings.Contains(text, "发现压缩包") || !strings.Contains(text, "CloudDrive2") || !strings.Contains(text, "cd2-notify.zip") {
+			t.Fatalf("unexpected CD2 discovery notification: %q", text)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CD2 discovery did not send notification")
+	}
+}
+
 func TestCD2CacheThenRealZipExtraction(t *testing.T) {
 	t.Parallel()
 
