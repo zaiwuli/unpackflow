@@ -87,13 +87,23 @@ jobs:
           docker logs unpackflow-smoke
           exit 1
 
-      - name: Verify automatic ZIP extraction
+      - name: Create ZIP fixture
         run: |
-          python3 -c "import zipfile; archive=zipfile.ZipFile('.smoke/downloads/delivery-test.zip','w'); archive.writestr('delivery-ok.txt','UnpackFlow delivery test'); archive.close()"
+          printf '%s' 'UnpackFlow delivery test' > .smoke/delivery-ok.txt
+          (cd .smoke && zip -q downloads/delivery-test.zip delivery-ok.txt)
+          test -s .smoke/downloads/delivery-test.zip
+          ls -l .smoke/downloads/delivery-test.zip
+
+      - name: Verify automatic ZIP extraction
+        shell: bash
+        run: |
+          set +e
           for attempt in $(seq 1 90); do
-            if find .smoke/output -type f -name delivery-ok.txt -print -quit | grep -q delivery-ok.txt; then
-              grep -R --fixed-strings 'UnpackFlow delivery test' .smoke/output
-              exit 0
+            result=$(find .smoke/output -type f -name delivery-ok.txt -print -quit)
+            if [ -n "$result" ]; then
+              if grep --fixed-strings 'UnpackFlow delivery test' "$result"; then
+                exit 0
+              fi
             fi
             sleep 1
           done
