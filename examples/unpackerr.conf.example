@@ -124,7 +124,7 @@ passwords = []
 
 ## Leaving the [[sonarr]] header uncommented (no leading hash #) without also
 ## uncommenting the api_key (remove the hash #) will produce a startup warning.
-[[sonarr]]
+#[[sonarr]]
 # url = "http://127.0.0.1:8989"
 # api_key = "0123456789abcdef0123456789abcdef"
 ## List of paths where content is downloaded for this app.
@@ -150,7 +150,7 @@ passwords = []
 
 ## Leaving the [[radarr]] header uncommented (no leading hash #) without also
 ## uncommenting the api_key (remove the hash #) will produce a startup warning.
-[[radarr]]
+#[[radarr]]
 # url = "http://127.0.0.1:7878"
 # api_key = "0123456789abcdef0123456789abcdef"
 ## List of paths where content is downloaded for this app.

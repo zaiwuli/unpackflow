@@ -268,7 +268,8 @@ func (u *Unpackerr) postLogRotate(_, newFile string) {
 
 // logStartupInfo prints info about our startup config.
 func (u *Unpackerr) logStartupInfo(msg string, externalFiles map[string]string) {
-	u.Printf("UnpackFlow 已启动：%s", msg)
+	_ = msg
+	u.Printf("UnpackFlow 配置已加载")
 	u.Printf("任务配置：并发 %d，密码 %d 个，轮询间隔 %s", u.Parallel, len(u.Passwords), u.Interval.String())
 	if len(externalFiles) > 0 {
 		u.Printf("配置文件：已加载 %d 个扩展配置", len(externalFiles))

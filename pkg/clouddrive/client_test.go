@@ -52,6 +52,17 @@ func TestForceRefreshConsumesStreamingFrames(t *testing.T) {
 	}
 }
 
+func TestForceRefreshAcceptsGrpcStatusWithoutSpace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_, _ = w.Write(frame(0x80, []byte("grpc-status:0\r\n")))
+	}))
+	defer server.Close()
+	if err := (&Client{BaseURL: server.URL}).ForceRefresh(context.Background(), "/115open"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClientRejectsOversizedFrame(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)

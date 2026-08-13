@@ -85,7 +85,7 @@ func (c *Client) callWith(ctx context.Context, method string, payload []byte, st
 		}
 		if header[0]&0x80 != 0 {
 			status := string(frame)
-			if !strings.Contains(status, "grpc-status: 0") && !strings.Contains(status, "grpc-status: 0\r") {
+			if !grpcStatusOK(status) {
 				return replies, fmt.Errorf("CloudDrive2 %s failed: %s", method, status)
 			}
 			break
@@ -99,6 +99,16 @@ func (c *Client) callWith(ctx context.Context, method string, payload []byte, st
 		}
 	}
 	return replies, nil
+}
+
+func grpcStatusOK(trailer string) bool {
+	for _, line := range strings.Split(strings.ReplaceAll(trailer, "\r", ""), "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "grpc-status") {
+			return strings.TrimSpace(parts[1]) == "0"
+		}
+	}
+	return false
 }
 
 func (c *Client) GetMountPoints(ctx context.Context) ([]Mount, error) {

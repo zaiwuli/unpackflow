@@ -143,7 +143,7 @@ func (u *Unpackerr) PollFolders() {
 
 	go u.folders.watchFSNotify()
 
-	u.Printf("[Folder] Watching (fsnotify): %s", strings.Join(flist, ", "))
+	u.Printf("目录监控已启动：%s", strings.Join(flist, ", "))
 
 	// Setting an interval of any value less than 5 milliseconds
 	// (except zero in docker) allows disabling the poller.
@@ -157,7 +157,7 @@ func (u *Unpackerr) PollFolders() {
 		}
 	}()
 
-	u.Printf("[Folder] Polling @ %s: %s", u.Folder.Interval.String(), strings.Join(flist, ", "))
+	u.Printf("目录扫描已启动：每 %s 扫描 %s", u.Folder.Interval.String(), strings.Join(flist, ", "))
 }
 
 // checkFolders stats all configured folders and returns only "good" ones.

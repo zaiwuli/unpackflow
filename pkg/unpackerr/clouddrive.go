@@ -39,7 +39,7 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 		},
 	}
 	go monitor.Run(context.Background())
-	u.Printf("CloudDrive2 direct monitor enabled: %s", cfg.URL)
+	u.Printf("CloudDrive2 监控已连接：%s", cfg.URL)
 	if cfg.RefreshInterval.Duration > 0 {
 		go u.cloudDriveRefreshLoop(monitor.Client, cfg.RefreshInterval.Duration, cfg.RefreshPath)
 	}
@@ -59,7 +59,7 @@ func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval ti
 	defer ticker.Stop()
 	for range ticker.C {
 		if err := client.ForceRefresh(context.Background(), refreshPath); err != nil {
-			u.Errorf("CloudDrive2 force refresh failed: %s", err)
+			u.Errorf("CloudDrive2 定时刷新失败：%s", err)
 		} else {
 			u.Debugf("CloudDrive2 force refresh completed")
 		}

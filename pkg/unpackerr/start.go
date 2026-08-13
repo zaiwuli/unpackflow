@@ -170,9 +170,7 @@ func Start() error {
 	unpackerr.setupLogging()
 	// Do not do any logging before this.
 	// ie. No running of u.Debugf or u.Print* before running setupLogging()
-	unpackerr.Printf("Unpackerr v%s-%s Starting! PID: %v, UID: %d, GID: %d, Umask: %d, Now: %v",
-		version.Version, version.Revision, os.Getpid(),
-		os.Getuid(), os.Getgid(), getUmask(), version.Started.Round(time.Second))
+	unpackerr.Printf("UnpackFlow 服务启动")
 	unpackerr.Debugf("%s", strings.Join(strings.Fields(strings.ReplaceAll(version.Print("unpackerr"), "\n", ", ")), " "))
 	// Parse filepath: strings from the config and read in extra config files.
 	output, err := cnfgfile.Parse(unpackerr.Config, &cnfgfile.Opts{
