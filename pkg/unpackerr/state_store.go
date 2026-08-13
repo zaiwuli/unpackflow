@@ -150,7 +150,9 @@ func (u *Unpackerr) markProcessed(version ProcessedSource) {
 	u.state.mu.Unlock()
 	if err := u.saveProcessingState(); err != nil {
 		u.Errorf("保存处理记录失败: %v", err)
+		return
 	}
+	u.Printf("历史记录已保存：%s", version.Path)
 }
 
 func (u *Unpackerr) processedHistory() []ProcessedSource {

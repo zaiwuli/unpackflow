@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Unpackerr/unpackerr/pkg/clouddrive"
 	"github.com/julienschmidt/httprouter"
 	"golift.io/cnfg"
 )
@@ -422,6 +424,47 @@ func TestCD2CacheThenRealZipExtraction(t *testing.T) {
 	}
 	if string(data) != "cloud data" {
 		t.Fatalf("unexpected extracted content: %q", data)
+	}
+}
+
+func TestCD2FallbackScanUsesDirectMappingWithoutMountAPI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("CD2 container path mappings are Linux paths")
+	}
+	t.Parallel()
+
+	mountRoot, cacheDir, outputDir := t.TempDir(), t.TempDir(), t.TempDir()
+	cloudRoot := filepath.Join(mountRoot, "115open")
+	watchDir := filepath.Join(cloudRoot, "测试解压")
+	if err := os.MkdirAll(watchDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(watchDir, "fallback.zip")
+	createZipFixture(t, source, "fallback.txt", "fallback")
+
+	u := New()
+	u.ConfigFile = filepath.Join(t.TempDir(), "unpackerr.conf")
+	if err := u.loadProcessingState(); err != nil {
+		t.Fatal(err)
+	}
+	u.CloudDrive2.CacheDir = cacheDir
+	u.CloudDrive2.CacheExtractPath = outputDir
+	cacheConfig := &FolderConfig{Path: cacheDir, ExtractPath: outputDir, ExternalOnly: true}
+	u.folders = newTestFolders(t, cacheConfig)
+	client := &clouddrive.Client{BaseURL: "http://127.0.0.1:1", Token: "unused"}
+	override := "/115open=>" + filepath.ToSlash(cloudRoot)
+
+	u.cloudDriveFallbackScan(client, "/115open/测试解压", []string{override})
+	select {
+	case event := <-u.folders.Events:
+		if event.file != filepath.Join(cacheDir, "fallback.zip") {
+			t.Fatalf("unexpected fallback cache event: %+v", event)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("fallback scan did not copy and submit the archive")
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "fallback.zip")); err != nil {
+		t.Fatalf("fallback cache was not created: %v", err)
 	}
 }
 

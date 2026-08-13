@@ -94,10 +94,15 @@ func sameOrChild(child, parent string) bool {
 // cacheCloudDrivePaths copies a complete archive group off the mounted CloudDrive
 // filesystem before sending it to Unpackerr's native folder pipeline.
 func (u *Unpackerr) cacheCloudDrivePaths(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
 	for _, source := range paths {
 		if !xtractr.IsArchiveFile(filepath.Base(source)) {
+			u.Debugf("CloudDrive2 补扫跳过非压缩文件：%s", source)
 			continue
 		}
+		u.Printf("CloudDrive2 准备复制：%s", source)
 		files, groupKey, err := archiveVolumeGroup(source)
 		if err != nil {
 			u.Errorf("CloudDrive2 cache scan failed for %s: %v", source, err)
@@ -105,24 +110,29 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) {
 		}
 		version, err := sourceGroupVersion("cd2", files)
 		if err != nil {
-			u.Errorf("CloudDrive2 文件状态读取失败: %v", err)
-			continue
+			// CloudDrive2 FUSE may reject stat temporarily while the remote file
+			// is being materialized. Do not discard the event; copyStableFile
+			// will perform the authoritative stability check.
+			u.Errorf("CloudDrive2 文件状态读取失败，继续尝试复制：%v", err)
 		}
-		if u.wasProcessed(version) {
-			u.Debugf("CloudDrive2 压缩包已处理，跳过: %s", source)
+		if version.Key != "" && u.wasProcessed(version) {
+			u.Printf("CloudDrive2 压缩包已有成功记录，跳过：%s", source)
 			continue
 		}
 		if u.hasPendingCD2Files(files) {
+			u.Printf("CloudDrive2 已有相同任务在处理中：%s", source)
 			u.Debugf("CloudDrive2 压缩包正在处理，跳过重复事件: %s", source)
 			continue
 		}
 		if _, loaded := u.cd2Copy.LoadOrStore(groupKey, struct{}{}); loaded {
+			u.Printf("CloudDrive2 已有相同复制任务运行：%s", source)
 			continue
 		}
+		u.Printf("CloudDrive2 已提交复制任务：%d 个文件，来源 %s", len(files), source)
 		go func(files []string, groupKey string) {
 			defer u.cd2Copy.Delete(groupKey)
 			if err := u.cacheCloudDriveGroup(files, groupKey); err != nil {
-				u.Errorf("CloudDrive2 cache copy failed: %v", err)
+				u.Errorf("CloudDrive2 复制失败，将进入重试：%v", err)
 				u.queueCD2Retry(groupKey, files, err)
 			}
 		}(files, groupKey)
