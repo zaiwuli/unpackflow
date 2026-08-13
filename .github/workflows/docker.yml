@@ -89,24 +89,19 @@ jobs:
 
       - name: Verify automatic ZIP extraction
         run: |
-          python3 - <<'PY'
-          import zipfile
-          with zipfile.ZipFile('.smoke/downloads/delivery-test.zip', 'w') as archive:
-              archive.writestr('delivery-ok.txt', 'UnpackFlow delivery test')
-          PY
+          python3 -c "import zipfile; archive=zipfile.ZipFile('.smoke/downloads/delivery-test.zip','w'); archive.writestr('delivery-ok.txt','UnpackFlow delivery test'); archive.close()"
           for attempt in $(seq 1 90); do
             if find .smoke/output -type f -name delivery-ok.txt -print -quit | grep -q delivery-ok.txt; then
               grep -R --fixed-strings 'UnpackFlow delivery test' .smoke/output
               exit 0
             fi
-            if [ $((attempt % 10)) -eq 0 ]; then
-              echo "--- status attempt $attempt ---"
-              curl --silent http://127.0.0.1:5656/api/status || true
-              find .smoke -maxdepth 5 -type f -print
-            fi
             sleep 1
           done
+          echo "--- final API status ---"
+          curl --silent http://127.0.0.1:5656/api/status || true
+          echo "--- smoke directory tree ---"
           find .smoke -maxdepth 5 -type f -print
+          echo "--- container logs ---"
           docker logs unpackflow-smoke
           exit 1
 
