@@ -43,6 +43,7 @@ type DashboardLog struct {
 	Time    string `json:"time"`
 	Level   string `json:"level"`
 	Message string `json:"message"`
+	Kind    string `json:"kind"`
 }
 
 type DashboardHistory struct {

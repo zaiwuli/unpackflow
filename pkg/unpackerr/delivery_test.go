@@ -467,6 +467,23 @@ func TestVisibleCD2Paths(t *testing.T) {
 	}
 }
 
+func TestDashboardLogKind(t *testing.T) {
+	for _, test := range []struct {
+		message string
+		want    string
+	}{
+		{"CloudDrive2 已提交复制任务", "user"},
+		{"[目录任务] 解压完成", "user"},
+		{"通知已发送：解压完成", "user"},
+		{"WebUI：已启动，监听 0.0.0.0:5656", "system"},
+		{"Using Config File: /config/unpackerr.conf", "system"},
+	} {
+		if got := dashboardLogKind(test.message); got != test.want {
+			t.Fatalf("dashboardLogKind(%q) = %q, want %q", test.message, got, test.want)
+		}
+	}
+}
+
 func TestCD2CacheThenRealZipExtraction(t *testing.T) {
 	t.Parallel()
 

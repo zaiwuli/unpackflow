@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -90,7 +91,9 @@ func (status ExtractStatus) String() string {
 
 // Debugf writes Debug log lines... to stdout and/or a file.
 func (l *Logger) Debugf(msg string, v ...any) {
-	err := l.Debug.Output(callDepth, fmt.Sprintf(msg, v...))
+	message := fmt.Sprintf(msg, v...)
+	l.addDashboardLog("调试", message)
+	err := l.Debug.Output(callDepth, message)
 	if err != nil {
 		fmt.Println("Logger Error:", err) //nolint:forbidigo
 	}
@@ -103,6 +106,7 @@ func (l *Logger) addDashboardLog(level, message string) {
 		Time:    time.Now().Format("2006-01-02 15:04:05"),
 		Level:   level,
 		Message: message,
+		Kind:    dashboardLogKind(message),
 	}
 	l.mu.Lock()
 	l.items = append(l.items, entry)
@@ -110,6 +114,19 @@ func (l *Logger) addDashboardLog(level, message string) {
 		l.items = append([]DashboardLog(nil), l.items[len(l.items)-dashboardLogLimit:]...)
 	}
 	l.mu.Unlock()
+}
+
+func dashboardLogKind(message string) string {
+	userSignals := []string{
+		"任务", "压缩包", "解压", "复制", "缓存", "CloudDrive2", "CD2",
+		"通知", "重试", "密码", "历史记录", "源文件", "输出文件", "目录任务",
+	}
+	for _, signal := range userSignals {
+		if strings.Contains(message, signal) {
+			return "user"
+		}
+	}
+	return "system"
 }
 
 func (l *Logger) dashboardLogs() []DashboardLog {
