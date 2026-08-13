@@ -84,6 +84,8 @@ type Logger struct {
 	Info  *log.Logger
 	Error *log.Logger
 	Debug *log.Logger
+	mu    sync.RWMutex
+	items []DashboardLog
 }
 
 // Flags are our CLI input flags.

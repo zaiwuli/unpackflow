@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/julienschmidt/httprouter"
-	apachelog "github.com/lestrrat-go/apache-logformat/v2"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -68,12 +67,11 @@ func (u *Unpackerr) startWebServer() {
 	u.Webserver.URLBase = strings.TrimSuffix(path.Join("/", u.Webserver.URLBase), "/") + "/"
 	u.Webserver.allow = MakeIPs(u.Webserver.Upstreams)
 	u.Webserver.router = httprouter.New()
-	apache, _ := apachelog.New(`%{X-Forwarded-For}i %l - %t "%r" %>s %b "%{Referer}i" "%{User-agent}i"`)
-
-	// Make a multiplexer because websockets can't use apache log.
+	// Keep routine UI polling out of container logs. Server errors are still
+	// written through http.Server.ErrorLog below.
 	smx := http.NewServeMux()
 	smx.Handle(path.Join(u.Webserver.URLBase, "ws"), u.fixForwardedFor(u.Webserver.router))
-	smx.Handle("/", u.fixForwardedFor(apache.Wrap(u.Webserver.router, u.HTTP.Writer())))
+	smx.Handle("/", u.fixForwardedFor(u.Webserver.router))
 	u.webRoutes()
 
 	u.Webserver.server = &http.Server{

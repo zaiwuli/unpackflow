@@ -33,6 +33,13 @@ type DashboardSnapshot struct {
 	Passwords    []string            `json:"passwords"`
 	Notification UINotification      `json:"notification"`
 	Settings     UIOverrides         `json:"settings"`
+	Logs         []DashboardLog      `json:"logs"`
+}
+
+type DashboardLog struct {
+	Time    string `json:"time"`
+	Level   string `json:"level"`
+	Message string `json:"message"`
 }
 
 type DashboardTotals struct {
@@ -77,6 +84,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		Passwords:    sortedPasswords(u.uiPasswords()),
 		Notification: u.notificationSettings(),
 		Settings:     u.uiSettings(),
+		Logs:         u.Logger.dashboardLogs(),
 	}
 	for name, item := range u.Map {
 		task := DashboardTask{

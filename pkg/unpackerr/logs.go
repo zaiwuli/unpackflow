@@ -96,9 +96,37 @@ func (l *Logger) Debugf(msg string, v ...any) {
 	}
 }
 
+const dashboardLogLimit = 200
+
+func (l *Logger) addDashboardLog(level, message string) {
+	entry := DashboardLog{
+		Time:    time.Now().Format("2006-01-02 15:04:05"),
+		Level:   level,
+		Message: message,
+	}
+	l.mu.Lock()
+	l.items = append(l.items, entry)
+	if len(l.items) > dashboardLogLimit {
+		l.items = append([]DashboardLog(nil), l.items[len(l.items)-dashboardLogLimit:]...)
+	}
+	l.mu.Unlock()
+}
+
+func (l *Logger) dashboardLogs() []DashboardLog {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	result := make([]DashboardLog, 0, len(l.items))
+	for idx := len(l.items) - 1; idx >= 0; idx-- {
+		result = append(result, l.items[idx])
+	}
+	return result
+}
+
 // Printf writes log lines... to stdout and/or a file.
 func (l *Logger) Printf(msg string, v ...any) {
-	err := l.Info.Output(callDepth, fmt.Sprintf(msg, v...))
+	message := fmt.Sprintf(msg, v...)
+	l.addDashboardLog("信息", message)
+	err := l.Info.Output(callDepth, message)
 	if err != nil {
 		fmt.Println("Logger Error:", err) //nolint:forbidigo
 	}
@@ -106,7 +134,9 @@ func (l *Logger) Printf(msg string, v ...any) {
 
 // Errorf writes log errors... to stdout and/or a file.
 func (l *Logger) Errorf(msg string, v ...any) {
-	err := l.Error.Output(callDepth, fmt.Sprintf(msg, v...))
+	message := fmt.Sprintf(msg, v...)
+	l.addDashboardLog("错误", message)
+	err := l.Error.Output(callDepth, message)
 	if err != nil {
 		fmt.Println("Logger Error:", err) //nolint:forbidigo
 	}
@@ -116,6 +146,9 @@ func (l *Logger) Errorf(msg string, v ...any) {
 func (u *Unpackerr) logCurrentQueue(now time.Time) {
 	stats := u.stats()
 	_ = now
+	if stats.Waiting+stats.Queued+stats.Extracting+stats.Extracted+stats.Failed == 0 {
+		return
+	}
 	u.Printf("任务概览：等待 %d，排队 %d，解压中 %d，已完成 %d，失败 %d",
 		stats.Waiting, stats.Queued, stats.Extracting, stats.Extracted, stats.Failed)
 	u.updateTray(stats, uint(len(u.folders.Events)+len(u.updates)+len(u.folders.Updates)+len(u.delChan)+len(u.hookChan)))
