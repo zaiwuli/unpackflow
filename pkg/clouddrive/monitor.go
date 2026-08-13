@@ -64,13 +64,22 @@ func (m *Monitor) Run(ctx context.Context) {
 	for ctx.Err() == nil {
 		m.setStatus(func(s *Status) { s.Connected = true; s.LastError = "" })
 		err := m.Client.Subscribe(ctx, func(change Change) error {
-			mounts, err := m.Client.GetMountPoints(ctx)
-			if err != nil {
-				return err
+			// Direct path overrides are local and do not depend on CD2's mount
+			// point API. Resolve them first so a temporary GetMountPoints failure
+			// never drops a real-time file event.
+			paths := MapCloudPathWithOverrides(change.Path, nil, m.PathOverrides)
+			mounts, mountErr := m.Client.GetMountPoints(ctx)
+			if mountErr == nil {
+				paths = appendUniquePaths(paths, MapCloudPathWithOverrides(change.Path, mounts, m.PathOverrides))
 			}
-			paths := MapCloudPathWithOverrides(change.Path, mounts, m.PathOverrides)
 			if change.NewPath != "" {
-				paths = append(paths, MapCloudPathWithOverrides(change.NewPath, mounts, m.PathOverrides)...)
+				paths = appendUniquePaths(paths, MapCloudPathWithOverrides(change.NewPath, nil, m.PathOverrides))
+				if mountErr == nil {
+					paths = appendUniquePaths(paths, MapCloudPathWithOverrides(change.NewPath, mounts, m.PathOverrides))
+				}
+			}
+			if mountErr != nil && len(paths) == 0 {
+				return mountErr
 			}
 			m.setStatus(func(s *Status) { s.ChangesReceived++; s.PathsMapped += uint64(len(paths)); s.LastChange = time.Now() })
 			if m.OnChange != nil && len(paths) > 0 {
@@ -102,6 +111,13 @@ func (m *Monitor) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func appendUniquePaths(paths, additions []string) []string {
+	for _, value := range additions {
+		paths = appendUniquePath(paths, value)
+	}
+	return paths
 }
 
 func MapCloudPath(cloudPath string, mounts []Mount) []string {

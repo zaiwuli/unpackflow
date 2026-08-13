@@ -415,8 +415,6 @@ func TestNotificationEventIsSentImmediately(t *testing.T) {
 }
 
 func TestCD2DiscoverySubmitsCopyAndSendsNotification(t *testing.T) {
-	t.Parallel()
-
 	requestReceived := make(chan *http.Request, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestReceived <- r.Clone(r.Context())
@@ -446,6 +444,11 @@ func TestCD2DiscoverySubmitsCopyAndSendsNotification(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("CD2 discovery did not send notification")
+	}
+	select {
+	case <-u.folders.Events:
+	case <-time.After(2 * time.Second):
+		t.Fatal("CD2 copy did not finish")
 	}
 }
 

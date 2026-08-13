@@ -32,3 +32,10 @@ func TestParsePushChange(t *testing.T) {
 		t.Fatalf("unexpected push: ok=%v err=%v change=%#v", ok, err, parsed)
 	}
 }
+
+func TestMonitorPathMappingDoesNotRequireMountAPI(t *testing.T) {
+	paths := MapCloudPathWithOverrides("/115open/上传下载/new.zip", nil, []string{"/115open=>/volume1/CloudNAS/CloudDrive/115open"})
+	if len(paths) != 1 || paths[0] != "/volume1/CloudNAS/CloudDrive/115open/上传下载/new.zip" {
+		t.Fatalf("direct override mapping failed without mounts: %#v", paths)
+	}
+}
