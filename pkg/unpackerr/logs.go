@@ -6,16 +6,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"time"
 
-	"github.com/Unpackerr/unpackerr/pkg/ui"
-	"github.com/dromara/carbon/v2"
 	homedir "github.com/mitchellh/go-homedir"
 	"golift.io/rotatorr"
 	"golift.io/rotatorr/timerotator"
-	"golift.io/version"
 )
 
 // satisfy gomnd.
@@ -53,16 +49,16 @@ func (status ExtractStatus) Desc() string {
 
 	return []string{
 		// The order must not be faulty.
-		"Waiting, pre-Queue",
-		"Queued",
-		"Extracting",
-		"Extraction Failed",
-		"Extracted, Awaiting Import",
-		"Imported",
-		"Deleting",
-		"Delete Failed",
-		"Deleted",
-		"Nothing Extracted",
+		"等待处理",
+		"排队中",
+		"正在解压",
+		"解压失败",
+		"解压完成，等待整理",
+		"已整理",
+		"正在清理",
+		"清理失败",
+		"已完成",
+		"未发现可解压文件",
 	}[status]
 }
 
@@ -119,14 +115,9 @@ func (l *Logger) Errorf(msg string, v ...any) {
 // logCurrentQueue prints the number of things happening.
 func (u *Unpackerr) logCurrentQueue(now time.Time) {
 	stats := u.stats()
-	u.Printf("[Unpackerr] Queue: %d waiting, %d queued, %d extracting, %d extracted, %d imported, %d failed, %d deleted",
-		stats.Waiting, stats.Queued, stats.Extracting, stats.Extracted, stats.Imported, stats.Failed, stats.Deleted)
-
-	u.Printf("[Unpackerr] Totals: %d retries, %d finished, %d|%d webhooks,"+
-		" %d|%d cmdhooks, stacks; event:%d, hook:%d, del:%d, up %s",
-		u.Retries, u.Finished, stats.HookOK, stats.HookFail, stats.CmdOK, stats.CmdFail,
-		len(u.folders.Events)+len(u.updates)+len(u.folders.Updates), len(u.hookChan), len(u.delChan),
-		carbon.CreateFromStdTime(version.Started).DiffAbsInString(carbon.CreateFromStdTime(now)))
+	_ = now
+	u.Printf("任务概览：等待 %d，排队 %d，解压中 %d，已完成 %d，失败 %d",
+		stats.Waiting, stats.Queued, stats.Extracting, stats.Extracted, stats.Failed)
 	u.updateTray(stats, uint(len(u.folders.Events)+len(u.updates)+len(u.folders.Updates)+len(u.delChan)+len(u.hookChan)))
 }
 
@@ -244,43 +235,10 @@ func (u *Unpackerr) postLogRotate(_, newFile string) {
 
 // logStartupInfo prints info about our startup config.
 func (u *Unpackerr) logStartupInfo(msg string, externalFiles map[string]string) {
-	u.Printf("==> %s <==", helpLink)
-	u.Printf("==> Startup Settings <==")
-	u.Printf(" => %s", msg)
-
-	for path, file := range externalFiles {
-		u.Printf(" => Extra Config File: %s => %s", file, path)
+	u.Printf("UnpackFlow 已启动：%s", msg)
+	u.Printf("任务配置：并发 %d，密码 %d 个，轮询间隔 %s", u.Parallel, len(u.Passwords), u.Interval.String())
+	if len(externalFiles) > 0 {
+		u.Printf("配置文件：已加载 %d 个扩展配置", len(externalFiles))
 	}
-
-	u.logSonarr()
-	u.logRadarr()
-	u.logLidarr()
-	u.logReadarr()
-	u.logWhisparr()
-	u.logFolders()
-	u.Printf(" => Parallel: %d", u.Parallel)
-	u.Printf(" => Passwords: %d (rar/7z)", len(u.Passwords))
-	u.Printf(" => Interval / Progress: %s/%s", u.Interval.String(), u.Progress.String())
-	u.Printf(" => Start/Delete Delay: %s/%s", u.StartDelay.String(), u.DeleteDelay.String())
-	u.Printf(" => Retry Delay: %v, max: %d", u.RetryDelay, u.MaxRetries)
-	u.Printf(" => GUI / StdErr: %v / %v", ui.HasGUI(), u.ErrorStdErr)
-	u.Printf(" => Debug / Quiet: %v / %v", u.Config.Debug, u.Quiet)
-	u.Printf(" => Activity / Queues: %v / %s", u.Activity, u.LogQueues.String())
-
-	if runtime.GOOS != windows {
-		u.Printf(" => Directory & File Modes: %s & %s", u.DirMode, u.FileMode)
-	}
-
-	if u.LogFile != "" {
-		msg := "no rotation"
-		if u.LogFiles > 0 {
-			msg = fmt.Sprintf("%d @ %dMb", u.LogFiles, u.LogFileMb)
-		}
-
-		u.Printf(" => Log File: %s (%s, mode: %s)", u.LogFile, msg, u.LogFileMode)
-	}
-
-	u.logWebhook()
-	u.logCmdhook()
-	u.logWebserver()
+	u.Printf("WebUI：已启动，监听 %s", u.Webserver.ListenAddr)
 }

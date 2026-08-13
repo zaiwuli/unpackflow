@@ -1,68 +1,56 @@
-<img style="max-width:840px;" src="https://raw.githubusercontent.com/wiki/Unpackerr/unpackerr/images/unpackerr-logo-text.png">
+# UnpackFlow
 
-## About
+UnpackFlow 是面向群晖 NAS 的轻量自动解压服务，基于 Unpackerr 解压核心，提供中文 WebUI、CloudDrive2 直连监控和通知功能。
 
-Unpackerr runs as a daemon on your download host or seedbox.
-It checks for completed downloads and extracts them so
-[Lidarr](http://lidarr.audio), [Radarr](http://radarr.video),
-[Readarr](http://readarr.com), and [Sonarr](http://sonarr.tv) may import them. 
-If your problem is rar files getting stuck in your activity queue, then this is your solution.
+## 功能
 
-Not a starr app user, and just need to extract files? We do that too.
-This application can run standalone and extract files found in a "watch" folder.
-In other words, you can configure this application to watch your download folder, and
-it will happily extract everything you download. 
+- 监控本地目录，自动识别并解压 ZIP、RAR、7z、TAR、GZ、BZ2、XZ、ISO 及常见分卷。
+- CloudDrive2 使用 gRPC-Web + Token 直连，不依赖 Webhook。
+- CD2 压缩包先复制到本地缓存，复制完成后才开始解压。
+- 支持设置 CD2 监控路径、路径映射、定时刷新和缓存保留策略。
+- 中文任务页、历史记录、密码、通知、设置和日志页面。
+- 支持群辉通知插件 / MoviePilot Webhook。
+- 仅发布 Docker 镜像，支持 `linux/amd64` 和 `linux/arm64`。
 
-Interested? Check out the website with installation instructions:
+## 群晖部署
 
-### [https://unpackerr.zip](https://unpackerr.zip)
-
-**Website missing what you need? We can [chat on Discord](https://golift.io/discord) too.**
-
-## What's it extract?
-
-The absolute basics, just ask STaRDoGG. It also extracts recursively, meaning deep within folders, and archives within archives.
-**Tars, Rars, Zips, 7-Zips, Gzips, Tarred gzips and bzips; encrypted rars and 7zips. And ISO disc images.**
-
-## CloudDrive2 direct monitor
-
-This fork can subscribe directly to CloudDrive2's gRPC-Web file change stream. It does not
-use the CD2 webhook. Enable it in the TOML configuration:
-
-```toml
-[clouddrive2]
-enabled = true
-url = "http://192.168.31.2:19798"
-token = "replace-with-a-scoped-api-token"
-refresh_path = "/"
-refresh_interval = "10m"
-reconnect_min = "5s"
-reconnect_max = "2m"
-path_overrides = ["/volume1/CloudNAS/CloudDrive=>/downloads"]
+```yaml
+services:
+  unpackflow:
+    image: ghcr.io/zaiwuli/unpackflow:latest
+    container_name: unpackflow
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - /volume2/解压目录/监控目录:/downloads
+      - /volume2/解压目录/输出目录:/output
+      - /volume2/解压目录/缓存目录:/cache
+      - /volume1/CloudNAS/CloudDrive:/volume1/CloudNAS/CloudDrive
+      - /volume1/docker/unpackflow:/config
+    ports:
+      - 8066:5656
 ```
 
-The token is sent only as a Bearer header and is never included in logs. The monitor
-reconnects with exponential backoff, maps CloudDrive mount paths, and injects changes into
-the existing folder stability/queue logic. `refresh_interval` forces a CloudDrive directory
-refresh to compensate for files added by another CloudDrive client.
-Need something else? Ask. Does it do too much? Let me know what knobs you need. [Open a request!](https://github.com/Unpackerr/unpackerr/issues/new)
+启动后访问：`http://群晖IP:8066`
 
-## Attribution
+首次使用时，在“设置”页面填写 CloudDrive2 地址、Token 和监控路径；在“通知”页面填写通知地址并测试。
 
-The following fine folks are providing their services, completely free! These service
-integrations are used for things like storage, building, compiling, distribution and
-documentation support. This project succeeds because of them. Thank you!
+## 目录说明
 
-[![packagecloud](https://docs.golift.io/integrations/packagecloud.png "PackageCloud.io")](https://packagecloud.io)
-[![GitHub](https://docs.golift.io/integrations/octocat.png "GitHub")](https://GitHub.com)
-[![Docker Cloud](https://docs.golift.io/integrations/docker.png "Docker Cloud")](https://cloud.docker.com)
-[![Go Lift](https://docs.golift.io/integrations/golift.png "Go Lift")](https://golift.io)
-[![CloudFlare](https://docs.golift.io/integrations/cloudflare.png "CloudFlare")](https://cloudflare.com)
+- `/downloads`：本地监控目录。
+- `/output`：解压输出目录。
+- `/cache`：CD2 本地缓存目录。
+- `/config`：配置、密码、历史和日志文件。
 
-## Contributing
+## 构建状态
 
-Yes, please. Just make a pull request and lets chat about it in the PR or on Discord.
+推送到 `main` 分支后，GitHub Actions 会自动构建并发布：
 
-## License
+```text
+ghcr.io/zaiwuli/unpackflow:latest
+```
 
-[MIT](https://unpackerr.zip/docs/unpackerr/license)
+## 许可证
+
+MIT
