@@ -142,7 +142,14 @@ func (u *Unpackerr) PollFolders() {
 	}
 
 	go u.folders.watchFSNotify()
-	go u.scanExistingFolderArchives()
+	u.scanExistingFolderArchives()
+	go func() {
+		// Close the small gap between the initial scan and watcher snapshot.
+		// This matters for bind mounts where the UI can become healthy just
+		// before the folder watcher has fully entered its event loop.
+		time.Sleep(2 * time.Second)
+		u.scanExistingFolderArchives()
+	}()
 
 	u.Printf("目录监控已启动：%s", strings.Join(flist, ", "))
 
