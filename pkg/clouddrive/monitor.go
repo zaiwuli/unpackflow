@@ -110,6 +110,13 @@ func MapCloudPath(cloudPath string, mounts []Mount) []string {
 func MapCloudPathWithOverrides(cloudPath string, mounts []Mount, overrides []string) []string {
 	cloudPath = cleanPath(cloudPath)
 	var result []string
+	// Accept direct cloud-path mappings such as:
+	// /115open=>/volume1/CloudNAS/CloudDrive/115open
+	// This keeps CD2 usable when its mount-point API reports paths that are not
+	// visible inside the container, or when no matching mount point is returned.
+	if mapped, ok := applyMatchingOverride(cloudPath, overrides); ok {
+		result = appendUniquePath(result, mapped)
+	}
 	for _, mount := range mounts {
 		if !mount.IsMounted {
 			continue
@@ -123,9 +130,33 @@ func MapCloudPathWithOverrides(cloudPath string, mounts []Mount, overrides []str
 		}
 		relative := strings.TrimPrefix(cloudPath, strings.TrimRight(source, "/"))
 		server := strings.TrimRight(cleanPath(mount.MountPath), "/") + "/" + strings.TrimLeft(relative, "/")
-		result = append(result, applyOverrides(path.Clean(server), overrides))
+		result = appendUniquePath(result, applyOverrides(path.Clean(server), overrides))
 	}
 	return result
+}
+
+func appendUniquePath(paths []string, value string) []string {
+	for _, existing := range paths {
+		if existing == value {
+			return paths
+		}
+	}
+	return append(paths, value)
+}
+
+func applyMatchingOverride(value string, overrides []string) (string, bool) {
+	for _, override := range overrides {
+		parts := strings.SplitN(override, "=>", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		source := strings.TrimRight(cleanPath(parts[0]), "/")
+		target := strings.TrimRight(cleanPath(parts[1]), "/")
+		if value == source || strings.HasPrefix(value, source+"/") {
+			return path.Clean(target + strings.TrimPrefix(value, source)), true
+		}
+	}
+	return "", false
 }
 
 func applyOverrides(value string, overrides []string) string {

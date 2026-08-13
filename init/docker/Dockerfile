@@ -57,6 +57,11 @@ COPY --from=builder /tmp/unpackerr /unpackerr
 # Make sure we have an ssl cert chain and timezone data.
 RUN apk add --no-cache openssl tzdata
 
-ENV TZ=UTC
+ENV TZ=UTC \
+    UN_FOLDER_0_PATH=/downloads \
+    UN_FOLDER_0_EXTRACT_PATH=/output \
+    UN_FOLDER_0_MOVE_BACK=true \
+    UN_FOLDER_0_DISABLE_LOG=true \
+    UN_FOLDER_0_DELETE_ORIGINAL=false
 
 ENTRYPOINT [ "/unpackerr" ]

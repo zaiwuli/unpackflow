@@ -110,6 +110,34 @@ func TestFoldersProcessEventCurrentBehavior(t *testing.T) {
 	}
 }
 
+func TestLocalWatchedZipDetectionAndExtraction(t *testing.T) {
+	t.Parallel()
+
+	archive := makeNestedZipFixture(t)
+	watchPath := filepath.Dir(archive)
+	cfg := &FolderConfig{Path: watchPath, DisableRecursion: true}
+	folders := newTestFolders(t, cfg)
+
+	folders.processEvent(&eventData{
+		cnfg: cfg,
+		name: filepath.Base(archive),
+		file: archive,
+		op:   "local test",
+	}, time.Now())
+
+	if _, ok := folders.Folders[archive]; !ok {
+		t.Fatalf("expected local ZIP to be tracked: %s", archive)
+	}
+
+	done := runExtraction(t, archive, true)
+	if done.Error != nil {
+		t.Fatalf("expected local ZIP extraction to succeed: %v", done.Error)
+	}
+	if !containsFileBase(done.Output, "root.txt") {
+		t.Fatalf("expected extracted file root.txt; output=%s files=%v", done.Output, listFiles(done.Output))
+	}
+}
+
 func TestFoldersProcessEventExcludedPath(t *testing.T) {
 	t.Parallel()
 

@@ -22,3 +22,18 @@ func TestMapCloudPathDoesNotMatchSibling(t *testing.T) {
 		t.Fatalf("unexpected sibling match: %#v", paths)
 	}
 }
+
+func TestMapCloudPathDirectCloudOverride(t *testing.T) {
+	paths := MapCloudPathWithOverrides(
+		"/115open/上传下载/sample.zip",
+		nil,
+		[]string{"/115open=>/volume1/CloudNAS/CloudDrive/115open"},
+	)
+	if len(paths) != 1 {
+		t.Fatalf("expected one direct override path, got %#v", paths)
+	}
+	want := "/volume1/CloudNAS/CloudDrive/115open/上传下载/sample.zip"
+	if paths[0] != want {
+		t.Fatalf("unexpected direct override path: got %q want %q", paths[0], want)
+	}
+}
