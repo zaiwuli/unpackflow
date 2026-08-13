@@ -170,3 +170,25 @@ func TestCacheCloudDriveGroup(t *testing.T) {
 		t.Fatal("expected cache-ready event")
 	}
 }
+
+func TestDeleteCachedSourceUsesProvidedGroupAfterPendingRemoval(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "release.part1.rar")
+	second := filepath.Join(dir, "release.part2.rar")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte("archive"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u := New()
+	u.CloudDrive2.DeleteSource = true
+	u.cd2Cache.Store(filepath.Join(dir, "cached.part1.rar"), []string{first, second})
+	// Simulate the normal success path, where the pending state has already
+	// been removed before the asynchronous source cleanup runs.
+	u.deleteCachedSource(filepath.Join(dir, "cached.part1.rar"), []string{first, second})
+	for _, path := range []string{first, second} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("source %s still exists: %v", path, err)
+		}
+	}
+}

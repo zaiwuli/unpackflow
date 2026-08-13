@@ -604,14 +604,51 @@ func copyStableFile(source, target string) error {
 	return nil
 }
 
-func (u *Unpackerr) deleteCachedSource(cachePath string) {
-	value, ok := u.cd2Cache.LoadAndDelete(filepath.Clean(cachePath))
-	if !ok || !u.CloudDrive2.DeleteSource {
+func (u *Unpackerr) deleteCachedSource(cachePath string, sourceGroups ...[]string) {
+	cleanPath := filepath.Clean(cachePath)
+	value, mapped := u.cd2Cache.LoadAndDelete(cleanPath)
+	if !u.CloudDrive2.DeleteSource {
 		return
 	}
-	for _, source := range value.([]string) {
-		if err := os.Remove(source); err != nil && !os.IsNotExist(err) {
-			u.Errorf("CloudDrive2 source delete failed for %s: %v", source, err)
+	var sources []string
+	if mapped {
+		sources, _ = value.([]string)
+	}
+	if len(sources) == 0 {
+		for _, group := range sourceGroups {
+			if len(group) > 0 {
+				sources = append([]string(nil), group...)
+				break
+			}
 		}
 	}
+	if len(sources) == 0 {
+		if pending, ok := u.pendingCD2ForPath(cleanPath); ok {
+			sources = append([]string(nil), pending.Files...)
+		}
+	}
+	if len(sources) == 0 {
+		u.Errorf("CloudDrive2 原包删除失败：未找到源文件组 %s", cleanPath)
+		return
+	}
+	for _, source := range sources {
+		if err := removeCloudDriveSource(source); err != nil {
+			u.Errorf("CloudDrive2 原包删除失败 %s: %v", source, err)
+		} else {
+			u.Printf("CloudDrive2 原包已删除：%s", source)
+		}
+	}
+}
+
+func removeCloudDriveSource(path string) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		err := os.Remove(path)
+		if err == nil || os.IsNotExist(err) {
+			return nil
+		}
+		lastErr = err
+		time.Sleep(time.Duration(attempt+1) * time.Second)
+	}
+	return lastErr
 }
