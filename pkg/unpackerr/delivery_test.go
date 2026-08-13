@@ -14,7 +14,123 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
+	"golift.io/cnfg"
 )
+
+func TestDockerDefaultFolderEnvironment(t *testing.T) {
+	t.Setenv("UN_FOLDER_0_PATH", "/downloads")
+	t.Setenv("UN_FOLDER_0_EXTRACT_PATH", "/output")
+	t.Setenv("UN_FOLDER_0_MOVE_BACK", "false")
+	t.Setenv("UN_FOLDER_0_DISABLE_LOG", "true")
+	t.Setenv("UN_FOLDER_0_DELETE_ORIGINAL", "false")
+
+	u := New()
+	if _, err := cnfg.UnmarshalENV(u.Config, "UN"); err != nil {
+		t.Fatal(err)
+	}
+	if len(u.Folders) != 1 {
+		t.Fatalf("expected one default folder from environment, got %d", len(u.Folders))
+	}
+	folder := u.Folders[0]
+	if folder.Path != "/downloads" || folder.ExtractPath != "/output" || folder.MoveBack || !folder.DisableLog || folder.DeleteOrig {
+		t.Fatalf("unexpected default folder config: %#v", folder)
+	}
+}
+
+func TestFolderPollerDetectsRootZipCreatedAfterStart(t *testing.T) {
+	t.Parallel()
+
+	watchPath := t.TempDir()
+	cfg := &FolderConfig{Path: watchPath}
+	folders, err := (FoldersConfig{Buffer: 32, Interval: cnfg.Duration{Duration: 50 * time.Millisecond}}).newWatcher(
+		[]*FolderConfig{cfg}, noopLogger{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		folders.Watcher.Close()
+		_ = folders.FSNotify.Close()
+	})
+	go func() { _ = folders.Watcher.Start(50 * time.Millisecond) }()
+
+	archive := filepath.Join(watchPath, "root-created.zip")
+	createZipFixture(t, archive, "found.txt", "found")
+
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case event := <-folders.Watcher.Event:
+			folders.handleFileEvent(event.Path, "w "+event.Op.String())
+		case event := <-folders.Events:
+			if event.file == archive {
+				return
+			}
+		case err := <-folders.Watcher.Error:
+			t.Fatal(err)
+		case <-deadline.C:
+			t.Fatal("poller did not detect ZIP created in watched root")
+		}
+	}
+}
+
+func TestStartupScanTracksExistingArchivesAndSkipsCD2Cache(t *testing.T) {
+	t.Parallel()
+
+	watchPath, cachePath := t.TempDir(), t.TempDir()
+	rootArchive := filepath.Join(watchPath, "already-there.zip")
+	nestedDir := filepath.Join(watchPath, "nested")
+	if err := os.MkdirAll(nestedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nestedArchive := filepath.Join(nestedDir, "nested.zip")
+	cacheArchive := filepath.Join(cachePath, "copying.zip")
+	createZipFixture(t, rootArchive, "root.txt", "root")
+	createZipFixture(t, nestedArchive, "nested.txt", "nested")
+	createZipFixture(t, cacheArchive, "cache.txt", "cache")
+
+	u := New()
+	localConfig := &FolderConfig{Path: watchPath}
+	cacheConfig := &FolderConfig{Path: cachePath, ExternalOnly: true}
+	u.Folders = []*FolderConfig{localConfig, cacheConfig}
+	folders, err := (FoldersConfig{Buffer: 32}).newWatcher(u.Folders, noopLogger{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.folders = folders
+	t.Cleanup(func() {
+		folders.Watcher.Close()
+		_ = folders.FSNotify.Close()
+	})
+
+	done := make(chan struct{})
+	go func() {
+		u.scanExistingFolderArchives()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup scan timed out")
+	}
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case event := <-folders.Events:
+			seen[event.file] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("startup scan events missing: %#v", seen)
+		}
+	}
+	if !seen[rootArchive] || !seen[nestedArchive] {
+		t.Fatalf("expected existing local archives, got %#v", seen)
+	}
+	if seen[cacheArchive] {
+		t.Fatal("CD2 external cache must not be startup-scanned")
+	}
+}
 
 func TestDashboardPageContainsRequiredChineseViews(t *testing.T) {
 	t.Parallel()

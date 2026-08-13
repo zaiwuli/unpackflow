@@ -142,6 +142,7 @@ func (u *Unpackerr) PollFolders() {
 	}
 
 	go u.folders.watchFSNotify()
+	go u.scanExistingFolderArchives()
 
 	u.Printf("目录监控已启动：%s", strings.Join(flist, ", "))
 
@@ -158,6 +159,38 @@ func (u *Unpackerr) PollFolders() {
 	}()
 
 	u.Printf("目录扫描已启动：每 %s 扫描 %s", u.Folder.Interval.String(), strings.Join(flist, ", "))
+}
+
+// scanExistingFolderArchives submits archives that were already present when
+// the service started. Files created while the watcher is initializing may also
+// land here, so normal stability checks still decide when extraction begins.
+// External-only folders are CD2 cache folders and must only be submitted after
+// their copy operation has completed.
+func (u *Unpackerr) scanExistingFolderArchives() {
+	for _, folder := range u.Folders {
+		if folder.ExternalOnly {
+			continue
+		}
+		err := filepath.WalkDir(folder.Path, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if folder.isExcludedPath(path) {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.IsDir() || !xtractr.IsArchiveFile(entry.Name()) {
+				return nil
+			}
+			u.folders.InjectFileEvent(path, "startup scan")
+			return nil
+		})
+		if err != nil {
+			u.Errorf("启动扫描失败：%s：%v", folder.Path, err)
+		}
+	}
 }
 
 // checkFolders stats all configured folders and returns only "good" ones.
