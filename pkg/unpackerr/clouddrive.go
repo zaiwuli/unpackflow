@@ -21,8 +21,9 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 		u.Errorf("CloudDrive2 直连需要填写服务地址和 Token")
 		return
 	}
+	client := &clouddrive.Client{BaseURL: cfg.URL, Token: cfg.Token}
 	monitor := &clouddrive.Monitor{
-		Client: &clouddrive.Client{BaseURL: cfg.URL, Token: cfg.Token},
+		Client: client,
 		Config: clouddrive.MonitorConfig{
 			ReconnectMin: cfg.ReconnectMin.Duration,
 			ReconnectMax: cfg.ReconnectMax.Duration,
@@ -32,7 +33,13 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 			if !cloudDrivePathMatch(change.Path, cfg.WatchPath) && !cloudDrivePathMatch(change.NewPath, cfg.WatchPath) {
 				return nil
 			}
-			u.cacheCloudDrivePaths(paths)
+			if change.Type == 1 { // delete
+				return nil
+			}
+			// CloudDrive2 can publish the remote event before its mounted
+			// filesystem exposes the file. Refresh the affected remote directory
+			// and wait briefly for the mapped path before starting the copy.
+			go u.handleCloudDriveChange(client, change, paths)
 			return nil
 		},
 		OnStatus: func(status clouddrive.Status) {
@@ -51,6 +58,56 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 	if cfg.RefreshInterval.Duration > 0 {
 		go u.cloudDriveRefreshLoop(monitor.Client, cfg.RefreshInterval.Duration, cfg.RefreshPath, cfg.WatchPath, cfg.PathOverrides)
 	}
+}
+
+func (u *Unpackerr) handleCloudDriveChange(client *clouddrive.Client, change clouddrive.Change, paths []string) {
+	remotePath := change.Path
+	if change.NewPath != "" {
+		remotePath = change.NewPath
+	}
+	refreshPath := path.Dir(remotePath)
+	if change.IsDirectory {
+		refreshPath = remotePath
+	}
+	if refreshPath == "." || refreshPath == "" {
+		refreshPath = "/"
+	}
+	if err := client.ForceRefresh(context.Background(), refreshPath); err != nil {
+		u.Debugf("CloudDrive2 事件目录刷新失败，继续等待挂载文件：%s：%v", refreshPath, err)
+	} else {
+		u.Debugf("CloudDrive2 已刷新事件目录：%s", refreshPath)
+	}
+
+	delays := []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second}
+	for index, delay := range delays {
+		if delay > 0 {
+			time.Sleep(delay)
+			if err := client.ForceRefresh(context.Background(), refreshPath); err != nil {
+				u.Debugf("CloudDrive2 第 %d 次事件目录刷新失败：%v", index+1, err)
+			}
+		}
+		if visibleCD2Paths(paths) {
+			submitted := u.cacheCloudDrivePaths(paths)
+			if submitted > 0 {
+				u.Printf("CloudDrive2 实时事件已提交：发现 %d 个复制任务", submitted)
+			}
+			return
+		}
+		u.Debugf("CloudDrive2 实时事件已收到，但挂载文件尚未出现，等待第 %d 次重试", index+1)
+	}
+	u.Errorf("CloudDrive2 实时事件对应的挂载文件未出现：%s", remotePath)
+}
+
+func visibleCD2Paths(paths []string) bool {
+	if len(paths) == 0 {
+		return false
+	}
+	for _, file := range paths {
+		if _, err := os.Stat(file); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func cloudDrivePathMatch(value, root string) bool {

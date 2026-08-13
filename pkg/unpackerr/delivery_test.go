@@ -452,6 +452,21 @@ func TestCD2DiscoverySubmitsCopyAndSendsNotification(t *testing.T) {
 	}
 }
 
+func TestVisibleCD2Paths(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.zip")
+	present := filepath.Join(dir, "present.zip")
+	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if visibleCD2Paths([]string{missing}) {
+		t.Fatal("missing path reported as visible")
+	}
+	if !visibleCD2Paths([]string{missing, present}) {
+		t.Fatal("present path was not detected")
+	}
+}
+
 func TestCD2CacheThenRealZipExtraction(t *testing.T) {
 	t.Parallel()
 
