@@ -232,6 +232,125 @@ func TestUISettingsPersistAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestUIPasswordAddDeletePersistsAcrossRestart(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "unpackerr.conf")
+	u := New()
+	u.ConfigFile = configPath
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.addUIPassword("z-password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.addUIPassword("a-password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.removeUIPassword(0); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := New()
+	restarted.ConfigFile = configPath
+	if err := restarted.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.uiPasswords(); len(got) != 1 || got[0] != "z-password" {
+		t.Fatalf("unexpected persisted passwords: %#v", got)
+	}
+}
+
+func TestPersistentHistoryDeleteDoesNotRetryAndRetryDoes(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "history.zip")
+	createZipFixture(t, archive, "file.txt", "content")
+	cfg := &FolderConfig{Path: dir}
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	if err := u.loadProcessingState(); err != nil {
+		t.Fatal(err)
+	}
+	u.folders = newTestFolders(t, cfg)
+
+	version, err := sourceVersion("local", archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.markProcessed(version)
+	if err := u.handleHistoryAction(historyAction{Key: version.Key, Action: "delete"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-u.folders.Events:
+		t.Fatalf("deleting history must not submit extraction: %+v", event)
+	default:
+	}
+
+	u.markProcessed(version)
+	if err := u.handleHistoryAction(historyAction{Key: version.Key, Action: "retry"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-u.folders.Events:
+		if event.file != archive {
+			t.Fatalf("unexpected retry event: %+v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("retry did not submit archive")
+	}
+}
+
+func TestStartupScanSkipsPersistedArchiveUntilFileChanges(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "once.zip")
+	createZipFixture(t, archive, "one.txt", "one")
+	cfg := &FolderConfig{Path: dir}
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	if err := u.loadProcessingState(); err != nil {
+		t.Fatal(err)
+	}
+	u.Folders = []*FolderConfig{cfg}
+	u.folders = newTestFolders(t, cfg)
+	version, err := sourceVersion("local", archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.markProcessed(version)
+	u.scanExistingFolderArchives()
+	select {
+	case event := <-u.folders.Events:
+		t.Fatalf("persisted archive was submitted again: %+v", event)
+	default:
+	}
+
+	file, err := os.OpenFile(archive, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("changed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	u.scanExistingFolderArchives()
+	select {
+	case event := <-u.folders.Events:
+		if event.file != archive {
+			t.Fatalf("unexpected changed archive event: %+v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("changed archive was not submitted")
+	}
+}
+
 func TestNotificationUsesGETAndEncodedText(t *testing.T) {
 	t.Parallel()
 

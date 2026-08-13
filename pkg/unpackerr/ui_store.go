@@ -160,11 +160,18 @@ func (u *Unpackerr) removeUIPassword(index int) error {
 		return fmt.Errorf("UI 存储未初始化")
 	}
 	u.uiStore.mu.Lock()
-	if index < 0 || index >= len(u.uiStore.Passwords) {
+	sorted := sortedPasswords(u.uiStore.Passwords)
+	if index < 0 || index >= len(sorted) {
 		u.uiStore.mu.Unlock()
 		return fmt.Errorf("密码不存在")
 	}
-	u.uiStore.Passwords = append(u.uiStore.Passwords[:index], u.uiStore.Passwords[index+1:]...)
+	target := sorted[index]
+	for originalIndex, password := range u.uiStore.Passwords {
+		if password == target {
+			u.uiStore.Passwords = append(u.uiStore.Passwords[:originalIndex], u.uiStore.Passwords[originalIndex+1:]...)
+			break
+		}
+	}
 	u.Passwords = append([]string(nil), u.uiStore.Passwords...)
 	u.uiStore.mu.Unlock()
 	return u.saveUIStore()

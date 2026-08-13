@@ -2,11 +2,14 @@ package unpackerr
 
 import (
 	"context"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Unpackerr/unpackerr/pkg/clouddrive"
+	"golift.io/xtractr"
 )
 
 func (u *Unpackerr) startCloudDriveMonitor() {
@@ -15,7 +18,7 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 		return
 	}
 	if cfg.URL == "" || cfg.Token == "" {
-		u.Errorf("CloudDrive2 direct mode requires URL and token")
+		u.Errorf("CloudDrive2 直连需要填写服务地址和 Token")
 		return
 	}
 	monitor := &clouddrive.Monitor{
@@ -34,14 +37,16 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 		},
 		OnStatus: func(status clouddrive.Status) {
 			if status.LastError != "" {
-				u.Errorf("CloudDrive2 monitor: %s", status.LastError)
+				u.Errorf("CloudDrive2 监控：%s", status.LastError)
 			}
 		},
 	}
 	go monitor.Run(context.Background())
 	u.Printf("CloudDrive2 监控已连接：%s", cfg.URL)
+	go u.cloudDriveFallbackScan(monitor.Client, cfg.WatchPath, cfg.PathOverrides)
+	go u.cloudDriveRetryLoop()
 	if cfg.RefreshInterval.Duration > 0 {
-		go u.cloudDriveRefreshLoop(monitor.Client, cfg.RefreshInterval.Duration, cfg.RefreshPath)
+		go u.cloudDriveRefreshLoop(monitor.Client, cfg.RefreshInterval.Duration, cfg.RefreshPath, cfg.WatchPath, cfg.PathOverrides)
 	}
 }
 
@@ -51,7 +56,7 @@ func cloudDrivePathMatch(value, root string) bool {
 	return root == "/" || value == root || strings.HasPrefix(value, root+"/")
 }
 
-func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval time.Duration, refreshPath string) {
+func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval time.Duration, refreshPath, watchPath string, overrides []string) {
 	if refreshPath == "" {
 		refreshPath = "/"
 	}
@@ -61,8 +66,53 @@ func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval ti
 		if err := client.ForceRefresh(context.Background(), refreshPath); err != nil {
 			u.Errorf("CloudDrive2 定时刷新失败：%s", err)
 		} else {
-			u.Debugf("CloudDrive2 force refresh completed")
+			u.Debugf("CloudDrive2 定时刷新完成")
 		}
+		u.cloudDriveFallbackScan(client, watchPath, overrides)
+	}
+}
+
+// cloudDriveFallbackScan compensates for delayed or missed change events. It
+// scans only the configured watch path after mapping it to the mounted path.
+func (u *Unpackerr) cloudDriveFallbackScan(client *clouddrive.Client, watchPath string, overrides []string) {
+	mounts, err := client.GetMountPoints(context.Background())
+	if err != nil {
+		u.Errorf("CloudDrive2 补偿扫描读取挂载点失败：%v", err)
+		return
+	}
+	roots := clouddrive.MapCloudPathWithOverrides(watchPath, mounts, overrides)
+	if len(roots) == 0 {
+		u.Errorf("CloudDrive2 补偿扫描无法映射监控路径：%s", watchPath)
+		return
+	}
+	for _, root := range roots {
+		root = filepath.Clean(root)
+		paths := make([]string, 0, 16)
+		err := filepath.WalkDir(root, func(file string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+			if !entry.IsDir() && xtractr.IsArchiveFile(entry.Name()) {
+				paths = append(paths, file)
+			}
+			return nil
+		})
+		if err != nil {
+			u.Errorf("CloudDrive2 补偿扫描失败 %s：%v", root, err)
+			continue
+		}
+		if len(paths) > 0 {
+			u.cacheCloudDrivePaths(paths)
+		}
+	}
+}
+
+func (u *Unpackerr) cloudDriveRetryLoop() {
+	u.resumeCD2Pending()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		u.resumeCD2Pending()
 	}
 }
 

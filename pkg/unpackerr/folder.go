@@ -191,6 +191,11 @@ func (u *Unpackerr) scanExistingFolderArchives() {
 			if entry.IsDir() || !xtractr.IsArchiveFile(entry.Name()) {
 				return nil
 			}
+			version, versionErr := sourceVersion("local", path)
+			if versionErr == nil && u.wasProcessed(version) {
+				u.Debugf("本地压缩包已处理，跳过: %s", path)
+				return nil
+			}
 			u.folders.InjectFileEvent(path, "startup scan")
 			return nil
 		})
@@ -465,6 +470,17 @@ func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
 		folder.archives = resp.Archives
 		folder.status = EXTRACTED
 		folder.files = resp.NewFiles
+		if sources, cached := u.cd2Cache.Load(filepath.Clean(resp.X.Name)); cached {
+			if pending, ok := u.pendingCD2ForPath(resp.X.Name); ok && pending.Version.Key != "" {
+				u.markProcessed(pending.Version)
+			} else if version, err := sourceGroupVersion("cd2", sources.([]string)); err == nil {
+				u.markProcessed(version)
+			}
+			u.removePendingCD2(filepath.Clean(resp.X.Name))
+			u.cd2Resume.Delete(filepath.Clean(resp.X.Name))
+		} else if version, err := sourceVersion("local", resp.X.Name); err == nil {
+			u.markProcessed(version)
+		}
 		go u.deleteCachedSource(resp.X.Name)
 	}
 
@@ -550,6 +566,13 @@ func (u *Unpackerr) processEvent(event *eventData, now time.Time) {
 	// Do not watch our own log file.
 	if event.file == u.LogFile || event.file == u.Webserver.LogFile {
 		return
+	}
+	if event.cnfg != nil && !event.cnfg.ExternalOnly {
+		version, err := sourceVersion("local", event.file)
+		if err == nil && u.wasProcessed(version) {
+			u.Debugf("本地压缩包已处理，忽略重复事件: %s", event.file)
+			return
+		}
 	}
 
 	u.folders.processEvent(event, now)

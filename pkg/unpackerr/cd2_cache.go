@@ -103,6 +103,19 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) {
 			u.Errorf("CloudDrive2 cache scan failed for %s: %v", source, err)
 			continue
 		}
+		version, err := sourceGroupVersion("cd2", files)
+		if err != nil {
+			u.Errorf("CloudDrive2 文件状态读取失败: %v", err)
+			continue
+		}
+		if u.wasProcessed(version) {
+			u.Debugf("CloudDrive2 压缩包已处理，跳过: %s", source)
+			continue
+		}
+		if u.hasPendingCD2Files(files) {
+			u.Debugf("CloudDrive2 压缩包正在处理，跳过重复事件: %s", source)
+			continue
+		}
 		if _, loaded := u.cd2Copy.LoadOrStore(groupKey, struct{}{}); loaded {
 			continue
 		}
@@ -110,6 +123,7 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) {
 			defer u.cd2Copy.Delete(groupKey)
 			if err := u.cacheCloudDriveGroup(files, groupKey); err != nil {
 				u.Errorf("CloudDrive2 cache copy failed: %v", err)
+				u.queueCD2Retry(groupKey, files, err)
 			}
 		}(files, groupKey)
 	}
@@ -207,9 +221,56 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	}
 	primaryPath := filepath.Join(finalDir, filepath.Base(primary))
 	u.cd2Cache.Store(filepath.Clean(primaryPath), append([]string(nil), files...))
+	version, _ := sourceGroupVersion("cd2", files)
+	u.savePendingCD2(PendingCD2{Key: filepath.Clean(primaryPath), Files: append([]string(nil), files...), CachedPrimary: primaryPath, Version: version})
+	u.cd2Resume.Store(filepath.Clean(primaryPath), struct{}{})
 	u.folders.InjectFileEvent(primaryPath, "cd2 cache ready")
 	u.Printf("CloudDrive2 cache ready: %d file(s) copied to %s", len(files), finalDir)
 	return nil
+}
+
+func (u *Unpackerr) queueCD2Retry(groupKey string, files []string, copyErr error) {
+	key := "copy|" + filepath.Clean(groupKey)
+	attempts := 1
+	for _, item := range u.pendingCD2() {
+		if item.Key == key {
+			attempts = item.Attempts + 1
+			break
+		}
+	}
+	delay := time.Duration(1<<min(attempts-1, 6)) * 30 * time.Second
+	u.savePendingCD2(PendingCD2{Key: key, Files: append([]string(nil), files...), Attempts: attempts, NextAttempt: time.Now().Add(delay), LastError: copyErr.Error()})
+}
+
+func (u *Unpackerr) resumeCD2Pending() {
+	for _, pending := range u.pendingCD2() {
+		pending := pending
+		if pending.CachedPrimary != "" {
+			if _, err := os.Stat(pending.CachedPrimary); err == nil {
+				if _, loaded := u.cd2Resume.LoadOrStore(filepath.Clean(pending.CachedPrimary), struct{}{}); loaded {
+					continue
+				}
+				u.cd2Cache.Store(filepath.Clean(pending.CachedPrimary), append([]string(nil), pending.Files...))
+				u.folders.InjectFileEvent(pending.CachedPrimary, "cd2 resume cached task")
+				continue
+			}
+		}
+		if pending.NextAttempt.After(time.Now()) || len(pending.Files) == 0 {
+			continue
+		}
+		groupKey := strings.TrimPrefix(pending.Key, "copy|")
+		if _, loaded := u.cd2Copy.LoadOrStore(groupKey, struct{}{}); loaded {
+			continue
+		}
+		go func() {
+			defer u.cd2Copy.Delete(groupKey)
+			if err := u.cacheCloudDriveGroup(pending.Files, groupKey); err != nil {
+				u.queueCD2Retry(groupKey, pending.Files, err)
+				return
+			}
+			u.removePendingCD2(pending.Key)
+		}()
+	}
 }
 
 func archivePrimary(files []string) string {

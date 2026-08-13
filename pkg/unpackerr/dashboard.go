@@ -4,7 +4,9 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -27,7 +29,7 @@ type DashboardSnapshot struct {
 	UpdatedAt    string              `json:"updated_at"`
 	Totals       DashboardTotals     `json:"totals"`
 	Tasks        []DashboardTask     `json:"tasks"`
-	History      []string            `json:"history"`
+	History      []DashboardHistory  `json:"history"`
 	Folders      []DashboardFolder   `json:"folders"`
 	CloudDrive   DashboardCloudDrive `json:"clouddrive2"`
 	Passwords    []string            `json:"passwords"`
@@ -40,6 +42,19 @@ type DashboardLog struct {
 	Time    string `json:"time"`
 	Level   string `json:"level"`
 	Message string `json:"message"`
+}
+
+type DashboardHistory struct {
+	Key         string `json:"key"`
+	Path        string `json:"path"`
+	Source      string `json:"source"`
+	CompletedAt string `json:"completed_at"`
+}
+
+type historyAction struct {
+	Key    string
+	Action string
+	result chan error
 }
 
 type DashboardTotals struct {
@@ -73,7 +88,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 	snapshot := DashboardSnapshot{
 		UpdatedAt: time.Now().Format(time.RFC3339),
 		Tasks:     []DashboardTask{},
-		History:   []string{},
+		History:   []DashboardHistory{},
 		Folders:   []DashboardFolder{},
 		Totals: DashboardTotals{
 			Finished: u.Finished,
@@ -103,10 +118,15 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		snapshot.Tasks = append(snapshot.Tasks, task)
 	}
 	sort.Slice(snapshot.Tasks, func(i, j int) bool { return snapshot.Tasks[i].Updated > snapshot.Tasks[j].Updated })
-	for _, item := range u.Items {
-		if item != "" {
-			snapshot.History = append(snapshot.History, item)
+	for _, item := range u.processedHistory() {
+		source := "本地目录"
+		if item.Source == "cd2" {
+			source = "CloudDrive2"
 		}
+		snapshot.History = append(snapshot.History, DashboardHistory{
+			Key: item.Key, Path: item.Path, Source: source,
+			CompletedAt: item.CompletedAt.Format("2006-01-02 15:04:05"),
+		})
 	}
 	for _, folder := range u.Folders {
 		tracked := 0
@@ -228,6 +248,74 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 		return
 	}
 	u.writeJSON(w, map[string]any{"success": true, "restart_required": true})
+}
+
+func (u *Unpackerr) historyAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var input struct {
+		Key    string `json:"key"`
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Key) == "" || (input.Action != "delete" && input.Action != "retry") {
+		http.Error(w, "请求格式错误", http.StatusBadRequest)
+		return
+	}
+	action := historyAction{Key: input.Key, Action: input.Action, result: make(chan error, 1)}
+	select {
+	case u.historyActions <- action:
+	case <-r.Context().Done():
+		http.Error(w, "请求已取消", http.StatusRequestTimeout)
+		return
+	}
+	if err := <-action.result; err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	u.writeJSON(w, map[string]any{"success": true})
+}
+
+func (u *Unpackerr) handleHistoryAction(action historyAction) error {
+	item, ok := u.deleteProcessed(action.Key)
+	if !ok {
+		return fmt.Errorf("历史记录不存在")
+	}
+	if action.Action == "delete" {
+		return nil
+	}
+	if u.folders == nil {
+		u.restoreProcessed(item)
+		return fmt.Errorf("目录监控尚未启动")
+	}
+	if item.Source == "local" {
+		if _, err := os.Stat(item.Path); err != nil {
+			u.restoreProcessed(item)
+			return fmt.Errorf("源文件不存在，无法重试")
+		}
+		u.folders.InjectFileEvent(item.Path, "history retry")
+		return nil
+	}
+	if item.Source == "cd2" {
+		if _, err := os.Stat(item.Path); err == nil && dashboardPathPrefix(item.Path, u.CloudDrive2.CacheDir) {
+			u.cd2Cache.Store(filepath.Clean(item.Path), append([]string(nil), item.Files...))
+			u.savePendingCD2(PendingCD2{Key: filepath.Clean(item.Path), Files: append([]string(nil), item.Files...), CachedPrimary: item.Path, Version: item})
+			u.cd2Resume.Store(filepath.Clean(item.Path), struct{}{})
+			u.folders.InjectFileEvent(item.Path, "history retry cached")
+			return nil
+		}
+		files := append([]string(nil), item.Files...)
+		if len(files) == 0 {
+			files = []string{item.Path}
+		}
+		for _, file := range files {
+			if _, err := os.Stat(file); err != nil {
+				u.restoreProcessed(item)
+				return fmt.Errorf("CD2 源文件不存在，无法重试")
+			}
+		}
+		u.cacheCloudDrivePaths(files)
+		return nil
+	}
+	u.restoreProcessed(item)
+	return fmt.Errorf("不支持的任务来源")
 }
 func (u *Unpackerr) writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

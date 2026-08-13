@@ -53,21 +53,24 @@ type Unpackerr struct {
 	*Config
 	*History
 	*xtractr.Xtractr
-	metrics    *metrics
-	folders    *Folders
-	sigChan    chan os.Signal
-	updates    chan *xtractr.Response
-	progChan   chan *ExtractProgress
-	hookChan   chan *hookQueueItem
-	delChan    chan *fileDeleteReq
-	workChan   chan []func()
-	uiRequests chan chan DashboardSnapshot
+	metrics        *metrics
+	folders        *Folders
+	sigChan        chan os.Signal
+	updates        chan *xtractr.Response
+	progChan       chan *ExtractProgress
+	hookChan       chan *hookQueueItem
+	delChan        chan *fileDeleteReq
+	workChan       chan []func()
+	uiRequests     chan chan DashboardSnapshot
+	historyActions chan historyAction
 	*Logger
-	rotatorr *rotatorr.Logger
-	menu     map[string]ui.MenuItem
-	uiStore  *UIStore
-	cd2Cache sync.Map // cache archive path -> []mounted CloudDrive source files
-	cd2Copy  sync.Map // source group key -> struct{} while a cache copy is in progress
+	rotatorr  *rotatorr.Logger
+	menu      map[string]ui.MenuItem
+	uiStore   *UIStore
+	state     *ProcessingState
+	cd2Cache  sync.Map // cache archive path -> []mounted CloudDrive source files
+	cd2Copy   sync.Map // source group key -> struct{} while a cache copy is in progress
+	cd2Resume sync.Map // cached primary path -> struct{} after resume submission
 }
 
 type fileDeleteReq struct {
@@ -100,16 +103,17 @@ type Flags struct {
 // An empty struct will surely cause you pain, so use this!
 func New() *Unpackerr {
 	return &Unpackerr{
-		Flags:      &Flags{EnvPrefix: "UN"},
-		hookChan:   make(chan *hookQueueItem, updateChanBuf),
-		delChan:    make(chan *fileDeleteReq, updateChanBuf),
-		sigChan:    make(chan os.Signal),
-		workChan:   make(chan []func(), 1),
-		uiRequests: make(chan chan DashboardSnapshot),
-		History:    &History{Map: make(map[string]*Extract)},
-		updates:    make(chan *xtractr.Response, updateChanBuf),
-		progChan:   make(chan *ExtractProgress),
-		menu:       make(map[string]ui.MenuItem),
+		Flags:          &Flags{EnvPrefix: "UN"},
+		hookChan:       make(chan *hookQueueItem, updateChanBuf),
+		delChan:        make(chan *fileDeleteReq, updateChanBuf),
+		sigChan:        make(chan os.Signal),
+		workChan:       make(chan []func(), 1),
+		uiRequests:     make(chan chan DashboardSnapshot),
+		historyActions: make(chan historyAction),
+		History:        &History{Map: make(map[string]*Extract)},
+		updates:        make(chan *xtractr.Response, updateChanBuf),
+		progChan:       make(chan *ExtractProgress),
+		menu:           make(map[string]ui.MenuItem),
 		Config: &Config{
 			KeepHistory: defaultHistory,
 			LogQueues:   cnfg.Duration{Duration: time.Minute + time.Second},
@@ -400,6 +404,8 @@ func (u *Unpackerr) Run() {
 			u.folderXtractrCallback(resp)
 		case request := <-u.uiRequests:
 			request <- u.dashboardSnapshot()
+		case action := <-u.historyActions:
+			action.result <- u.handleHistoryAction(action)
 		case event := <-u.folders.Events:
 			// file system event for watched folder.
 			u.processEvent(event, now)
