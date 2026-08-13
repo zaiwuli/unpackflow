@@ -273,11 +273,31 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	return u.saveUIStore()
 }
 func (u *Unpackerr) notifyUI(status ExtractStatus, item *Extract) {
-	s := u.notificationSettings()
-	if !s.Enabled || s.URL == "" || item == nil {
+	if item == nil {
 		return
 	}
-	message := formatUINotification(status, item)
+	icon, title := "⚪", "任务状态"
+	switch status {
+	case QUEUED:
+		icon, title = "📦", "发现压缩包"
+	case EXTRACTING:
+		icon, title = "⏱️", "开始解压"
+	case EXTRACTED:
+		icon, title = "✅", "解压完成"
+	case EXTRACTFAILED:
+		icon, title = "❌", "解压失败"
+	case DELETED:
+		icon, title = "🧹", "任务清理完成"
+	}
+	u.notifyEvent(icon, title, sourceName(item.App), item.Path)
+}
+
+func (u *Unpackerr) notifyEvent(icon, title, source, task string) {
+	s := u.notificationSettings()
+	if !s.Enabled || s.URL == "" {
+		return
+	}
+	message := formatNotificationMessage(icon, title, source, task)
 	go func() {
 		parsed, err := url.Parse(s.URL)
 		if err != nil {
@@ -316,7 +336,11 @@ func formatUINotification(status ExtractStatus, item *Extract) string {
 	case DELETED:
 		icon, title = "\U0001f9f9", "\u4efb\u52a1\u6e05\u7406\u5b8c\u6210"
 	}
-	return fmt.Sprintf("%s UnpackFlow %s\n--------------------\n\u23f1\ufe0f \u65f6\u95f4: %s\n\U0001f4c1 \u6765\u6e90: %s\n\U0001f194 \u4efb\u52a1: %s", icon, title, time.Now().Format("2006-01-02 15:04:05"), sourceName(item.App), item.Path)
+	return formatNotificationMessage(icon, title, sourceName(item.App), item.Path)
+}
+
+func formatNotificationMessage(icon, title, source, task string) string {
+	return fmt.Sprintf("%s UnpackFlow %s\n--------------------\n⏱️ 时间: %s\n📁 来源: %s\n🆔 任务: %s", icon, title, time.Now().Format("2006-01-02 15:04:05"), source, task)
 }
 func sortedPasswords(p []string) []string {
 	r := append([]string{}, p...)

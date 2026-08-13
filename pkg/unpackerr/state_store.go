@@ -28,6 +28,7 @@ type ProcessedSource struct {
 	Files       []string  `json:"files,omitempty"`
 	Size        int64     `json:"size"`
 	ModifiedNS  int64     `json:"modified_ns"`
+	CachedAt    time.Time `json:"cached_at,omitempty"`
 	CompletedAt time.Time `json:"completed_at"`
 }
 

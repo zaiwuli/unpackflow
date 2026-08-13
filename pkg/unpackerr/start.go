@@ -73,6 +73,7 @@ type Unpackerr struct {
 	cd2Copy   sync.Map // source group key -> struct{} while a cache copy is in progress
 	cd2Resume sync.Map // cached primary path -> struct{} after resume submission
 	cd2Tasks  sync.Map // group key -> *CD2Transfer while copying or verifying
+	cd2Notice sync.Map // cached primary path -> discovery notification already sent
 	cd2Mu     sync.RWMutex
 	cd2Client *clouddrive.Client
 }

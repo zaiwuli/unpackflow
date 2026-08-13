@@ -385,6 +385,35 @@ func TestNotificationUsesGETAndEncodedText(t *testing.T) {
 	}
 }
 
+func TestNotificationEventIsSentImmediately(t *testing.T) {
+	t.Parallel()
+
+	requestReceived := make(chan *http.Request, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived <- r.Clone(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	u := New()
+	u.uiStore = &UIStore{Notification: UINotification{Enabled: true, URL: server.URL}}
+	started := time.Now()
+	u.notifyEvent("📦", "发现压缩包", "CloudDrive2", "/115open/test.7z")
+
+	select {
+	case request := <-requestReceived:
+		if elapsed := time.Since(started); elapsed > time.Second {
+			t.Fatalf("notification was delayed: %v", elapsed)
+		}
+		text := request.URL.Query().Get("text")
+		if !strings.Contains(text, "发现压缩包") || !strings.Contains(text, "CloudDrive2") {
+			t.Fatalf("unexpected event notification: %q", text)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for immediate notification")
+	}
+}
+
 func TestCD2CacheThenRealZipExtraction(t *testing.T) {
 	t.Parallel()
 

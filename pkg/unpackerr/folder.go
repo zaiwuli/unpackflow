@@ -362,7 +362,7 @@ func (u *Unpackerr) extractTrackedItem(name string, folder *Folder, now time.Tim
 	// Do not extract r00 file if rar file with same name exists.
 	if strings.HasSuffix(strings.ToLower(name), ".r00") &&
 		xtractr.CheckR00ForRarFile(getFileList(filepath.Dir(name)), filepath.Base(name)) {
-		u.Printf("[Folder] Removing tracked item without extraction: %v (rar file exists)", name)
+		u.Printf("[目录任务] 已移除无需解压的重复条目：%v（已存在 RAR 主卷）", name)
 		u.folders.Folders[name].status = EXTRACTEDNOTHING
 
 		return
@@ -394,7 +394,7 @@ func (u *Unpackerr) extractTrackedItem(name string, folder *Folder, now time.Tim
 		return
 	}
 
-	u.Printf("[Folder] Queued: %s, queue size: %d", name, queueSize)
+	u.Printf("[目录任务] 已排队：%s，队列数量 %d", name, queueSize)
 }
 
 // folderExcludeSuffixes returns archive suffixes to ignore when scanning for items to extract.
@@ -451,19 +451,18 @@ func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
 	case !resp.Done:
 		item.XProg.Archives = resp.Archives.Count() + resp.Extras.Count()
 		folder.status = EXTRACTING
-		u.Printf("[Folder] Extraction Started: %s, retries: %d, items in queue: %d", resp.X.Name, folder.retries, resp.Queued)
+		u.Printf("[目录任务] 开始解压：%s，已重试 %d 次，队列剩余 %d", resp.X.Name, folder.retries, resp.Queued)
 	case errors.Is(resp.Error, xtractr.ErrNoCompressedFiles):
 		folder.status = EXTRACTEDNOTHING
-		u.Printf("[Folder] %s: %s: %v", folder.status.Desc(), resp.X.Name, resp.Error)
+		u.Printf("[目录任务] %s：%s：%v", folder.status.Desc(), resp.X.Name, resp.Error)
 	case resp.Error != nil:
 		folder.archives = resp.Archives
 		folder.status = EXTRACTFAILED
-		u.Errorf("[Folder] %s: %s: %v", folder.status.Desc(), resp.X.Name, resp.Error)
+		u.Errorf("[目录任务] %s：%s：%v", folder.status.Desc(), resp.X.Name, resp.Error)
 		u.updateMetrics(resp, FolderString, folder.config.Path)
 	default: // this runs in a go routine
 		u.updateMetrics(resp, FolderString, folder.config.Path)
-		u.Printf("[Folder] Extraction Finished: %s => elapsed: %v, archives: %d, "+
-			"extra archives: %d, files extracted: %d, written: %sB",
+		u.Printf("[目录任务] 解压完成：%s，耗时 %v，压缩文件 %d 个，附加压缩文件 %d 个，输出文件 %d 个，写入 %sB",
 			resp.X.Name, resp.Elapsed.Round(time.Second), resp.Archives.Count(),
 			resp.Extras.Count(), len(resp.NewFiles), bytefmt.ByteSize(resp.Size))
 
@@ -631,7 +630,7 @@ func (f *Folders) saveEvent(event *eventData, dirPath string, now time.Time) {
 		return
 	}
 
-	f.Printf("[Folder] Tracking New Item: %v (event: %s)", dirPath, event.op)
+	f.Printf("[目录任务] 发现新压缩包：%v（事件：%s）", dirPath, event.op)
 
 	f.Folders[dirPath] = &Folder{
 		updated: now,
@@ -661,7 +660,7 @@ func (u *Unpackerr) checkFolderStats(now time.Time) {
 			folder.retries++
 			folder.updated = now
 			folder.status = WAITING
-			u.Printf("[Folder] Re-starting Failed Extraction: %s (%d/%d, failed %v ago)",
+			u.Printf("[目录任务] 重新尝试解压：%s（%d/%d，上次失败于 %v 前）",
 				folder.config.Path, folder.retries, u.MaxRetries, elapsed.Round(time.Second))
 		case EXTRACTFAILED == folder.status && folder.retries < u.MaxRetries:
 			// This empty block is to avoid deleting an item that needs more retries.
@@ -669,7 +668,7 @@ func (u *Unpackerr) checkFolderStats(now time.Time) {
 			// Retries exhausted — clean up to prevent the item from staying in the map forever.
 			u.updateQueueStatus(&newStatus{Name: name, Status: DELETED, Resp: nil}, now, true)
 			delete(u.folders.Folders, name)
-			u.Printf("[Folder] Retries exhausted (%d/%d), giving up: %s", folder.retries, u.MaxRetries, name)
+			u.Printf("[目录任务] 重试次数已用完（%d/%d），停止处理：%s", folder.retries, u.MaxRetries, name)
 		case folder.status > EXTRACTING && folder.config.DeleteAfter.Duration <= 0:
 			// if DeleteAfter is 0 we don't delete anything. we are done.
 			u.updateQueueStatus(&newStatus{Name: name, Status: DELETED, Resp: nil}, now, false)
@@ -730,7 +729,9 @@ func (u *Unpackerr) updateQueueStatus(data *newStatus, now time.Time, sendHook b
 
 		if sendHook {
 			u.runAllHooks(u.Map[data.Name])
-			u.notifyUI(u.Map[data.Name].Status, u.Map[data.Name])
+			if _, alreadyNotified := u.cd2Notice.LoadAndDelete(filepath.Clean(data.Name)); !alreadyNotified {
+				u.notifyUI(u.Map[data.Name].Status, u.Map[data.Name])
+			}
 		}
 
 		return u.Map[data.Name]

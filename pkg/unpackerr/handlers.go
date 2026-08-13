@@ -181,7 +181,7 @@ func (u *Unpackerr) checkExtractDone(now time.Time) {
 			// Remove the item from history some time after it's deleted.
 			u.Finished++
 			delete(u.Map, name)
-			u.Printf("[%s] Finished, Removed History: %v", item.App, name)
+			u.Printf("[%s] 任务已完成并移出当前列表：%v", sourceName(item.App), name)
 		case item.App == FolderString:
 			continue // folders are handled in folder.go.
 		case item.Status == EXTRACTFAILED && elapsed >= u.RetryDelay.Duration &&
@@ -190,19 +190,19 @@ func (u *Unpackerr) checkExtractDone(now time.Time) {
 			item.Retries++
 			item.Status = WAITING
 			item.Updated = now
-			u.Printf("[%s] Extract failed %v ago, triggering restart (%d/%d): %v",
+			u.Printf("[%s] 解压失败已等待 %v，重新尝试（%d/%d）：%v",
 				item.App, elapsed.Round(time.Second), item.Retries, u.MaxRetries, name)
 		case item.Status == EXTRACTFAILED && u.MaxRetries > 0 && item.Retries >= u.MaxRetries:
 			// Retries exhausted — clean up to prevent the item from staying in the map forever.
 			u.updateQueueStatus(&newStatus{Name: name, Status: DELETED, Resp: item.Resp}, now, true)
-			u.Printf("[%s] Retries exhausted (%d/%d), giving up: %v",
+			u.Printf("[%s] 重试次数已用完（%d/%d），停止处理：%v",
 				item.App, item.Retries, u.MaxRetries, name)
 		case (item.Status == EXTRACTED || item.Status == EXTRACTING || item.Status == QUEUED) &&
 			elapsed >= staleItemTimeout:
 			// Safety net: items stuck at intermediate states for too long are cleaned up
 			// to prevent unbounded map growth (e.g. Starr app never imports the item).
 			u.updateQueueStatus(&newStatus{Name: name, Status: DELETED, Resp: item.Resp}, now, true)
-			u.Printf("[%s] Stale item removed after %v at status %s: %v",
+			u.Printf("[%s] 条目超过 %v 未更新，已移出当前任务（状态：%s）：%v",
 				item.App, elapsed.Round(time.Second), item.Status.Desc(), name)
 		case item.Status == IMPORTED && elapsed >= item.DeleteDelay:
 			var webhook bool
@@ -237,17 +237,16 @@ func (u *Unpackerr) handleXtractrCallback(resp *xtractr.Response) {
 
 	switch now := resp.Started.Add(resp.Elapsed); {
 	case !resp.Done:
-		u.Printf("Extraction Started: %s, items in queue: %d", resp.X.Name, resp.Queued)
+		u.Printf("开始解压：%s，队列剩余 %d", resp.X.Name, resp.Queued)
 		u.updateQueueStatus(&newStatus{Name: resp.X.Name, Status: EXTRACTING, Resp: resp}, now, true)
 	case resp.Error != nil:
-		u.Errorf("Extraction Failed: %s: %v", resp.X.Name, resp.Error)
+		u.Errorf("解压失败：%s：%v", resp.X.Name, resp.Error)
 		u.updateQueueStatus(&newStatus{Name: resp.X.Name, Status: EXTRACTFAILED, Resp: resp}, now, true)
 	default:
 		files := fileList(resp.X.Path)
-		u.Printf("Extraction Finished: %s => elapsed: %v, archives: %d, extra archives: %d, "+
-			"files extracted: %d, wrote: %sB", resp.X.Name, resp.Elapsed.Round(time.Second),
+		u.Printf("解压完成：%s，耗时 %v，压缩文件 %d 个，附加压缩文件 %d 个，输出文件 %d 个，写入 %sB", resp.X.Name, resp.Elapsed.Round(time.Second),
 			resp.Archives.Count(), resp.Extras.Count(), len(resp.NewFiles), bytefmt.ByteSize(resp.Size))
-		u.Debugf("Extraction Finished: %d files in path: %s", len(files), files)
+		u.Debugf("解压完成：目录中共有 %d 个文件：%s", len(files), files)
 		u.updateQueueStatus(&newStatus{Name: resp.X.Name, Status: EXTRACTED, Resp: resp}, now, true)
 
 		if item != nil && item.App == starr.Lidarr && item.SplitFlac && resp.Size > 0 {

@@ -129,7 +129,7 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 		}
 		files, groupKey, err := archiveVolumeGroup(source)
 		if err != nil {
-			u.Errorf("CloudDrive2 cache scan failed for %s: %v", source, err)
+			u.Errorf("CloudDrive2 缓存扫描失败 %s：%v", source, err)
 			continue
 		}
 		version, err := sourceGroupVersion("cd2", files)
@@ -159,6 +159,9 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 			continue
 		}
 		u.Printf("CloudDrive2 已提交复制任务：%d 个文件，来源 %s", len(files), source)
+		cachedPrimary := filepath.Join(u.CloudDrive2.CacheDir, filepath.Base(archivePrimary(files)))
+		u.cd2Notice.Store(filepath.Clean(cachedPrimary), struct{}{})
+		u.notifyEvent("📦", "发现压缩包", "CloudDrive2", source)
 		submitted++
 		go func(files []string, groupKey string) {
 			defer u.cd2Copy.Delete(groupKey)
@@ -213,7 +216,7 @@ func archiveVolumeGroup(source string) ([]string, string, error) {
 		files = append(files, filepath.Join(dir, entry.Name()))
 	}
 	if len(files) == 0 {
-		return nil, "", fmt.Errorf("archive source is unavailable: %s", source)
+		return nil, "", fmt.Errorf("压缩包源文件不可用：%s", source)
 	}
 	sort.Strings(files)
 	if err := validateVolumeSequence(files); err != nil {
@@ -368,10 +371,12 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	primaryPath := filepath.Join(finalDir, filepath.Base(primary))
 	u.cd2Cache.Store(filepath.Clean(primaryPath), append([]string(nil), files...))
 	version, _ := sourceGroupVersion("cd2", files)
+	version.CachedAt = time.Now()
 	u.savePendingCD2(PendingCD2{Key: filepath.Clean(primaryPath), Files: append([]string(nil), files...), CachedPrimary: primaryPath, Version: version})
 	u.cd2Resume.Store(filepath.Clean(primaryPath), struct{}{})
 	u.folders.InjectFileEvent(primaryPath, "cd2 cache ready")
-	u.Printf("CloudDrive2 cache ready: %d file(s) copied to %s", len(files), finalDir)
+	u.Printf("CloudDrive2 缓存完成：已复制 %d 个文件到 %s", len(files), finalDir)
+	u.notifyEvent("✅", "缓存完成", "CloudDrive2", primaryPath)
 	return nil
 }
 
@@ -650,7 +655,7 @@ func copyStableFile(source, target string) error {
 		return err
 	}
 	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
-		return fmt.Errorf("source changed while copying: %s", source)
+		return fmt.Errorf("源文件复制期间发生变化：%s", source)
 	}
 	return nil
 }

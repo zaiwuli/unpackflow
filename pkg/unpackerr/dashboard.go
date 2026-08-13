@@ -49,6 +49,7 @@ type DashboardHistory struct {
 	Key         string `json:"key"`
 	Path        string `json:"path"`
 	Source      string `json:"source"`
+	CachedAt    string `json:"cached_at,omitempty"`
 	CompletedAt string `json:"completed_at"`
 }
 
@@ -131,6 +132,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		}
 		snapshot.History = append(snapshot.History, DashboardHistory{
 			Key: item.Key, Path: item.Path, Source: source,
+			CachedAt:    formatDashboardTime(item.CachedAt),
 			CompletedAt: item.CompletedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
@@ -148,6 +150,13 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		})
 	}
 	return snapshot
+}
+
+func formatDashboardTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Format("2006-01-02 15:04:05")
 }
 
 func (u *Unpackerr) dashboardTransfers() []CD2Transfer {

@@ -45,7 +45,7 @@ function renderStatus(data) {
   $('worker-count').textContent = data.totals.workers;
   renderList($('tasks'), data.tasks, task => '<article class="task"><div><div class="task-name">' + esc(task.name) + '</div><div class="task-meta">' + esc(task.source) + ' · ' + esc(task.updated) + '</div></div><div class="task-side"><span class="badge">' + esc(task.status) + '</span></div></article>', zh.noTasks);
   renderList($('folders'), data.folders, folder => '<div class="compact-item">' + esc(folder.path) + '<small>' + esc(folder.extract_path || '\u539f\u76ee\u5f55\u8f93\u51fa') + ' · ' + folder.tracked + '</small></div>', zh.noFolders);
-  renderList($('history'), data.history, item => '<div class="compact-item"><div>' + esc(item.path) + '<small>' + esc(item.source) + ' · ' + esc(item.completed_at) + '</small></div><div><button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button><button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
+  renderList($('history'), data.history, item => '<div class="compact-item history-item"><div><strong>' + esc(item.path) + '</strong><small>' + esc(item.source) + ' · 解压完成 ' + esc(item.completed_at) + (item.cached_at ? ' · 缓存完成 ' + esc(item.cached_at) : '') + '</small></div><div><button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button><button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
   renderList($('logs'), data.logs, item => '<article class="log-item ' + (item.level === '\u9519\u8bef' ? 'log-error' : '') + '"><time>' + esc(item.time) + '</time><span>' + esc(item.level) + '</span><p>' + esc(item.message) + '</p></article>', zh.noLogs);
   renderList($('transfers'), data.transfers, item => '<div class="compact-item"><div>' + esc(item.path) + '<small>' + esc(item.state) + ' · ' + formatBytes(item.bytes) + ' / ' + formatBytes(item.total) + ' · ' + formatBytes(item.speed) + '/s' + (item.eta_seconds ? ' · 预计 ' + formatDuration(item.eta_seconds) : '') + '</small><div class="copy-bar"><i style="width:' + Math.min(100, item.total ? item.bytes * 100 / item.total : 0) + '%"></i></div></div></div>', '暂无复制任务');
   renderList($('password-list'), data.passwords, (password, index) => '<div class="compact-item">' + esc(password) + '<button data-remove-password="' + index + '" type="button">\u5220\u9664</button></div>', zh.noPasswords);
@@ -85,6 +85,12 @@ document.querySelectorAll('.tab').forEach(button => button.addEventListener('cli
   document.querySelectorAll('.view').forEach(item => item.classList.remove('active-view'));
   button.classList.add('active');
   $(button.dataset.view).classList.add('active-view');
+}));
+document.querySelectorAll('.task-switch-button').forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('.task-switch-button').forEach(item => item.classList.remove('active'));
+  document.querySelectorAll('.task-subview').forEach(item => item.classList.remove('active-task-subview'));
+  button.classList.add('active');
+  $(button.dataset.taskView).classList.add('active-task-subview');
 }));
 
 $('refresh').addEventListener('click', () => load(false));
