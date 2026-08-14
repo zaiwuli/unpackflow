@@ -18,9 +18,9 @@ import (
 	"golift.io/xtractr"
 )
 
-// defaultPollInterval is used if Docker is detected.
+// defaultPollInterval is the local directory compensation scan interval.
 const (
-	defaultPollInterval = time.Second
+	defaultPollInterval = time.Minute
 	minimumPollInterval = 5 * time.Millisecond
 	defaultFolderDelete = 10 * time.Minute
 )
@@ -35,6 +35,7 @@ type FolderConfig struct {
 	MoveBack         bool           `json:"move_back"        toml:"move_back"         xml:"move_back"         yaml:"move_back"`
 	DeleteAfter      *cnfg.Duration `json:"delete_after"     toml:"delete_after"      xml:"delete_after"      yaml:"delete_after"`
 	ExtractPath      string         `json:"extract_path"     toml:"extract_path"      xml:"extract_path"      yaml:"extract_path"`
+	ArchivePath      string         `json:"archive_path"     toml:"archive_path"      xml:"archive_path"      yaml:"archive_path"`
 	ExtractISOs      bool           `json:"extract_isos"     toml:"extract_isos"      xml:"extract_isos"      yaml:"extract_isos"`
 	DisableRecursion bool           `json:"disableRecursion" toml:"disable_recursion" xml:"disable_recursion" yaml:"disableRecursion"`
 	ExcludePaths     []string       `json:"exclude_paths"    toml:"exclude_paths"     xml:"exclude_path"      yaml:"exclude_paths"`
@@ -80,6 +81,19 @@ type eventData struct {
 
 func (u *Unpackerr) validateFolders() error {
 	for idx := range u.Folders {
+		folder := u.Folders[idx]
+		for label, dir := range map[string]string{
+			"monitor": folder.Path,
+			"output":  folder.ExtractPath,
+			"archive": folder.ArchivePath,
+		} {
+			if strings.TrimSpace(dir) == "" {
+				continue
+			}
+			if err := os.MkdirAll(expandHomedir(dir), 0o755); err != nil {
+				return fmt.Errorf("creating %s directory %s: %w", label, dir, err)
+			}
+		}
 		if u.Folders[idx].DeleteAfter == nil {
 			// If delete after wasn't set, then set it to 10 minutes.
 			u.Folders[idx].DeleteAfter = &cnfg.Duration{Duration: defaultFolderDelete}
@@ -484,10 +498,10 @@ func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
 			}
 			u.removePendingCD2(filepath.Clean(resp.X.Name))
 			u.cd2Resume.Delete(filepath.Clean(resp.X.Name))
+			go u.deleteCachedSource(resp.X.Name, cd2Sources)
 		} else if version, err := sourceVersion("local", resp.X.Name); err == nil {
 			u.markProcessed(version)
 		}
-		go u.deleteCachedSource(resp.X.Name, cd2Sources)
 	}
 
 	folder.updated = resp.Started.Add(resp.Elapsed)
@@ -678,6 +692,10 @@ func (u *Unpackerr) checkFolderStats(now time.Time) {
 			delete(u.folders.Folders, name)
 			u.Printf("[目录任务] 重试次数已用完（%d/%d），停止处理：%s", folder.retries, u.MaxRetries, name)
 		case folder.status > EXTRACTING && folder.config.DeleteAfter.Duration <= 0:
+			if folder.config.ArchivePath != "" {
+				u.deleteAfterReached(name, now, folder)
+				continue
+			}
 			// if DeleteAfter is 0 we don't delete anything. we are done.
 			u.updateQueueStatus(&newStatus{Name: name, Status: DELETED, Resp: nil}, now, false)
 			delete(u.folders.Folders, name)
@@ -690,6 +708,15 @@ func (u *Unpackerr) checkFolderStats(now time.Time) {
 //nolint:wsl_v5
 func (u *Unpackerr) deleteAfterReached(name string, now time.Time, folder *Folder) {
 	var webhook bool
+	if folder.config.ArchivePath != "" {
+		if err := archiveFolderSources(name, folder); err != nil {
+			folder.updated = now
+			u.Errorf("本地原包归档失败，将稍后重试：%s：%v", name, err)
+			return
+		}
+		u.Printf("本地原包已归档：%s -> %s", name, folder.config.ArchivePath)
+		webhook = true
+	}
 	// Folder reached delete delay (after extraction), nuke it.
 	if folder.config.DeleteFiles && !folder.config.MoveBack {
 		u.delChan <- &fileDeleteReq{Paths: []string{strings.TrimRight(name, `/\`) + suffix}}
@@ -710,6 +737,55 @@ func (u *Unpackerr) deleteAfterReached(name string, now time.Time, folder *Folde
 	u.updateQueueStatus(&newStatus{Name: name, Status: DELETED, Resp: nil}, now, webhook)
 	// Folder reached delete delay (after extraction), nuke it.
 	delete(u.folders.Folders, name)
+}
+
+func archiveFolderSources(name string, folder *Folder) error {
+	files := folder.archives.List()
+	if len(files) == 0 {
+		if info, err := os.Stat(name); err == nil && !info.IsDir() {
+			files = []string{name}
+		}
+	}
+	for _, source := range files {
+		if err := archiveSourceFile(source, folder.config.Path, folder.config.ArchivePath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func archiveSourceFile(source, watchRoot, archiveRoot string) error {
+	relative, err := filepath.Rel(watchRoot, source)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		relative = filepath.Base(source)
+	}
+	target := filepath.Join(archiveRoot, relative)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(target); err == nil {
+		target = uniqueArchiveTarget(target)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Rename(source, target); err == nil {
+		return nil
+	}
+	if err := copyStableFile(source, target); err != nil {
+		return err
+	}
+	return os.Remove(source)
+}
+
+func uniqueArchiveTarget(target string) string {
+	extension := filepath.Ext(target)
+	base := strings.TrimSuffix(target, extension)
+	for index := 1; ; index++ {
+		candidate := fmt.Sprintf("%s (%d)%s", base, index, extension)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
 }
 
 type newStatus struct {

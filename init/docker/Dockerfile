@@ -54,14 +54,10 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}-${ITERATION}"
 
 COPY --from=builder /tmp/unpackerr /unpackerr
+COPY init/docker/entrypoint.sh /entrypoint.sh
 # Make sure we have an ssl cert chain and timezone data.
-RUN apk add --no-cache openssl tzdata
+RUN apk add --no-cache openssl tzdata && chmod +x /entrypoint.sh
 
-ENV TZ=UTC \
-    UN_FOLDER_0_PATH=/downloads \
-    UN_FOLDER_0_EXTRACT_PATH=/output \
-    UN_FOLDER_0_MOVE_BACK=false \
-    UN_FOLDER_0_DISABLE_LOG=true \
-    UN_FOLDER_0_DELETE_ORIGINAL=false
+ENV TZ=UTC
 
-ENTRYPOINT [ "/unpackerr" ]
+ENTRYPOINT [ "/entrypoint.sh" ]

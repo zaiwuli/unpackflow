@@ -54,8 +54,34 @@ function ensureNotificationOptions() {
   $('notify-url').closest('.field').insertAdjacentElement('afterend', options);
 }
 
+function ensureLocalSettings() {
+  if ($('local-source-action')) return;
+  const workers = $('workers').closest('.field');
+  if (!workers) return;
+  const block = document.createElement('div');
+  block.id = 'local-settings';
+  block.innerHTML = '<div class="panel-heading" style="margin-top:18px"><div><h3>\u672c\u5730\u76ee\u5f55</h3>' +
+    '<p>\u5b9e\u65f6\u76d1\u542c\u6587\u4ef6\u53d8\u5316\uff0c\u5e76\u7528\u5b9a\u65f6\u626b\u63cf\u9632\u6b62\u6f0f\u4e8b\u4ef6</p>' +
+    '<p id="local-path-summary" style="margin-top:4px"></p></div></div>' +
+    '<label class="field"><span>\u89e3\u538b\u6210\u529f\u540e\u7684\u539f\u5305\u5904\u7406</span><select id="local-source-action">' +
+    '<option value="keep">\u4fdd\u7559\u539f\u5305</option><option value="delete">\u5220\u9664\u539f\u5305</option><option value="archive">\u5f52\u6863\u539f\u5305</option></select></label>' +
+    '<label class="field" id="local-archive-row"><span>\u672c\u5730\u5f52\u6863\u76ee\u5f55</span><input id="local-archive-dir" type="text" placeholder="/data/\u5f52\u6863\u76ee\u5f55"></label>' +
+    '<label class="field"><span>\u8865\u507f\u626b\u63cf\u95f4\u9694</span><input id="folder-interval" type="text" placeholder="60s">' +
+    '<small style="color:var(--muted);font-size:12px">0s \u5173\u95ed\u8865\u507f\u626b\u63cf\uff0c\u5b9e\u65f6\u76d1\u542c\u4ecd\u4fdd\u7559</small></label>';
+  workers.insertAdjacentElement('afterend', block);
+  const select = $('local-source-action');
+  select.style.cssText = 'width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit';
+  select.addEventListener('change', updateLocalArchiveVisibility);
+}
+
+function updateLocalArchiveVisibility() {
+  if (!$('local-source-action')) return;
+  $('local-archive-row').style.display = $('local-source-action').value === 'archive' ? 'flex' : 'none';
+}
+
 function fillForms(data) {
   ensureNotificationOptions();
+  ensureLocalSettings();
   $('notify-enabled').checked = !!data.notification.enabled;
   $('notify-url').value = data.notification.url || '';
   const notifyEvents = data.notification.events || {discovery: true, cache: true, extract: true, complete: true, cleanup: true};
@@ -65,6 +91,12 @@ function fillForms(data) {
   $('notify-complete').checked = !!notifyEvents.complete;
   $('notify-cleanup').checked = !!notifyEvents.cleanup;
   $('workers').value = data.totals.workers || 1;
+  $('local-source-action').value = (data.settings && data.settings.local_source_action) || 'keep';
+  $('local-archive-dir').value = (data.settings && data.settings.local_archive_dir) || '/data/\u5f52\u6863\u76ee\u5f55';
+  $('folder-interval').value = (data.settings && data.settings.folder_interval) || '60s';
+  const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
+  $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
+  updateLocalArchiveVisibility();
   $('cd2-enabled').checked = !!data.clouddrive2.enabled;
   $('cd2-url').value = data.clouddrive2.url || '';
   $('watch-path').value = (data.settings && data.settings.watch_path) || '/';
@@ -220,7 +252,11 @@ $('notify-test').addEventListener('click', async () => {
 
 $('settings-save').addEventListener('click', async () => {
   const body = {
-    workers: Number($('workers').value) || 1, cd2_enabled: $('cd2-enabled').checked,
+    workers: Number($('workers').value) || 1,
+    local_source_action: $('local-source-action').value,
+    local_archive_dir: $('local-archive-dir').value.trim(),
+    folder_interval: $('folder-interval').value.trim(),
+    cd2_enabled: $('cd2-enabled').checked,
     cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),
     watch_path: $('watch-path').value.trim(), refresh_interval: $('refresh-interval').value.trim(),
     refresh_path: $('refresh-path').value.trim(), path_overrides: $('path-overrides').value.split(',').map(item => item.trim()).filter(Boolean),

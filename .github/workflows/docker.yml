@@ -64,14 +64,12 @@ jobs:
 
       - name: Start container
         run: |
-          mkdir -p .smoke/downloads .smoke/output .smoke/cache .smoke/config
+          mkdir -p .smoke/data .smoke/config
           docker run -d --name unpackflow-smoke \
             -p 5656:5656 \
             -e UN_START_DELAY=1s \
             -e UN_FOLDERS_INTERVAL=1s \
-            -v "$PWD/.smoke/downloads:/downloads" \
-            -v "$PWD/.smoke/output:/output" \
-            -v "$PWD/.smoke/cache:/cache" \
+            -v "$PWD/.smoke/data:/data" \
             -v "$PWD/.smoke/config:/config" \
             unpackflow-smoke
 
@@ -87,19 +85,26 @@ jobs:
           docker logs unpackflow-smoke
           exit 1
 
+      - name: Verify automatic data directories
+        run: |
+          test -d .smoke/data/监控目录
+          test -d .smoke/data/解压目录
+          test -d .smoke/data/缓存目录
+          test -d .smoke/data/归档目录
+
       - name: Create ZIP fixture
         run: |
           printf '%s' 'UnpackFlow delivery test' > .smoke/delivery-ok.txt
-          (cd .smoke && zip -q downloads/delivery-test.zip delivery-ok.txt)
-          test -s .smoke/downloads/delivery-test.zip
-          ls -l .smoke/downloads/delivery-test.zip
+          (cd .smoke && zip -q data/监控目录/delivery-test.zip delivery-ok.txt)
+          test -s .smoke/data/监控目录/delivery-test.zip
+          ls -l .smoke/data/监控目录/delivery-test.zip
 
       - name: Verify automatic ZIP extraction
         shell: bash
         run: |
           set +e
           for attempt in $(seq 1 90); do
-            result=$(find .smoke/output -type f -name delivery-ok.txt -print -quit)
+            result=$(find .smoke/data/解压目录 -type f -name delivery-ok.txt -print -quit)
             if [ -n "$result" ]; then
               if grep --fixed-strings 'UnpackFlow delivery test' "$result"; then
                 exit 0

@@ -56,20 +56,23 @@ func normalizeNotification(settings UINotification) UINotification {
 }
 
 type UIOverrides struct {
-	Workers          uint     `json:"workers,omitempty"`
-	CD2Enabled       *bool    `json:"cd2_enabled,omitempty"`
-	CD2URL           string   `json:"cd2_url,omitempty"`
-	CD2Token         string   `json:"cd2_token,omitempty"`
-	RefreshInterval  string   `json:"refresh_interval,omitempty"`
-	RefreshPath      string   `json:"refresh_path,omitempty"`
-	WatchPath        string   `json:"watch_path,omitempty"`
-	PathOverrides    []string `json:"path_overrides,omitempty"`
-	CacheDir         string   `json:"cache_dir,omitempty"`
-	CacheExtractPath string   `json:"cache_extract_path,omitempty"`
-	KeepCache        *bool    `json:"keep_cache,omitempty"`
-	DeleteSource     *bool    `json:"delete_source,omitempty"`
-	CacheDeleteDelay string   `json:"cache_delete_delay,omitempty"`
-	CopyTimeout      string   `json:"copy_timeout,omitempty"`
+	Workers           uint     `json:"workers,omitempty"`
+	LocalSourceAction string   `json:"local_source_action,omitempty"`
+	LocalArchiveDir   string   `json:"local_archive_dir,omitempty"`
+	FolderInterval    string   `json:"folder_interval,omitempty"`
+	CD2Enabled        *bool    `json:"cd2_enabled,omitempty"`
+	CD2URL            string   `json:"cd2_url,omitempty"`
+	CD2Token          string   `json:"cd2_token,omitempty"`
+	RefreshInterval   string   `json:"refresh_interval,omitempty"`
+	RefreshPath       string   `json:"refresh_path,omitempty"`
+	WatchPath         string   `json:"watch_path,omitempty"`
+	PathOverrides     []string `json:"path_overrides,omitempty"`
+	CacheDir          string   `json:"cache_dir,omitempty"`
+	CacheExtractPath  string   `json:"cache_extract_path,omitempty"`
+	KeepCache         *bool    `json:"keep_cache,omitempty"`
+	DeleteSource      *bool    `json:"delete_source,omitempty"`
+	CacheDeleteDelay  string   `json:"cache_delete_delay,omitempty"`
+	CopyTimeout       string   `json:"copy_timeout,omitempty"`
 }
 
 func (u *Unpackerr) loadUIStore() error {
@@ -95,6 +98,7 @@ func (u *Unpackerr) loadUIStore() error {
 	if store.Overrides.Workers > 0 {
 		u.Parallel = store.Overrides.Workers
 	}
+	u.applyLocalUIOverrides(store.Overrides)
 	if store.Overrides.CD2Enabled != nil {
 		u.CloudDrive2.Enabled = *store.Overrides.CD2Enabled
 	}
@@ -225,6 +229,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	enabled, keepCache, deleteSource := u.CloudDrive2.Enabled, u.CloudDrive2.KeepCache, u.CloudDrive2.DeleteSource
 	settings := UIOverrides{
 		Workers:          u.Parallel,
+		FolderInterval:   u.Folder.Interval.Duration.String(),
 		CD2Enabled:       &enabled,
 		CD2URL:           u.CloudDrive2.URL,
 		RefreshInterval:  u.CloudDrive2.RefreshInterval.Duration.String(),
@@ -238,6 +243,10 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		CacheDeleteDelay: u.CloudDrive2.CacheDeleteDelay.Duration.String(),
 		CopyTimeout:      u.CloudDrive2.CopyTimeout.Duration.String(),
 	}
+	if folder := u.localFolder(); folder != nil {
+		settings.LocalSourceAction = localSourceAction(folder)
+		settings.LocalArchiveDir = folder.ArchivePath
+	}
 	if u.uiStore == nil {
 		return settings
 	}
@@ -246,6 +255,15 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	u.uiStore.mu.RUnlock()
 	if overrides.Workers > 0 {
 		settings.Workers = overrides.Workers
+	}
+	if overrides.LocalSourceAction != "" {
+		settings.LocalSourceAction = overrides.LocalSourceAction
+	}
+	if overrides.LocalArchiveDir != "" {
+		settings.LocalArchiveDir = overrides.LocalArchiveDir
+	}
+	if overrides.FolderInterval != "" {
+		settings.FolderInterval = overrides.FolderInterval
 	}
 	if overrides.CD2Enabled != nil {
 		settings.CD2Enabled = overrides.CD2Enabled
@@ -284,6 +302,55 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		settings.CopyTimeout = overrides.CopyTimeout
 	}
 	return settings
+}
+
+func (u *Unpackerr) localFolder() *FolderConfig {
+	for _, folder := range u.Folders {
+		if folder != nil && !folder.ExternalOnly {
+			return folder
+		}
+	}
+	return nil
+}
+
+func localSourceAction(folder *FolderConfig) string {
+	if folder == nil {
+		return "keep"
+	}
+	if strings.TrimSpace(folder.ArchivePath) != "" {
+		return "archive"
+	}
+	if folder.DeleteOrig {
+		return "delete"
+	}
+	return "keep"
+}
+
+func (u *Unpackerr) applyLocalUIOverrides(overrides UIOverrides) {
+	if overrides.FolderInterval != "" {
+		if duration, err := time.ParseDuration(overrides.FolderInterval); err == nil && duration >= 0 {
+			u.Folder.Interval.Duration = duration
+		}
+	}
+	folder := u.localFolder()
+	if folder == nil {
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(overrides.LocalSourceAction))
+	switch action {
+	case "delete":
+		folder.DeleteOrig = true
+		folder.ArchivePath = ""
+	case "archive":
+		folder.DeleteOrig = false
+		folder.ArchivePath = strings.TrimSpace(overrides.LocalArchiveDir)
+		if folder.ArchivePath == "" {
+			folder.ArchivePath = strings.TrimSpace(os.Getenv("UN_LOCAL_ARCHIVE_DIR"))
+		}
+	case "keep":
+		folder.DeleteOrig = false
+		folder.ArchivePath = ""
+	}
 }
 func (u *Unpackerr) saveNotification(s UINotification) error {
 	s = normalizeNotification(s)

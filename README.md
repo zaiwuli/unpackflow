@@ -4,12 +4,12 @@ UnpackFlow 是面向群晖 NAS 的轻量自动解压服务，基于 Unpackerr �
 
 ## 功能
 
-- 监控本地目录，自动识别并解压 ZIP、RAR、7z、TAR、GZ、BZ2、XZ、ISO 及常见分卷。
-- CloudDrive2 使用 gRPC-Web + Token 直连，不依赖 Webhook。
-- CD2 压缩包先复制到本地缓存，复制完成后才开始解压。
-- 支持设置 CD2 监控路径、路径映射、定时刷新和缓存保留策略。
-- 中文任务页、历史记录、密码、通知、设置和日志页面。
-- 支持群辉通知插件 / MoviePilot Webhook。
+- 自动监控本地目录，支持 ZIP、RAR、7z、TAR、GZ、BZ2、XZ、ISO 和常见分卷。
+- 本地监控同时使用实时文件事件与定期补偿扫描。
+- 本地压缩包解压成功后可选择保留、删除或移动到归档目录。
+- CloudDrive2 使用 gRPC-Web + Token 直连，新压缩包先复制到本地缓存，完整落盘后再解压。
+- CD2 缓存和云端原包分别设置保留或删除，不影响本地监控目录的文件。
+- 提供中文任务、历史、密码、通知、日志和设置界面。
 - 仅发布 Docker 镜像，支持 `linux/amd64` 和 `linux/arm64`。
 
 ## 群晖部署
@@ -23,29 +23,39 @@ services:
     environment:
       TZ: Asia/Shanghai
     volumes:
-      - /volume2/解压目录/监控目录:/downloads
-      - /volume2/解压目录/输出目录:/output
-      - /volume2/解压目录/缓存目录:/cache
+      - /volume2/解压目录:/data
       - /volume1/CloudNAS/CloudDrive:/volume1/CloudNAS/CloudDrive
       - /volume1/docker/unpackflow:/config
     ports:
       - 8066:5656
 ```
 
+只需挂载一个本地数据目录。首次启动时会自动创建：
+
+```text
+/volume2/解压目录/
+  监控目录/
+  解压目录/
+  缓存目录/
+  归档目录/
+```
+
+容器内对应 `/data/监控目录`、`/data/解压目录`、`/data/缓存目录` 和 `/data/归档目录`。
+
+旧版 `/downloads`、`/output`、`/cache` 独立挂载方式仍然兼容。新部署建议使用 `/data` 单目录挂载。
+
 启动后访问：`http://群晖IP:8066`
 
-首次使用时，在“设置”页面填写 CloudDrive2 地址、Token 和监控路径；在“通知”页面填写通知地址并测试。
+## 设置说明
 
-## 目录说明
+- “本地目录”可选择原包保留、删除或归档；补偿扫描默认每 `60s` 执行一次。
+- `0s` 仅关闭定期补偿扫描，实时文件事件监听仍然开启。
+- “CloudDrive2 直连”中的删除云端原包只作用于 CD2 缓存任务，不会删除本地监控目录中的文件。
+- 设置保存后重启容器生效。
 
-- `/downloads`：本地监控目录。
-- `/output`：解压输出目录。
-- `/cache`：CD2 本地缓存目录。
-- `/config`：配置、密码、历史和日志文件。
+## 镜像
 
-## 构建状态
-
-推送到 `main` 分支后，GitHub Actions 会自动构建并发布：
+推送到 `main` 后，GitHub Actions 自动构建并发布：
 
 ```text
 ghcr.io/zaiwuli/unpackflow:latest

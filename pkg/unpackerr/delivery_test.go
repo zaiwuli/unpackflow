@@ -186,19 +186,22 @@ func TestUISettingsPersistAcrossRestart(t *testing.T) {
 	}
 	enabled, keep, deleteSource := true, true, false
 	overrides := UIOverrides{
-		Workers:          2,
-		CD2Enabled:       &enabled,
-		CD2URL:           "http://192.168.31.2:19798",
-		CD2Token:         "secret-token",
-		WatchPath:        "/115open/上传下载",
-		RefreshPath:      "/115open/上传下载",
-		RefreshInterval:  "15m",
-		PathOverrides:    []string{"/115open=>/mnt/cd2/115open"},
-		CacheDir:         "/cache",
-		CacheExtractPath: "/output",
-		KeepCache:        &keep,
-		DeleteSource:     &deleteSource,
-		CacheDeleteDelay: "2m",
+		Workers:           2,
+		LocalSourceAction: "archive",
+		LocalArchiveDir:   "/archive",
+		FolderInterval:    "30s",
+		CD2Enabled:        &enabled,
+		CD2URL:            "http://192.168.31.2:19798",
+		CD2Token:          "secret-token",
+		WatchPath:         "/115open/上传下载",
+		RefreshPath:       "/115open/上传下载",
+		RefreshInterval:   "15m",
+		PathOverrides:     []string{"/115open=>/mnt/cd2/115open"},
+		CacheDir:          "/cache",
+		CacheExtractPath:  "/output",
+		KeepCache:         &keep,
+		DeleteSource:      &deleteSource,
+		CacheDeleteDelay:  "2m",
 	}
 	if err := u.saveUIOverrides(overrides); err != nil {
 		t.Fatal(err)
@@ -218,11 +221,18 @@ func TestUISettingsPersistAcrossRestart(t *testing.T) {
 
 	restarted := New()
 	restarted.ConfigFile = configPath
+	restarted.Folders = []*FolderConfig{{Path: "/downloads", ExtractPath: "/output"}}
 	if err := restarted.loadUIStore(); err != nil {
 		t.Fatal(err)
 	}
 	if restarted.Parallel != 3 || !restarted.CloudDrive2.Enabled || restarted.CloudDrive2.WatchPath != overrides.WatchPath {
 		t.Fatalf("settings were not restored: %#v", restarted.uiSettings())
+	}
+	if restarted.Folder.Interval.Duration != 30*time.Second {
+		t.Fatalf("folder interval was not restored: %v", restarted.Folder.Interval.Duration)
+	}
+	if folder := restarted.localFolder(); folder == nil || folder.ArchivePath != "/archive" || folder.DeleteOrig {
+		t.Fatalf("local archive policy was not restored: %#v", folder)
 	}
 	if restarted.CloudDrive2.Token != "secret-token" {
 		t.Fatal("CD2 token was not restored")

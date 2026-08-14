@@ -110,6 +110,28 @@ func TestFoldersProcessEventCurrentBehavior(t *testing.T) {
 	}
 }
 
+func TestArchiveSourceFileMovesLocalOriginal(t *testing.T) {
+	watch := t.TempDir()
+	archive := t.TempDir()
+	source := filepath.Join(watch, "nested", "release.zip")
+	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := archiveSourceFile(source, watch, archive); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(archive, "nested", "release.zip")
+	if _, err := os.Stat(moved); err != nil {
+		t.Fatalf("archived file missing: %v", err)
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatalf("source file still exists: %v", err)
+	}
+}
+
 func TestLocalWatchedZipDetectionAndExtraction(t *testing.T) {
 	t.Parallel()
 

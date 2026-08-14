@@ -120,6 +120,7 @@ func New() *Unpackerr {
 		progChan:       make(chan *ExtractProgress),
 		menu:           make(map[string]ui.MenuItem),
 		Config: &Config{
+			Folder:      FoldersConfig{Interval: cnfg.Duration{Duration: time.Minute}},
 			KeepHistory: defaultHistory,
 			LogQueues:   cnfg.Duration{Duration: time.Minute + time.Second},
 			MaxRetries:  defaultMaxRetries,

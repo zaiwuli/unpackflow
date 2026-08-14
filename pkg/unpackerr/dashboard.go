@@ -325,6 +325,24 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 	if overrides.Workers > 0 {
 		u.Parallel = overrides.Workers
 	}
+	switch overrides.LocalSourceAction {
+	case "", "keep", "delete":
+	case "archive":
+		if strings.TrimSpace(overrides.LocalArchiveDir) == "" {
+			http.Error(w, "选择归档原包时必须填写归档目录", http.StatusBadRequest)
+			return
+		}
+	default:
+		http.Error(w, "本地原包处理方式无效", http.StatusBadRequest)
+		return
+	}
+	if overrides.FolderInterval != "" {
+		duration, err := time.ParseDuration(overrides.FolderInterval)
+		if err != nil || duration < 0 {
+			http.Error(w, "补偿扫描间隔格式无效，例如：1s、30s、2m；填写 0s 可关闭补偿扫描", http.StatusBadRequest)
+			return
+		}
+	}
 	if overrides.CopyTimeout != "" {
 		duration, err := time.ParseDuration(overrides.CopyTimeout)
 		if err != nil || duration <= 0 {

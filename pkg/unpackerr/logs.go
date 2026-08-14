@@ -173,15 +173,11 @@ func (l *Logger) Errorf(msg string, v ...any) {
 	}
 }
 
-// logCurrentQueue prints the number of things happening.
+// logCurrentQueue only refreshes internal/tray counters. Task state changes
+// produce their own logs, so periodic summaries would only add noise.
 func (u *Unpackerr) logCurrentQueue(now time.Time) {
 	stats := u.stats()
 	_ = now
-	if stats.Waiting+stats.Queued+stats.Extracting+stats.Extracted+stats.Failed == 0 {
-		return
-	}
-	u.Printf("任务概览：等待 %d，排队 %d，解压中 %d，已完成 %d，失败 %d",
-		stats.Waiting, stats.Queued, stats.Extracting, stats.Extracted, stats.Failed)
 	u.updateTray(stats, uint(len(u.folders.Events)+len(u.updates)+len(u.folders.Updates)+len(u.delChan)+len(u.hookChan)))
 }
 

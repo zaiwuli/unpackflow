@@ -6,9 +6,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
-      - /volume2/解压目录/监控目录:/downloads
-      - /volume2/解压目录/输出目录:/output
-      - /volume2/解压目录/缓存目录:/cache
+      - /volume2/解压目录:/data
       - /volume1/CloudNAS/CloudDrive:/volume1/CloudNAS/CloudDrive
       - /volume1/docker/unpackflow:/config
     ports:

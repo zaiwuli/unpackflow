@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+if grep -qs ' /data ' /proc/mounts; then
+    : "${UN_DATA_DIR:=/data}"
+    : "${UN_FOLDER_0_PATH:=${UN_DATA_DIR}/监控目录}"
+    : "${UN_FOLDER_0_EXTRACT_PATH:=${UN_DATA_DIR}/解压目录}"
+    : "${UN_CLOUDDRIVE2_CACHE_DIR:=${UN_DATA_DIR}/缓存目录}"
+    : "${UN_CLOUDDRIVE2_CACHE_EXTRACT_PATH:=${UN_DATA_DIR}/解压目录}"
+    : "${UN_LOCAL_ARCHIVE_DIR:=${UN_DATA_DIR}/归档目录}"
+else
+    : "${UN_FOLDER_0_PATH:=/downloads}"
+    : "${UN_FOLDER_0_EXTRACT_PATH:=/output}"
+    : "${UN_CLOUDDRIVE2_CACHE_DIR:=/cache}"
+    : "${UN_CLOUDDRIVE2_CACHE_EXTRACT_PATH:=/output}"
+    : "${UN_LOCAL_ARCHIVE_DIR:=/archive}"
+fi
+
+: "${UN_FOLDER_0_MOVE_BACK:=false}"
+: "${UN_FOLDER_0_DISABLE_LOG:=true}"
+: "${UN_FOLDER_0_DELETE_ORIGINAL:=false}"
+: "${UN_FOLDERS_INTERVAL:=60s}"
+
+export UN_DATA_DIR UN_FOLDER_0_PATH UN_FOLDER_0_EXTRACT_PATH
+export UN_CLOUDDRIVE2_CACHE_DIR UN_CLOUDDRIVE2_CACHE_EXTRACT_PATH
+export UN_LOCAL_ARCHIVE_DIR UN_FOLDER_0_MOVE_BACK UN_FOLDER_0_DISABLE_LOG
+export UN_FOLDER_0_DELETE_ORIGINAL UN_FOLDERS_INTERVAL
+
+mkdir -p "$UN_FOLDER_0_PATH" "$UN_FOLDER_0_EXTRACT_PATH" \
+    "$UN_CLOUDDRIVE2_CACHE_DIR" "$UN_LOCAL_ARCHIVE_DIR" /config
+
+exec /unpackerr "$@"
