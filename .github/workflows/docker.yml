@@ -94,6 +94,7 @@ jobs:
 
       - name: Create ZIP fixture
         run: |
+          sudo chown -R "$(id -u):$(id -g)" .smoke/data
           printf '%s' 'UnpackFlow delivery test' > .smoke/delivery-ok.txt
           (cd .smoke && zip -q data/监控目录/delivery-test.zip delivery-ok.txt)
           test -s .smoke/data/监控目录/delivery-test.zip
