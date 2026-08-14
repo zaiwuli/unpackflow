@@ -40,6 +40,15 @@ func TestDockerDefaultFolderEnvironment(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacyDataPathsForSingleDataMount(t *testing.T) {
+	t.Setenv("UN_DATA_DIR", "/data")
+	settings := UIOverrides{CacheDir: "/cache", CacheExtractPath: "/output", LocalArchiveDir: "/archive"}
+	migrateLegacyDataPaths(&settings)
+	if settings.CacheDir != filepath.Join("/data", "缓存目录") || settings.CacheExtractPath != filepath.Join("/data", "解压目录") || settings.LocalArchiveDir != filepath.Join("/data", "归档目录") {
+		t.Fatalf("legacy paths not migrated: %#v", settings)
+	}
+}
+
 func TestFolderPollerDetectsRootZipCreatedAfterStart(t *testing.T) {
 	t.Parallel()
 

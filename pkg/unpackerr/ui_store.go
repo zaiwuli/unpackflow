@@ -93,6 +93,7 @@ func (u *Unpackerr) loadUIStore() error {
 		return fmt.Errorf("ui state: %w", err)
 	}
 	store.Path = filepath.Join(base, "unpackflow-ui.json")
+	migrateLegacyDataPaths(&store.Overrides)
 	if len(store.Passwords) == 0 && len(u.Passwords) > 0 {
 		store.Passwords = append([]string(nil), u.Passwords...)
 	}
@@ -149,6 +150,24 @@ func (u *Unpackerr) loadUIStore() error {
 	}
 	u.uiStore = store
 	return nil
+}
+
+// migrateLegacyDataPaths keeps existing UI settings usable after changing from
+// separate /downloads, /output and /cache mounts to the single /data mount.
+func migrateLegacyDataPaths(settings *UIOverrides) {
+	dataRoot := strings.TrimSpace(os.Getenv("UN_DATA_DIR"))
+	if dataRoot == "" || settings == nil {
+		return
+	}
+	if settings.CacheDir == "/cache" {
+		settings.CacheDir = filepath.Join(dataRoot, "缓存目录")
+	}
+	if settings.CacheExtractPath == "/output" {
+		settings.CacheExtractPath = filepath.Join(dataRoot, "解压目录")
+	}
+	if settings.LocalArchiveDir == "/archive" {
+		settings.LocalArchiveDir = filepath.Join(dataRoot, "归档目录")
+	}
 }
 func (u *Unpackerr) saveUIStore() error {
 	if u.uiStore == nil {
