@@ -89,6 +89,7 @@ func (u *Unpackerr) startWebServer() {
 
 func (u *Unpackerr) webRoutes() {
 	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/"), u.dashboardPage)
+	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/icon.svg"), u.dashboardIcon)
 	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/health"), u.healthAPI)
 	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/api/status"), u.dashboardAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/passwords"), u.passwordAPI)

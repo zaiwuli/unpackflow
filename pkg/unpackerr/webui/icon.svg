@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="UnpackFlow">
+  <rect width="64" height="64" rx="15" fill="#101828"/>
+  <path d="M15.5 27.5h33l4.5 9.2v11.8a5 5 0 0 1-5 5H16a5 5 0 0 1-5-5V36.7l4.5-9.2Z" fill="#fff" fill-opacity=".08" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M12 37h12l3.5 5h9l3.5-5h12" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M32 10v23m0 0-8-8m8 8 8-8" fill="none" stroke="#5B8CFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

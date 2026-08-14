@@ -734,6 +734,7 @@ func (u *Unpackerr) updateQueueStatus(data *newStatus, now time.Time, sendHook b
 		}
 
 		u.Map[data.Name].XProg = &ExtractProgress{Extract: u.Map[data.Name]}
+		u.clearCD2TransferForCachedPath(data.Name)
 
 		if sendHook {
 			u.runAllHooks(u.Map[data.Name])

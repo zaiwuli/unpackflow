@@ -249,3 +249,53 @@ func TestPendingCD2ForFilesReturnsMatchingRetry(t *testing.T) {
 		t.Fatalf("matching retry not found: %#v, %v", pending, ok)
 	}
 }
+
+func TestCD2TransferAppearsInUnifiedTaskListImmediately(t *testing.T) {
+	u := New()
+	mapped := filepath.Join(t.TempDir(), "new-cloud.7z")
+	key := u.beginCD2EventTask([]string{mapped}, "/115open/new-cloud.7z")
+	if key == "" {
+		t.Fatal("CD2 event did not create a task")
+	}
+	snapshot := u.dashboardSnapshot()
+	if len(snapshot.Tasks) != 1 {
+		t.Fatalf("expected one unified task, got %#v", snapshot.Tasks)
+	}
+	if snapshot.Tasks[0].Name != "new-cloud.7z" || snapshot.Tasks[0].Status != "等待文件可见" || snapshot.Tasks[0].Source != "CloudDrive2" {
+		t.Fatalf("unexpected CD2 task: %#v", snapshot.Tasks[0])
+	}
+}
+
+func TestIncompleteCD2VolumeRemainsVisible(t *testing.T) {
+	dir := t.TempDir()
+	third := filepath.Join(dir, "release.7z.003")
+	if err := os.WriteFile(third, []byte("incomplete"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := New()
+	if submitted := u.cacheCloudDrivePaths([]string{third}); submitted != 0 {
+		t.Fatalf("incomplete volume unexpectedly submitted: %d", submitted)
+	}
+	key := cloudDriveTaskKey(third)
+	value, exists := u.cd2Tasks.Load(key)
+	if !exists {
+		t.Fatal("incomplete CD2 volume disappeared from the task list")
+	}
+	transfer, ok := value.(*CD2Transfer)
+	if !ok || transfer == nil || transfer.Error == "" {
+		t.Fatalf("incomplete CD2 task has no actionable error: %#v", value)
+	}
+}
+
+func TestCD2TransferClearsWhenCachedTaskQueues(t *testing.T) {
+	u := New()
+	cached := filepath.Join(t.TempDir(), "queued.zip")
+	key := cloudDriveTaskKey(cached)
+	u.updateCD2Transfer(key, cached, "排队中", func(transfer *CD2Transfer) {
+		transfer.CachedPath = cached
+	})
+	u.clearCD2TransferForCachedPath(cached)
+	if _, exists := u.cd2Tasks.Load(key); exists {
+		t.Fatal("copy phase remained after extraction task entered the queue")
+	}
+}

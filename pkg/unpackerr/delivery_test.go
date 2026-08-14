@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -577,6 +578,25 @@ func TestDashboardLogKind(t *testing.T) {
 	} {
 		if got := dashboardLogKind(test.message); got != test.want {
 			t.Fatalf("dashboardLogKind(%q) = %q, want %q", test.message, got, test.want)
+		}
+	}
+}
+
+func TestDebugAndExplicitSystemLogsNeverEnterUserLog(t *testing.T) {
+	logger := &Logger{
+		Info:  log.New(io.Discard, "", 0),
+		Error: log.New(io.Discard, "", 0),
+		Debug: log.New(io.Discard, "", 0),
+	}
+	logger.Debugf("CloudDrive2 实时推送：收到文件变化")
+	logger.Systemf("CloudDrive2 文件变化触发任务：test.7z")
+	logs := logger.dashboardLogs()
+	if len(logs) != 2 {
+		t.Fatalf("unexpected log count: %d", len(logs))
+	}
+	for _, item := range logs {
+		if item.Kind != "system" {
+			t.Fatalf("diagnostic log leaked into user log: %#v", item)
 		}
 	}
 }

@@ -17,22 +17,87 @@ import (
 )
 
 type CD2Transfer struct {
-	Key       string    `json:"key"`
-	Path      string    `json:"path"`
-	State     string    `json:"state"`
-	Bytes     int64     `json:"bytes"`
-	Total     int64     `json:"total"`
-	StartedAt time.Time `json:"started_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Speed     int64     `json:"speed"`
-	ETA       int64     `json:"eta_seconds"`
-	Error     string    `json:"error,omitempty"`
+	Key        string    `json:"key"`
+	Path       string    `json:"path"`
+	CachedPath string    `json:"cached_path,omitempty"`
+	State      string    `json:"state"`
+	Bytes      int64     `json:"bytes"`
+	Total      int64     `json:"total"`
+	StartedAt  time.Time `json:"started_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	Speed      int64     `json:"speed"`
+	ETA        int64     `json:"eta_seconds"`
+	Error      string    `json:"error,omitempty"`
 }
 
 var (
 	rawRARVolume   = regexp.MustCompile(`(?i)^(.*?)(?:\.part\d+\.rar|\.rar|\.r\d{2})$`)
 	sevenZipVolume = regexp.MustCompile(`(?i)^(.*?\.7z)\.\d{3}$`)
 )
+
+func isCloudDriveArchiveEvent(file string) bool {
+	name := filepath.Base(file)
+	return xtractr.IsArchiveFile(name) || rawRARVolume.MatchString(name) || sevenZipVolume.MatchString(name)
+}
+
+func cloudDriveTaskKey(source string) string {
+	clean := filepath.Clean(source)
+	name, dir := filepath.Base(clean), filepath.Dir(clean)
+	key := strings.ToLower(name)
+	if groups := sevenZipVolume.FindStringSubmatch(name); len(groups) > 0 {
+		key = strings.ToLower(groups[1])
+	} else if groups := rawRARVolume.FindStringSubmatch(name); len(groups) > 0 {
+		key = strings.ToLower(groups[1])
+	}
+	return filepath.Join(dir, key)
+}
+
+func (u *Unpackerr) updateCD2Transfer(key, source, state string, update func(*CD2Transfer)) {
+	now := time.Now()
+	transfer := &CD2Transfer{Key: key, Path: source, State: state, StartedAt: now, UpdatedAt: now}
+	if current, ok := u.cd2Tasks.Load(key); ok {
+		if existing, valid := current.(*CD2Transfer); valid && existing != nil {
+			copy := *existing
+			transfer = &copy
+			transfer.Path = source
+			transfer.State = state
+			transfer.UpdatedAt = now
+			transfer.Error = ""
+		}
+	}
+	if update != nil {
+		update(transfer)
+	}
+	u.cd2Tasks.Store(key, transfer)
+}
+
+func (u *Unpackerr) beginCD2EventTask(paths []string, remotePath string) string {
+	for _, mapped := range paths {
+		if !isCloudDriveArchiveEvent(mapped) {
+			continue
+		}
+		key := cloudDriveTaskKey(mapped)
+		u.updateCD2Transfer(key, mapped, "等待文件可见", nil)
+		return key
+	}
+	if isCloudDriveArchiveEvent(remotePath) {
+		key := "remote|" + strings.ToLower(filepath.ToSlash(filepath.Clean(remotePath)))
+		u.updateCD2Transfer(key, remotePath, "等待文件可见", nil)
+		return key
+	}
+	return ""
+}
+
+func (u *Unpackerr) clearCD2TransferForCachedPath(cachedPath string) {
+	clean := filepath.Clean(cachedPath)
+	u.cd2Tasks.Range(func(key, value any) bool {
+		transfer, ok := value.(*CD2Transfer)
+		if ok && transfer != nil && transfer.CachedPath != "" && filepath.Clean(transfer.CachedPath) == clean {
+			u.cd2Tasks.Delete(key)
+		}
+		return true
+	})
+}
 
 // validateCloudDriveCache creates an internal watched folder for cached CD2
 // archives. Regular watched folders exclude this directory, preventing cache
@@ -123,13 +188,16 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 	}
 	submitted := 0
 	for _, source := range paths {
-		if !xtractr.IsArchiveFile(filepath.Base(source)) {
-			u.Debugf("CloudDrive2 补扫跳过非压缩文件：%s", source)
+		if !isCloudDriveArchiveEvent(source) {
 			continue
 		}
+		candidateKey := cloudDriveTaskKey(source)
+		u.updateCD2Transfer(candidateKey, source, "检查文件完整性", nil)
 		files, groupKey, err := archiveVolumeGroup(source)
 		if err != nil {
-			u.Errorf("CloudDrive2 缓存扫描失败 %s：%v", source, err)
+			u.updateCD2Transfer(candidateKey, source, "等待文件完整", func(transfer *CD2Transfer) {
+				transfer.Error = err.Error()
+			})
 			continue
 		}
 		version, err := sourceGroupVersion("cd2", files)
@@ -141,24 +209,30 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 		}
 		if version.Key != "" && u.wasProcessed(version) {
 			u.Debugf("CloudDrive2 压缩包已有成功记录，跳过：%s", source)
+			u.cd2Tasks.Delete(groupKey)
 			continue
 		}
 		if pending, exists := u.pendingCD2ForFiles(files); exists {
 			if pending.CachedPrimary != "" {
 				u.Debugf("CloudDrive2 压缩包已缓存，正在等待解压：%s", source)
+				u.updateCD2Transfer(groupKey, source, "排队中", func(transfer *CD2Transfer) {
+					transfer.CachedPath = pending.CachedPrimary
+				})
 				continue
 			}
 			if pending.NextAttempt.After(time.Now()) {
-				u.Printf("CloudDrive2 复制等待重试：%s，下次尝试 %s", source, pending.NextAttempt.Format("2006-01-02 15:04:05"))
+				u.updateCD2Transfer(groupKey, source, "复制失败，等待重试", func(transfer *CD2Transfer) {
+					transfer.Error = pending.LastError
+				})
 				continue
 			}
 			u.removePendingCD2(pending.Key)
 		}
 		if _, loaded := u.cd2Copy.LoadOrStore(groupKey, struct{}{}); loaded {
-			u.Debugf("CloudDrive2 已有相同复制任务运行：%s", source)
 			continue
 		}
-		u.Printf("CloudDrive2 已提交复制任务：%d 个文件，来源 %s", len(files), source)
+		u.updateCD2Transfer(groupKey, source, "准备复制到缓存", nil)
+		u.Systemf("CloudDrive2 文件变化触发任务：%s", source)
 		cachedPrimary := filepath.Join(u.CloudDrive2.CacheDir, filepath.Base(archivePrimary(files)))
 		u.cd2Notice.Store(filepath.Clean(cachedPrimary), struct{}{})
 		u.notifyEvent(notifyDiscovery, "📦", "发现压缩包", "CloudDrive2", source)
@@ -167,6 +241,9 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 			defer u.cd2Copy.Delete(groupKey)
 			if err := u.cacheCloudDriveGroup(files, groupKey); err != nil {
 				u.Errorf("CloudDrive2 复制失败，将进入重试：%v", err)
+				u.updateCD2Transfer(groupKey, archivePrimary(files), "复制失败，等待重试", func(transfer *CD2Transfer) {
+					transfer.Error = err.Error()
+				})
 				u.queueCD2Retry(groupKey, files, err)
 			}
 		}(files, groupKey)
@@ -309,6 +386,11 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), u.CloudDrive2.CopyTimeout.Duration)
 	defer cancel()
 	startedAt := time.Now()
+	if current, ok := u.cd2Tasks.Load(key); ok {
+		if transfer, valid := current.(*CD2Transfer); valid && transfer != nil && !transfer.StartedAt.IsZero() {
+			startedAt = transfer.StartedAt
+		}
+	}
 	totalBytes, existingBytes, err := cacheGroupSpace(files, staging)
 	if err != nil {
 		return err
@@ -316,8 +398,11 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	if free, spaceErr := freeSpace(staging); spaceErr == nil && free < uint64(totalBytes-existingBytes) {
 		return fmt.Errorf("缓存空间不足：还需 %d 字节，可用 %d 字节", totalBytes-existingBytes, free)
 	}
-	u.cd2Tasks.Store(key, &CD2Transfer{Key: key, Path: files[0], State: "正在缓存", Bytes: existingBytes, Total: totalBytes, StartedAt: startedAt, UpdatedAt: startedAt})
-	defer u.cd2Tasks.Delete(key)
+	u.updateCD2Transfer(key, archivePrimary(files), "正在复制到缓存", func(transfer *CD2Transfer) {
+		transfer.Bytes = existingBytes
+		transfer.Total = totalBytes
+		transfer.StartedAt = startedAt
+	})
 
 	completedBefore := int64(0)
 	newBytesBefore := int64(0)
@@ -337,7 +422,13 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 			if speed > 0 {
 				eta = (totalBytes - copied) / speed
 			}
-			u.cd2Tasks.Store(key, &CD2Transfer{Key: key, Path: source, State: "正在缓存", Bytes: copied, Total: totalBytes, StartedAt: startedAt, UpdatedAt: time.Now(), Speed: speed, ETA: eta})
+			u.updateCD2Transfer(key, archivePrimary(files), "正在复制到缓存", func(transfer *CD2Transfer) {
+				transfer.Bytes = copied
+				transfer.Total = totalBytes
+				transfer.StartedAt = startedAt
+				transfer.Speed = speed
+				transfer.ETA = eta
+			})
 		}); err != nil {
 			return err
 		}
@@ -346,7 +437,13 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 			newBytesBefore += max(info.Size()-initialDone, 0)
 		}
 	}
-	u.cd2Tasks.Store(key, &CD2Transfer{Key: key, Path: files[0], State: "正在校验", Bytes: totalBytes, Total: totalBytes, StartedAt: startedAt, UpdatedAt: time.Now()})
+	u.updateCD2Transfer(key, archivePrimary(files), "正在校验缓存", func(transfer *CD2Transfer) {
+		transfer.Bytes = totalBytes
+		transfer.Total = totalBytes
+		transfer.StartedAt = startedAt
+		transfer.Speed = 0
+		transfer.ETA = 0
+	})
 	if err := verifyCopiedGroup(files, staging); err != nil {
 		return err
 	}
@@ -373,6 +470,13 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	version, _ := sourceGroupVersion("cd2", files)
 	version.CachedAt = time.Now()
 	u.savePendingCD2(PendingCD2{Key: filepath.Clean(primaryPath), Files: append([]string(nil), files...), CachedPrimary: primaryPath, Version: version})
+	u.updateCD2Transfer(key, archivePrimary(files), "排队中", func(transfer *CD2Transfer) {
+		transfer.CachedPath = primaryPath
+		transfer.Bytes = totalBytes
+		transfer.Total = totalBytes
+		transfer.Speed = 0
+		transfer.ETA = 0
+	})
 	u.cd2Resume.Store(filepath.Clean(primaryPath), struct{}{})
 	u.folders.InjectFileEvent(primaryPath, "cd2 cache ready")
 	u.Printf("CloudDrive2 缓存完成：已复制 %d 个文件到 %s", len(files), finalDir)

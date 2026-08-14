@@ -20,6 +20,27 @@ function renderList(element, values, render, empty) {
   element.innerHTML = values && values.length ? values.map(render).join('') : `<p class="empty">${empty}</p>`;
 }
 
+function ensureBrandIcon() {
+  if (document.querySelector('.brand-icon')) return;
+  const title = document.querySelector('.topbar > div:first-child');
+  if (!title) return;
+  const text = document.createElement('div');
+  while (title.firstChild) text.appendChild(title.firstChild);
+  const icon = document.createElement('img');
+  icon.className = 'brand-icon';
+  icon.src = 'icon.svg';
+  icon.alt = 'UnpackFlow';
+  icon.width = 46;
+  icon.height = 46;
+  icon.style.cssText = 'display:block;flex:0 0 auto;border-radius:11px;box-shadow:0 8px 20px #10182824';
+  title.style.cssText = 'display:flex;align-items:center;gap:12px';
+  title.append(icon, text);
+  const favicon = document.createElement('link');
+  favicon.rel = 'icon';
+  favicon.href = 'icon.svg';
+  document.head.appendChild(favicon);
+}
+
 function ensureNotificationOptions() {
   if ($('notify-options')) return;
   const options = document.createElement('div');
@@ -58,6 +79,23 @@ function fillForms(data) {
   $('copy-timeout').value = (data.settings && data.settings.copy_timeout) || '24h';
 }
 
+function renderTask(task) {
+  const hasCopyProgress = Number(task.total) > 0;
+  const percent = hasCopyProgress ? Math.min(100, Number(task.bytes || 0) * 100 / Number(task.total)) : 0;
+  let detail = task.progress || '';
+  if (hasCopyProgress) {
+    detail = formatBytes(task.bytes) + ' / ' + formatBytes(task.total);
+    if (task.speed) detail += ' · ' + formatBytes(task.speed) + '/s';
+    if (task.eta_seconds) detail += ' · 预计 ' + formatDuration(task.eta_seconds);
+  }
+  return '<article class="task"><div style="min-width:0;flex:1"><div class="task-name">' + esc(task.name) + '</div>' +
+    '<div class="task-meta">' + esc(task.source) + ' · ' + esc(task.updated) + '</div>' +
+    (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
+    (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
+    (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span></div></article>';
+}
+
 function renderStatus(data) {
   $('connection-dot').className = 'online';
   $('updated-at').textContent = '\u66f4\u65b0\u4e8e ' + new Date(data.updated_at).toLocaleTimeString();
@@ -65,12 +103,12 @@ function renderStatus(data) {
   $('finished-count').textContent = data.totals.finished;
   $('retry-count').textContent = data.totals.retries;
   $('worker-count').textContent = data.totals.workers;
-  renderList($('tasks'), data.tasks, task => '<article class="task"><div><div class="task-name">' + esc(task.name) + '</div><div class="task-meta">' + esc(task.source) + ' · ' + esc(task.updated) + '</div></div><div class="task-side"><span class="badge">' + esc(task.status) + '</span></div></article>', zh.noTasks);
+  renderList($('tasks'), data.tasks, renderTask, zh.noTasks);
   renderList($('folders'), data.folders, folder => '<div class="compact-item">' + esc(folder.path) + '<small>' + esc(folder.extract_path || '\u539f\u76ee\u5f55\u8f93\u51fa') + ' · ' + folder.tracked + '</small></div>', zh.noFolders);
   renderList($('history'), data.history, item => '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + ' · 解压完成 ' + esc(item.completed_at) + (item.cached_at ? ' · 缓存完成 ' + esc(item.cached_at) : '') + '</small></div><div class="history-actions"><button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button><button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
   latestLogs = data.logs || [];
   renderLogs();
-  renderList($('transfers'), data.transfers, item => '<div class="compact-item"><div>' + esc(item.path) + '<small>' + esc(item.state) + ' · ' + formatBytes(item.bytes) + ' / ' + formatBytes(item.total) + ' · ' + formatBytes(item.speed) + '/s' + (item.eta_seconds ? ' · 预计 ' + formatDuration(item.eta_seconds) : '') + '</small><div class="copy-bar"><i style="width:' + Math.min(100, item.total ? item.bytes * 100 / item.total : 0) + '%"></i></div></div></div>', '暂无复制任务');
+  $('transfers').innerHTML = '';
   renderList($('password-list'), data.passwords, (password, index) => '<div class="compact-item">' + esc(password) + '<button data-remove-password="' + index + '" type="button">\u5220\u9664</button></div>', zh.noPasswords);
   $('cd2-status').textContent = data.clouddrive2.enabled ? '\u5df2\u542f\u7528 · ' + (data.clouddrive2.url || '') : '\u672a\u542f\u7528';
 }
@@ -193,5 +231,6 @@ $('settings-save').addEventListener('click', async () => {
   $('settings-message').textContent = response.ok ? zh.restart : zh.saveFailed;
 });
 
+ensureBrandIcon();
 load(true);
 setInterval(() => load(false), 5000);

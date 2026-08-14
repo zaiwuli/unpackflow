@@ -92,7 +92,7 @@ func (status ExtractStatus) String() string {
 // Debugf writes Debug log lines... to stdout and/or a file.
 func (l *Logger) Debugf(msg string, v ...any) {
 	message := fmt.Sprintf(msg, v...)
-	l.addDashboardLog("调试", message)
+	l.addDashboardLogWithKind("调试", message, "system")
 	err := l.Debug.Output(callDepth, message)
 	if err != nil {
 		fmt.Println("Logger Error:", err) //nolint:forbidigo
@@ -102,11 +102,15 @@ func (l *Logger) Debugf(msg string, v ...any) {
 const dashboardLogLimit = 200
 
 func (l *Logger) addDashboardLog(level, message string) {
+	l.addDashboardLogWithKind(level, message, dashboardLogKind(message))
+}
+
+func (l *Logger) addDashboardLogWithKind(level, message, kind string) {
 	entry := DashboardLog{
 		Time:    time.Now().Format("2006-01-02 15:04:05"),
 		Level:   level,
 		Message: message,
-		Kind:    dashboardLogKind(message),
+		Kind:    kind,
 	}
 	l.mu.Lock()
 	l.items = append(l.items, entry)
@@ -114,6 +118,16 @@ func (l *Logger) addDashboardLog(level, message string) {
 		l.items = append([]DashboardLog(nil), l.items[len(l.items)-dashboardLogLimit:]...)
 	}
 	l.mu.Unlock()
+}
+
+// Systemf writes an informational line that is available only in the system
+// log view, even when the text contains task-related words.
+func (l *Logger) Systemf(msg string, v ...any) {
+	message := fmt.Sprintf(msg, v...)
+	l.addDashboardLogWithKind("信息", message, "system")
+	if err := l.Info.Output(callDepth, message); err != nil {
+		fmt.Println("Logger Error:", err) //nolint:forbidigo
+	}
 }
 
 func dashboardLogKind(message string) string {

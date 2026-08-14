@@ -33,7 +33,11 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 			if !cloudDrivePathMatch(change.Path, cfg.WatchPath) && !cloudDrivePathMatch(change.NewPath, cfg.WatchPath) {
 				return nil
 			}
-			if change.Type == 1 { // delete
+			eventPath := change.Path
+			if change.NewPath != "" {
+				eventPath = change.NewPath
+			}
+			if change.Type == 1 || change.IsDirectory || !isCloudDriveArchiveEvent(eventPath) { // delete, directory or irrelevant file
 				return nil
 			}
 			// CloudDrive2 can publish the remote event before its mounted
@@ -45,9 +49,6 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 		OnStatus: func(status clouddrive.Status) {
 			if status.LastError != "" {
 				u.Errorf("CloudDrive2 监控：%s", status.LastError)
-			}
-			if status.MessagesReceived > 0 {
-				u.Debugf("CloudDrive2 实时推送：已收到 %d 条消息，文件变化 %d 条，最后类型 %d", status.MessagesReceived, status.ChangesReceived, status.LastMessageType)
 			}
 		},
 	}
@@ -68,6 +69,7 @@ func (u *Unpackerr) handleCloudDriveChange(client *clouddrive.Client, change clo
 	if change.NewPath != "" {
 		remotePath = change.NewPath
 	}
+	taskKey := u.beginCD2EventTask(paths, remotePath)
 	refreshPath := path.Dir(remotePath)
 	if change.IsDirectory {
 		refreshPath = remotePath
@@ -90,15 +92,29 @@ func (u *Unpackerr) handleCloudDriveChange(client *clouddrive.Client, change clo
 			}
 		}
 		if visibleCD2Paths(paths) {
-			submitted := u.cacheCloudDrivePaths(paths)
-			if submitted > 0 {
-				u.Printf("CloudDrive2 实时事件已提交：发现 %d 个复制任务", submitted)
+			if taskKey != "" {
+				u.updateCD2Transfer(taskKey, firstVisibleCD2Path(paths, remotePath), "检查文件完整性", nil)
 			}
+			u.cacheCloudDrivePaths(paths)
 			return
 		}
 		u.Debugf("CloudDrive2 实时事件已收到，但挂载文件尚未出现，等待第 %d 次重试", index+1)
 	}
 	u.Errorf("CloudDrive2 实时事件对应的挂载文件未出现：%s", remotePath)
+	if taskKey != "" {
+		u.updateCD2Transfer(taskKey, remotePath, "等待文件可见", func(transfer *CD2Transfer) {
+			transfer.Error = "挂载文件尚未出现，将等待补偿扫描"
+		})
+	}
+}
+
+func firstVisibleCD2Path(paths []string, fallback string) string {
+	for _, file := range paths {
+		if _, err := os.Stat(file); err == nil {
+			return file
+		}
+	}
+	return fallback
 }
 
 func visibleCD2Paths(paths []string) bool {

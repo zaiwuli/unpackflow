@@ -25,6 +25,9 @@ var dashboardCSS []byte
 //go:embed webui/app.js
 var dashboardJS []byte
 
+//go:embed webui/icon.svg
+var dashboardIcon []byte
+
 type DashboardSnapshot struct {
 	UpdatedAt    string              `json:"updated_at"`
 	Totals       DashboardTotals     `json:"totals"`
@@ -68,12 +71,17 @@ type DashboardTotals struct {
 }
 
 type DashboardTask struct {
-	Name     string `json:"name"`
-	Source   string `json:"source"`
-	Status   string `json:"status"`
-	Updated  string `json:"updated"`
-	Retries  uint   `json:"retries"`
-	Progress string `json:"progress,omitempty"`
+	Name       string `json:"name"`
+	Source     string `json:"source"`
+	Status     string `json:"status"`
+	Updated    string `json:"updated"`
+	Retries    uint   `json:"retries"`
+	Progress   string `json:"progress,omitempty"`
+	Bytes      int64  `json:"bytes,omitempty"`
+	Total      int64  `json:"total,omitempty"`
+	Speed      int64  `json:"speed,omitempty"`
+	ETASeconds int64  `json:"eta_seconds,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type DashboardFolder struct {
@@ -124,6 +132,20 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			snapshot.Totals.Active++
 		}
 		snapshot.Tasks = append(snapshot.Tasks, task)
+	}
+	for _, transfer := range snapshot.Transfers {
+		snapshot.Tasks = append(snapshot.Tasks, DashboardTask{
+			Name:       filepath.Base(transfer.Path),
+			Source:     "CloudDrive2",
+			Status:     transfer.State,
+			Updated:    transfer.UpdatedAt.Format("2006-01-02 15:04:05"),
+			Bytes:      transfer.Bytes,
+			Total:      transfer.Total,
+			Speed:      transfer.Speed,
+			ETASeconds: transfer.ETA,
+			Error:      transfer.Error,
+		})
+		snapshot.Totals.Active++
 	}
 	sort.Slice(snapshot.Tasks, func(i, j int) bool { return snapshot.Tasks[i].Updated > snapshot.Tasks[j].Updated })
 	for _, item := range u.processedHistory() {
@@ -195,6 +217,12 @@ func (u *Unpackerr) dashboardPage(w http.ResponseWriter, _ *http.Request, _ http
 	page := bytes.ReplaceAll(dashboardHTML, []byte("/*__CSS__*/"), dashboardCSS)
 	page = bytes.ReplaceAll(page, []byte("/*__JS__*/"), dashboardJS)
 	_, _ = w.Write(page)
+}
+
+func (u *Unpackerr) dashboardIcon(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(dashboardIcon)
 }
 
 func (u *Unpackerr) dashboardAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
