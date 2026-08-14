@@ -234,13 +234,20 @@ func parseChange(data []byte) (Change, error) {
 }
 
 func parsePush(data []byte) (Change, bool, error) {
+	change, ok, _, err := parsePushMessage(data)
+	return change, ok, err
+}
+
+// parsePushMessage decodes a CloudDrive2 push frame and also returns the
+// message type so the long-lived stream can expose useful diagnostics.
+func parsePushMessage(data []byte) (Change, bool, int, error) {
 	var messageType int
 	var nested []byte
 	r := wireReader{b: data}
 	for {
 		field, wire, ok, err := r.tag()
 		if err != nil {
-			return Change{}, false, err
+			return Change{}, false, messageType, err
 		}
 		if !ok {
 			break
@@ -248,31 +255,31 @@ func parsePush(data []byte) (Change, bool, error) {
 		switch field {
 		case 1:
 			if wire != 0 {
-				return Change{}, false, fmt.Errorf("push type has wire type %d", wire)
+				return Change{}, false, messageType, fmt.Errorf("push type has wire type %d", wire)
 			}
 			v, _, err := r.varint()
 			if err != nil {
-				return Change{}, false, err
+				return Change{}, false, messageType, err
 			}
 			messageType = int(v)
 		case 5:
 			if wire != 2 {
-				return Change{}, false, fmt.Errorf("push change has wire type %d", wire)
+				return Change{}, false, messageType, fmt.Errorf("push change has wire type %d", wire)
 			}
 			v, err := r.bytes()
 			if err != nil {
-				return Change{}, false, err
+				return Change{}, false, messageType, err
 			}
 			nested = v
 		default:
 			if err := r.skip(wire); err != nil {
-				return Change{}, false, err
+				return Change{}, false, messageType, err
 			}
 		}
 	}
 	if messageType != 4 || len(nested) == 0 {
-		return Change{}, false, nil
+		return Change{}, false, messageType, nil
 	}
 	change, err := parseChange(nested)
-	return change, err == nil, err
+	return change, err == nil, messageType, err
 }

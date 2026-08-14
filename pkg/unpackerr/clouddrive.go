@@ -46,6 +46,9 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 			if status.LastError != "" {
 				u.Errorf("CloudDrive2 监控：%s", status.LastError)
 			}
+			if status.MessagesReceived > 0 {
+				u.Debugf("CloudDrive2 实时推送：已收到 %d 条消息，文件变化 %d 条，最后类型 %d", status.MessagesReceived, status.ChangesReceived, status.LastMessageType)
+			}
 		},
 	}
 	u.cd2Mu.Lock()

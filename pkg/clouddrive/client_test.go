@@ -6,8 +6,34 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestSubscribeReportsPushMetadataAndChange(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		var change []byte
+		putVarint(&change, uint64(1<<3))
+		putVarint(&change, 0)
+		putString(&change, 3, "/115open/test.zip")
+		var push []byte
+		putVarint(&push, uint64(1<<3))
+		putVarint(&push, 4)
+		putBytes(&push, 5, change)
+		_, _ = w.Write(append(frame(0, push), frame(0x80, []byte("grpc-status: 0\r\n"))...))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var info PushMessageInfo
+	var got Change
+	err := (&Client{BaseURL: server.URL}).SubscribeWithInfo(ctx, func(value PushMessageInfo) { info = value }, func(value Change) error { got = value; return nil })
+	if err != nil || !info.FileChange || info.Type != 4 || got.Path != "/115open/test.zip" {
+		t.Fatalf("info=%#v change=%#v err=%v", info, got, err)
+	}
+}
 
 func frame(flags byte, payload []byte) []byte {
 	out := make([]byte, 5+len(payload))
@@ -72,5 +98,18 @@ func TestClientRejectsOversizedFrame(t *testing.T) {
 	defer server.Close()
 	if _, err := (&Client{BaseURL: server.URL}).GetMountPoints(context.Background()); err == nil {
 		t.Fatal("expected oversized frame error")
+	}
+}
+
+func TestSubscribeReportsHeaderPermissionFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("grpc-status", "7")
+		w.Header().Set("grpc-message", "push%20message%20permission%20required")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	err := (&Client{BaseURL: server.URL}).Subscribe(context.Background(), func(Change) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "permission required") {
+		t.Fatalf("expected permission error, got %v", err)
 	}
 }

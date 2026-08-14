@@ -19,18 +19,23 @@ type Monitor struct {
 	Config        MonitorConfig
 	PathOverrides []string
 	OnChange      func(Change, []string) error
+	OnPush        func(PushMessageInfo)
 	OnStatus      func(Status)
 	mu            sync.RWMutex
 	status        Status
 }
 
 type Status struct {
-	Running         bool
-	Connected       bool
-	ChangesReceived uint64
-	PathsMapped     uint64
-	LastError       string
-	LastChange      time.Time
+	Running          bool
+	Connected        bool
+	ChangesReceived  uint64
+	MessagesReceived uint64
+	IgnoredMessages  uint64
+	LastMessageType  int
+	LastMessage      time.Time
+	PathsMapped      uint64
+	LastError        string
+	LastChange       time.Time
 }
 
 func (m *Monitor) Status() Status {
@@ -63,7 +68,19 @@ func (m *Monitor) Run(ctx context.Context) {
 	defer m.setStatus(func(s *Status) { s.Running = false; s.Connected = false })
 	for ctx.Err() == nil {
 		m.setStatus(func(s *Status) { s.Connected = true; s.LastError = "" })
-		err := m.Client.Subscribe(ctx, func(change Change) error {
+		err := m.Client.SubscribeWithInfo(ctx, func(info PushMessageInfo) {
+			m.setStatus(func(s *Status) {
+				s.MessagesReceived++
+				s.LastMessageType = info.Type
+				s.LastMessage = time.Now()
+				if !info.FileChange {
+					s.IgnoredMessages++
+				}
+			})
+			if m.OnPush != nil {
+				m.OnPush(info)
+			}
+		}, func(change Change) error {
 			// Direct path overrides are local and do not depend on CD2's mount
 			// point API. Resolve them first so a temporary GetMountPoints failure
 			// never drops a real-time file event.

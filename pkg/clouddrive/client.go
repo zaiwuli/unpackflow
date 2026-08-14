@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -24,6 +25,12 @@ type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
+}
+
+type PushMessageInfo struct {
+	Type         int
+	FileChange   bool
+	PayloadBytes int
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -64,6 +71,19 @@ func (c *Client) callWith(ctx context.Context, method string, payload []byte, st
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("CloudDrive2 %s: HTTP %s", method, resp.Status)
+	}
+	// CloudDrive2 may report gRPC failures in response headers without sending
+	// a trailer frame (PushMessage permission failures do this). Do not treat
+	// an empty body/EOF as a healthy stream in that case.
+	if status := resp.Header.Get("grpc-status"); status != "" && status != "0" {
+		message := resp.Header.Get("grpc-message")
+		if decoded, decodeErr := url.QueryUnescape(message); decodeErr == nil && decoded != "" {
+			message = decoded
+		}
+		if message == "" {
+			message = "unknown error"
+		}
+		return nil, fmt.Errorf("CloudDrive2 %s failed: grpc-status=%s grpc-message=%s", method, status, message)
 	}
 	reader := bufio.NewReader(resp.Body)
 	var replies [][]byte
@@ -132,9 +152,19 @@ func (c *Client) ForceRefresh(ctx context.Context, path string) error {
 }
 
 func (c *Client) Subscribe(ctx context.Context, onChange func(Change) error) error {
+	return c.SubscribeWithInfo(ctx, nil, onChange)
+}
+
+// SubscribeWithInfo keeps the PushMessage stream open and reports every
+// decoded push frame. The info callback is intentionally metadata-only: it
+// never exposes the bearer token or raw protobuf payload.
+func (c *Client) SubscribeWithInfo(ctx context.Context, onInfo func(PushMessageInfo), onChange func(Change) error) error {
 	_, err := c.callWith(ctx, "PushMessage", emptyRequest(), true, func(frame []byte) error {
-		change, ok, err := parsePush(frame)
-		if err != nil || !ok {
+		change, ok, messageType, err := parsePushMessage(frame)
+		if onInfo != nil {
+			onInfo(PushMessageInfo{Type: messageType, FileChange: ok, PayloadBytes: len(frame)})
+		}
+		if err != nil || !ok || onChange == nil {
 			return err
 		}
 		return onChange(change)
