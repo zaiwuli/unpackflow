@@ -22,7 +22,7 @@ import (
 const (
 	defaultPollInterval = time.Minute
 	minimumPollInterval = 5 * time.Millisecond
-	defaultFolderDelete = 10 * time.Minute
+	defaultFolderDelete = 0
 )
 
 // FolderConfig defines the input data for a watched folder.
@@ -95,7 +95,7 @@ func (u *Unpackerr) validateFolders() error {
 			}
 		}
 		if u.Folders[idx].DeleteAfter == nil {
-			// If delete after wasn't set, then set it to 10 minutes.
+			// Local source actions default to immediate handling after extraction.
 			u.Folders[idx].DeleteAfter = &cnfg.Duration{Duration: defaultFolderDelete}
 		}
 	}
@@ -110,19 +110,19 @@ func (u *Unpackerr) logFolders() {
 			epath = ", extract to: " + folder.ExtractPath
 		}
 
-		u.Printf(" => Folder Config: 1 path: %s%s; delete_after:%v delete_orig:%v delete_files:%v "+
-			"log_file:%v move_back:%v isos:%v event_buffer:%d",
+		u.Printf("本地目录配置：路径 %s%s；清理延迟 %v，删除原包 %v，删除输出 %v，"+
+			"写入文件日志 %v，原目录输出 %v，解压 ISO %v，事件缓冲 %d",
 			folder.Path, epath, folder.DeleteAfter, folder.DeleteOrig, folder.DeleteFiles,
 			!folder.DisableLog, folder.MoveBack, folder.ExtractISOs, u.Folder.Buffer)
 	} else {
-		u.Printf(" => Folder Config: %d paths, event_buffer:%d ", count, u.Folder.Buffer)
+		u.Printf("本地目录配置：%d 个路径，事件缓冲 %d", count, u.Folder.Buffer)
 
 		for _, folder := range u.Folders {
 			if epath = ""; folder.ExtractPath != "" {
 				epath = " extract to: " + folder.ExtractPath
 			}
 
-			u.Printf(" =>    Path: %s%s; delete_after:%v delete_orig:%v delete_files:%v log_file:%v move_back:%v isos:%v",
+			u.Printf("目录：%s%s；清理延迟 %v，删除原包 %v，删除输出 %v，写入文件日志 %v，原目录输出 %v，解压 ISO %v",
 				folder.Path, epath, folder.DeleteAfter, folder.DeleteOrig, folder.DeleteFiles,
 				!folder.DisableLog, folder.MoveBack, folder.ExtractISOs)
 		}
@@ -146,7 +146,7 @@ func (u *Unpackerr) PollFolders() {
 
 	u.folders, err = u.Folder.newWatcher(u.Folders, u.Logger)
 	if err != nil {
-		u.Errorf("Watching Folders: %s", err)
+		u.Errorf("目录监听启动失败：%s", err)
 		return
 	}
 	// do not close either watcher.
@@ -175,7 +175,7 @@ func (u *Unpackerr) PollFolders() {
 
 	go func() {
 		if err := u.folders.Watcher.Start(u.Folder.Interval.Duration); err != nil {
-			u.Errorf("Folder poller stopped: %v", err)
+			u.Errorf("目录补偿扫描已停止：%v", err)
 		}
 	}()
 
@@ -230,14 +230,14 @@ func checkFolders(folders []*FolderConfig, log Logs) ([]*FolderConfig, []string)
 	for _, folder := range folders {
 		folder.Path, err = filepath.Abs(expandHomedir(folder.Path))
 		if err != nil {
-			log.Errorf("Folder '%s' (bad path): %v", folder.Path, err)
+			log.Errorf("目录路径无效 %q：%v", folder.Path, err)
 			continue
 		}
 
 		if folder.ExtractPath != "" {
 			folder.ExtractPath, err = filepath.Abs(expandHomedir(folder.ExtractPath))
 			if err != nil {
-				log.Errorf("Folder '%s' (bad extract path): %v", folder.ExtractPath, err)
+				log.Errorf("解压输出路径无效 %q：%v", folder.ExtractPath, err)
 				continue
 			}
 		}
@@ -245,10 +245,10 @@ func checkFolders(folders []*FolderConfig, log Logs) ([]*FolderConfig, []string)
 		folder.ExcludePaths = normalizeFolderExcludePaths(folder.Path, folder.ExcludePaths)
 
 		if stat, err := os.Stat(folder.Path); err != nil {
-			log.Errorf("Folder '%s' (cannot watch): %v", folder.Path, err)
+			log.Errorf("目录无法监听 %q：%v", folder.Path, err)
 			continue
 		} else if !stat.IsDir() {
-			log.Errorf("Folder '%s' (cannot watch): not a folder", folder.Path)
+			log.Errorf("目录无法监听 %q：不是目录", folder.Path)
 			continue
 		}
 
@@ -327,11 +327,11 @@ func (c FoldersConfig) newWatcher(folderConfig []*FolderConfig, log Logs) (*Fold
 
 	for _, folder := range folderConfig {
 		if err := folders.Watcher.Add(folder.Path); err != nil {
-			log.Errorf("Folder '%s' (cannot poll): %v", folder.Path, err)
+			log.Errorf("目录无法补偿扫描 %q：%v", folder.Path, err)
 		}
 
 		if err := fsn.Add(folder.Path); err != nil {
-			log.Errorf("Folder '%s' (cannot watch): %v", folder.Path, err)
+			log.Errorf("目录无法监听 %q：%v", folder.Path, err)
 		}
 	}
 
@@ -404,7 +404,7 @@ func (u *Unpackerr) extractTrackedItem(name string, folder *Folder, now time.Tim
 		DisableRecursion: folder.config.DisableRecursion,
 	})
 	if err != nil {
-		u.Errorf("[ERROR] %v", err)
+		u.Errorf("目录任务出错：%v", err)
 		return
 	}
 
@@ -506,6 +506,10 @@ func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
 
 	folder.updated = resp.Started.Add(resp.Elapsed)
 	u.updateQueueStatus(&newStatus{Name: resp.X.Name, Resp: resp, Status: folder.status}, folder.updated, true)
+	if folder.status == EXTRACTED && folder.config.DeleteAfter.Duration <= 0 &&
+		(folder.config.DeleteOrig || folder.config.ArchivePath != "") {
+		u.deleteAfterReached(resp.X.Name, time.Now(), folder)
+	}
 }
 
 // watchFSNotify reads file system events from a channel and processes them.
@@ -516,9 +520,9 @@ func (f *Folders) watchFSNotify() {
 	for {
 		select {
 		case err := <-f.Watcher.Error:
-			f.Errorf("watcher: %v", err)
+			f.Errorf("目录扫描器：%v", err)
 		case err := <-f.FSNotify.Errors:
-			f.Errorf("fsnotify: %v", err)
+			f.Errorf("文件事件监听器：%v", err)
 		case event, ok := <-f.FSNotify.Events:
 			if !ok {
 				return
@@ -558,7 +562,7 @@ func (f *Folders) handleFileEvent(name, operation string) {
 		}
 
 		if cnfg.isExcludedPath(name) {
-			f.Debugf("Folder: Ignored event from excluded path: %v", name)
+			f.Debugf("目录：忽略排除路径事件：%v", name)
 			continue
 		}
 
@@ -572,7 +576,7 @@ func (f *Folders) handleFileEvent(name, operation string) {
 		return
 	}
 
-	f.Debugf("Folder: Ignored event from non-configured path: %v", name)
+	f.Debugf("目录：忽略未配置路径事件：%v", name)
 }
 
 // InjectFileEvent feeds an externally sourced filesystem change into the same
@@ -611,7 +615,7 @@ func (f *Folders) processEvent(event *eventData, now time.Time) {
 	dirPath := filepath.Join(event.cnfg.Path, event.name)
 
 	if event.cnfg.isExcludedPath(event.file) || event.cnfg.isExcludedPath(dirPath) {
-		f.Debugf("Folder: Ignored File Event (%s) '%s' (excluded path)", event.op, event.file)
+		f.Debugf("目录：忽略文件事件（%s）%q，原因：排除路径", event.op, event.file)
 		return
 	}
 
@@ -619,18 +623,18 @@ func (f *Folders) processEvent(event *eventData, now time.Time) {
 	if err != nil {
 		// Item is unusable (probably deleted), remove it from history.
 		if _, ok := f.Folders[dirPath]; ok {
-			f.Debugf("Folder: Removing Tracked Item: %v", dirPath)
+			f.Debugf("目录：移除已跟踪项目：%v", dirPath)
 			delete(f.Folders, dirPath)
 			f.Remove(dirPath)
 		}
 
-		f.Debugf("Folder: Ignored File Event (%s) '%s' (unreadable): %v", event.op, event.file, err)
+		f.Debugf("目录：忽略文件事件（%s）%q，原因：无法读取：%v", event.op, event.file, err)
 
 		return
 	}
 
 	if !stat.IsDir() && !xtractr.IsArchiveFile(event.name) {
-		f.Debugf("Folder: Ignored File Event (%s) '%s' (not archive or dir): %v", event.op, event.file, err)
+		f.Debugf("目录：忽略文件事件（%s）%q，原因：不是压缩包或目录：%v", event.op, event.file, err)
 		return
 	}
 
@@ -646,7 +650,7 @@ func (f *Folders) saveEvent(event *eventData, dirPath string, now time.Time) {
 
 	if err := f.Add(dirPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			f.Errorf("Folder: Tracking New Item: %v (event: %s): %v ", dirPath, event.op, err)
+			f.Errorf("目录：跟踪新项目失败：%v（事件：%s）：%v", dirPath, event.op, err)
 		}
 
 		return
@@ -692,7 +696,7 @@ func (u *Unpackerr) checkFolderStats(now time.Time) {
 			delete(u.folders.Folders, name)
 			u.Printf("[目录任务] 重试次数已用完（%d/%d），停止处理：%s", folder.retries, u.MaxRetries, name)
 		case folder.status > EXTRACTING && folder.config.DeleteAfter.Duration <= 0:
-			if folder.config.ArchivePath != "" {
+			if folder.config.ArchivePath != "" || folder.config.DeleteOrig {
 				u.deleteAfterReached(name, now, folder)
 				continue
 			}

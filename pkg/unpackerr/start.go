@@ -245,7 +245,7 @@ func (u *Unpackerr) watchDeleteChannel() {
 			continue
 		}
 
-		u.Debugf("Deleting files: %s", strings.Join(fileList(input.Paths...), ", "))
+		u.Debugf("正在删除文件：%s", strings.Join(fileList(input.Paths...), ", "))
 		u.DeleteFiles(input.Paths...)
 
 		if !input.PurgeEmptyParent {
@@ -259,9 +259,9 @@ func (u *Unpackerr) watchDeleteChannel() {
 
 		if purged := u.purgeEmptyFolders(input.Paths, root); purged > 0 {
 			if root != "" {
-				u.Printf("Purged %d empty folder(s) up to %s", purged, root)
+				u.Printf("已清理 %d 个空目录，范围至 %s", purged, root)
 			} else {
-				u.Printf("Purged %d empty folder(s)", purged)
+				u.Printf("已清理 %d 个空目录", purged)
 			}
 		}
 	}
@@ -381,7 +381,7 @@ func (u *Unpackerr) Run() {
 	if len(u.Lidarr)+len(u.Radarr)+len(u.Readarr)+len(u.Sonarr)+len(u.Whisparr)+len(u.Folders) > 0 {
 		logger = time.NewTicker(u.Config.LogQueues.Duration).C
 	} else {
-		u.Printf("No Starr apps or folders configured. Shut down and add some apps or folders to your config file.")
+		u.Printf("未配置媒体服务或本地监控目录，请检查配置文件。")
 	}
 
 	u.PollFolders() // This initializes channel(s) used below.

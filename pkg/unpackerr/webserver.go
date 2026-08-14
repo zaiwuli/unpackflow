@@ -36,7 +36,7 @@ func (w *WebServer) Enabled() bool {
 
 func (u *Unpackerr) logWebserver() {
 	if !u.Webserver.Enabled() {
-		u.Printf(" => Webserver Disabled")
+		u.Printf("Web 服务已关闭")
 		return
 	}
 
@@ -50,7 +50,7 @@ func (u *Unpackerr) logWebserver() {
 		ssl = "s"
 	}
 
-	u.Printf(" => Starting webserver. Listen address: http%s://%v%s (%d upstreams)",
+	u.Printf("Web 服务已启动，监听地址：http%s://%v%s（%d 个上游）",
 		ssl, addr, u.Webserver.URLBase, len(u.Webserver.Upstreams))
 }
 
@@ -101,7 +101,7 @@ func (u *Unpackerr) webRoutes() {
 
 	if u.Webserver.Pprof {
 		u.registerPprof()
-		u.Printf(" => WARNING: pprof debug endpoints enabled at /debug/pprof/")
+		u.Printf("警告：已启用 pprof 调试端点 /debug/pprof/")
 	}
 
 	if !u.Webserver.Metrics {
@@ -152,7 +152,7 @@ func (u *Unpackerr) runWebServer() {
 	}
 
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		u.Errorf("Web Server Failed: %v", err)
+		u.Errorf("Web 服务运行失败：%v", err)
 	}
 }
 

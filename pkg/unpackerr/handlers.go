@@ -56,28 +56,28 @@ func (u *Unpackerr) checkQueueChanges(now time.Time) {
 			case data.Status == WAITING:
 				// A waiting item just fell out of the queue. We never extracted it. Remove it and move on.
 				delete(u.Map, name)
-				u.Printf("[%v] Imported: %v (not extracted, removing from history)", data.App, name)
+				u.Printf("[%v] 已导入：%v（未解压，已移出历史记录）", data.App, name)
 			case data.Status > IMPORTED:
-				u.Debugf("Already imported? %s", name)
+				u.Debugf("已导入，跳过：%s", name)
 			case data.Status == IMPORTED:
-				u.Debugf("%v: Awaiting Delete Delay (%v remains): %v",
+				u.Debugf("%v：等待删除延迟（剩余 %v）：%v",
 					data.App, data.DeleteDelay-elapsed.Round(time.Second), name)
 			default:
 				u.updateQueueStatus(&newStatus{Name: name, Status: IMPORTED, Resp: data.Resp}, now, true)
-				u.Printf("[%v] Imported: %v (delete in %v)", data.App, name, data.DeleteDelay)
+				u.Printf("[%v] 已导入：%v（将在 %v 后删除）", data.App, name, data.DeleteDelay)
 			}
 		case data.Status == IMPORTED:
 			// The item fell out of the app queue and came back. Reset it.
-			u.Printf("%s: Extraction Not Imported: %s - De-queued and returned.", data.App, name)
+			u.Printf("%s：解压结果未导入：%s，已移出队列。", data.App, name)
 			data.Status = EXTRACTED
 		case data.Status > IMPORTED:
 			// The item fell out of the app queue and came back. Reset it.
-			u.Printf("%s: Extraction Restarting: %s - Deleted Item De-queued and returned.", data.App, name)
+			u.Printf("%s：重新开始解压：%s，已移出已删除项目。", data.App, name)
 			data.Status = WAITING
 			data.Updated = now
 		}
 
-		u.Printf("[%s] Status: %s (%v, elapsed: %v) %s", data.App, name, data.Status.Desc(),
+		u.Printf("[%s] 状态：%s（%v，耗时：%v）%s", data.App, name, data.Status.Desc(),
 			now.Sub(data.Updated).Round(time.Second), data.XProg)
 	}
 }
@@ -96,7 +96,7 @@ func (u *Unpackerr) extractCompletedDownloads(now time.Time) {
 // This is called by extractCompletedDownloads() via the main routine in start.go.
 func (u *Unpackerr) extractCompletedDownload(name string, now time.Time, item *Extract) {
 	if d := u.StartDelay.Duration - now.Sub(item.Updated); d > time.Second { // wiggle room.
-		u.Printf("[%s] Waiting for Start Delay: %v (%v remains)", item.App, name, d.Round(time.Second))
+		u.Printf("[%s] 等待稳定时间：%v（剩余 %v）", item.App, name, d.Round(time.Second))
 		return
 	}
 
@@ -152,7 +152,7 @@ func (u *Unpackerr) logQueuedDownload(queueSize int, item *Extract, files xtract
 		count = fmt.Sprintf("%v archives in %d folders", fileCount, len(files))
 	}
 
-	u.Printf("[%s] Extraction Queued: %s, retries: %d, %s, delete orig: %v, queue size: %d",
+	u.Printf("[%s] 已加入解压队列：%s，重试 %d 次，%s，删除原包 %v，队列数量 %d",
 		item.App, item.Path, item.Retries, count, item.DeleteOrig, queueSize)
 	u.updateHistory(string(item.App) + ": " + item.Path)
 }
@@ -164,7 +164,7 @@ func (u *Unpackerr) getPasswordFromPath(path string) string {
 		return ""
 	}
 
-	u.Debugf("Found password in Path: %s", path[start+2:end])
+	u.Debugf("路径中已匹配密码")
 
 	return path[start+2 : end]
 }

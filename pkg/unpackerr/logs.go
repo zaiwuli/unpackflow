@@ -285,7 +285,7 @@ func (u *Unpackerr) setupHTTPLogging() {
 
 func (u *Unpackerr) postLogRotate(_, newFile string) {
 	if newFile != "" {
-		go u.Printf("Rotated log file to: %s", newFile)
+		go u.Printf("日志文件已轮换：%s", newFile)
 	}
 
 	if u.rotatorr != nil && u.rotatorr.File != nil {

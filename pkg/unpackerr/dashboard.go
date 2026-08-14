@@ -126,7 +126,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			Retries: item.Retries,
 		}
 		if item.XProg != nil {
-			task.Progress = item.XProg.String()
+			if progress := item.XProg.String(); progress != "no progress yet" {
+				task.Progress = progress
+			}
 		}
 		if item.Status == QUEUED || item.Status == EXTRACTING || item.Status == WAITING {
 			snapshot.Totals.Active++
@@ -340,6 +342,13 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 		duration, err := time.ParseDuration(overrides.FolderInterval)
 		if err != nil || duration < 0 {
 			http.Error(w, "补偿扫描间隔格式无效，例如：1s、30s、2m；填写 0s 可关闭补偿扫描", http.StatusBadRequest)
+			return
+		}
+	}
+	if overrides.LocalSourceDelay != "" {
+		duration, err := time.ParseDuration(overrides.LocalSourceDelay)
+		if err != nil || duration < 0 {
+			http.Error(w, "原包处理延迟格式无效，例如：0s、10m、1h", http.StatusBadRequest)
 			return
 		}
 	}

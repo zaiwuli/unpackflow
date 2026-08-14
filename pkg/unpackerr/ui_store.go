@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golift.io/cnfg"
 )
 
 type UIStore struct {
@@ -59,6 +61,7 @@ type UIOverrides struct {
 	Workers           uint     `json:"workers,omitempty"`
 	LocalSourceAction string   `json:"local_source_action,omitempty"`
 	LocalArchiveDir   string   `json:"local_archive_dir,omitempty"`
+	LocalSourceDelay  string   `json:"local_source_delay,omitempty"`
 	FolderInterval    string   `json:"folder_interval,omitempty"`
 	CD2Enabled        *bool    `json:"cd2_enabled,omitempty"`
 	CD2URL            string   `json:"cd2_url,omitempty"`
@@ -246,6 +249,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	if folder := u.localFolder(); folder != nil {
 		settings.LocalSourceAction = localSourceAction(folder)
 		settings.LocalArchiveDir = folder.ArchivePath
+		if folder.DeleteAfter != nil {
+			settings.LocalSourceDelay = folder.DeleteAfter.Duration.String()
+		}
 	}
 	if u.uiStore == nil {
 		return settings
@@ -261,6 +267,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.LocalArchiveDir != "" {
 		settings.LocalArchiveDir = overrides.LocalArchiveDir
+	}
+	if overrides.LocalSourceDelay != "" {
+		settings.LocalSourceDelay = overrides.LocalSourceDelay
 	}
 	if overrides.FolderInterval != "" {
 		settings.FolderInterval = overrides.FolderInterval
@@ -335,6 +344,11 @@ func (u *Unpackerr) applyLocalUIOverrides(overrides UIOverrides) {
 	folder := u.localFolder()
 	if folder == nil {
 		return
+	}
+	if overrides.LocalSourceDelay != "" {
+		if duration, err := time.ParseDuration(overrides.LocalSourceDelay); err == nil && duration >= 0 {
+			folder.DeleteAfter = &cnfg.Duration{Duration: duration}
+		}
 	}
 	action := strings.ToLower(strings.TrimSpace(overrides.LocalSourceAction))
 	switch action {
