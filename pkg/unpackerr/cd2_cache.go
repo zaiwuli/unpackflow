@@ -161,7 +161,7 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 		u.Printf("CloudDrive2 已提交复制任务：%d 个文件，来源 %s", len(files), source)
 		cachedPrimary := filepath.Join(u.CloudDrive2.CacheDir, filepath.Base(archivePrimary(files)))
 		u.cd2Notice.Store(filepath.Clean(cachedPrimary), struct{}{})
-		u.notifyEvent("📦", "发现压缩包", "CloudDrive2", source)
+		u.notifyEvent(notifyDiscovery, "📦", "发现压缩包", "CloudDrive2", source)
 		submitted++
 		go func(files []string, groupKey string) {
 			defer u.cd2Copy.Delete(groupKey)
@@ -376,7 +376,7 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	u.cd2Resume.Store(filepath.Clean(primaryPath), struct{}{})
 	u.folders.InjectFileEvent(primaryPath, "cd2 cache ready")
 	u.Printf("CloudDrive2 缓存完成：已复制 %d 个文件到 %s", len(files), finalDir)
-	u.notifyEvent("✅", "缓存完成", "CloudDrive2", primaryPath)
+	u.notifyEvent(notifyCache, "✅", "缓存完成", "CloudDrive2", primaryPath)
 	return nil
 }
 

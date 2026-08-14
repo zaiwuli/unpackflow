@@ -231,6 +231,8 @@ func TestUISettingsPersistAcrossRestart(t *testing.T) {
 	}
 	if got := restarted.notificationSettings(); !got.Enabled || got.URL != "http://notify.local/webhook" {
 		t.Fatalf("notification was not restored: %#v", got)
+	} else if got.Events == nil || !got.Events.Discovery || !got.Events.Cache || !got.Events.Extract || !got.Events.Complete || !got.Events.Cleanup {
+		t.Fatalf("legacy notification settings must enable every stage: %#v", got.Events)
 	}
 }
 
@@ -455,7 +457,7 @@ func TestNotificationEventIsSentImmediately(t *testing.T) {
 	u := New()
 	u.uiStore = &UIStore{Notification: UINotification{Enabled: true, URL: server.URL}}
 	started := time.Now()
-	u.notifyEvent("📦", "发现压缩包", "CloudDrive2", "/115open/test.7z")
+	u.notifyEvent(notifyDiscovery, "📦", "发现压缩包", "CloudDrive2", "/115open/test.7z")
 
 	select {
 	case request := <-requestReceived:
@@ -468,6 +470,44 @@ func TestNotificationEventIsSentImmediately(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for immediate notification")
+	}
+}
+
+func TestNotificationStageSelection(t *testing.T) {
+	t.Parallel()
+
+	requests := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.URL.Query().Get("text")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	u := New()
+	u.uiStore = &UIStore{Notification: UINotification{
+		Enabled: true,
+		URL:     server.URL,
+		Events: &UINotificationEvents{
+			Discovery: true,
+			Complete:  true,
+		},
+	}}
+
+	u.notifyEvent(notifyCache, "✅", "缓存完成", "CloudDrive2", "/115open/test.7z")
+	select {
+	case text := <-requests:
+		t.Fatalf("disabled cache stage unexpectedly sent notification: %q", text)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	u.notifyEvent(notifyDiscovery, "📦", "发现压缩包", "CloudDrive2", "/115open/test.7z")
+	select {
+	case text := <-requests:
+		if !strings.Contains(text, "发现压缩包") {
+			t.Fatalf("unexpected discovery notification: %q", text)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("enabled discovery stage did not send notification")
 	}
 }
 

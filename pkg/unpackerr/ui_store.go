@@ -22,9 +22,39 @@ type UIStore struct {
 	mu           sync.RWMutex
 }
 type UINotification struct {
-	Enabled bool   `json:"enabled"`
-	URL     string `json:"url"`
+	Enabled bool                  `json:"enabled"`
+	URL     string                `json:"url"`
+	Events  *UINotificationEvents `json:"events,omitempty"`
 }
+type UINotificationEvents struct {
+	Discovery bool `json:"discovery"`
+	Cache     bool `json:"cache"`
+	Extract   bool `json:"extract"`
+	Complete  bool `json:"complete"`
+	Cleanup   bool `json:"cleanup"`
+}
+
+type notificationStage string
+
+const (
+	notifyDiscovery notificationStage = "discovery"
+	notifyCache     notificationStage = "cache"
+	notifyExtract   notificationStage = "extract"
+	notifyComplete  notificationStage = "complete"
+	notifyCleanup   notificationStage = "cleanup"
+)
+
+func defaultNotificationEvents() *UINotificationEvents {
+	return &UINotificationEvents{Discovery: true, Cache: true, Extract: true, Complete: true, Cleanup: true}
+}
+
+func normalizeNotification(settings UINotification) UINotification {
+	if settings.Events == nil {
+		settings.Events = defaultNotificationEvents()
+	}
+	return settings
+}
+
 type UIOverrides struct {
 	Workers          uint     `json:"workers,omitempty"`
 	CD2Enabled       *bool    `json:"cd2_enabled,omitempty"`
@@ -60,6 +90,7 @@ func (u *Unpackerr) loadUIStore() error {
 	if len(store.Passwords) == 0 && len(u.Passwords) > 0 {
 		store.Passwords = append([]string(nil), u.Passwords...)
 	}
+	store.Notification = normalizeNotification(store.Notification)
 	u.Passwords = append([]string(nil), store.Passwords...)
 	if store.Overrides.Workers > 0 {
 		u.Parallel = store.Overrides.Workers
@@ -188,7 +219,7 @@ func (u *Unpackerr) notificationSettings() UINotification {
 	}
 	u.uiStore.mu.RLock()
 	defer u.uiStore.mu.RUnlock()
-	return u.uiStore.Notification
+	return normalizeNotification(u.uiStore.Notification)
 }
 func (u *Unpackerr) uiSettings() UIOverrides {
 	enabled, keepCache, deleteSource := u.CloudDrive2.Enabled, u.CloudDrive2.KeepCache, u.CloudDrive2.DeleteSource
@@ -255,6 +286,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	return settings
 }
 func (u *Unpackerr) saveNotification(s UINotification) error {
+	s = normalizeNotification(s)
 	u.uiStore.mu.Lock()
 	u.uiStore.Notification = s
 	u.uiStore.mu.Unlock()
@@ -276,28 +308,36 @@ func (u *Unpackerr) notifyUI(status ExtractStatus, item *Extract) {
 	if item == nil {
 		return
 	}
-	icon, title := "⚪", "任务状态"
+	icon, title, stage := "⚪", "任务状态", notifyComplete
 	switch status {
 	case QUEUED:
-		icon, title = "📦", "发现压缩包"
+		icon, title, stage = "📦", "发现压缩包", notifyDiscovery
 	case EXTRACTING:
-		icon, title = "⏱️", "开始解压"
+		icon, title, stage = "⏱️", "开始解压", notifyExtract
 	case EXTRACTED:
-		icon, title = "✅", "解压完成"
+		icon, title, stage = "✅", "解压完成", notifyComplete
 	case EXTRACTFAILED:
-		icon, title = "❌", "解压失败"
+		icon, title, stage = "❌", "解压失败", notifyComplete
 	case DELETED:
-		icon, title = "🧹", "任务清理完成"
+		icon, title, stage = "🧹", "任务清理完成", notifyCleanup
 	}
-	u.notifyEvent(icon, title, sourceName(item.App), item.Path)
+	u.notifyEvent(stage, icon, title, sourceName(item.App), item.Path)
 }
 
-func (u *Unpackerr) notifyEvent(icon, title, source, task string) {
+func (u *Unpackerr) notifyEvent(stage notificationStage, icon, title, source, task string) {
 	s := u.notificationSettings()
 	if !s.Enabled || s.URL == "" {
 		u.Debugf("通知未发送：通知功能未启用或通知地址为空（%s）", title)
 		return
 	}
+	if !notificationStageEnabled(s, stage) {
+		u.Debugf("通知未发送：已关闭“%s”阶段通知（%s）", notificationStageName(stage), title)
+		return
+	}
+	u.sendNotification(s, icon, title, source, task)
+}
+
+func (u *Unpackerr) sendNotification(s UINotification, icon, title, source, task string) {
 	message := formatNotificationMessage(icon, title, source, task)
 	go func() {
 		parsed, err := url.Parse(s.URL)
@@ -333,6 +373,41 @@ func (u *Unpackerr) notifyEvent(icon, title, source, task string) {
 		}
 		u.Errorf("发送通知失败（已重试 3 次）：%s：%v", title, lastError)
 	}()
+}
+
+func notificationStageEnabled(settings UINotification, stage notificationStage) bool {
+	events := normalizeNotification(settings).Events
+	switch stage {
+	case notifyDiscovery:
+		return events.Discovery
+	case notifyCache:
+		return events.Cache
+	case notifyExtract:
+		return events.Extract
+	case notifyComplete:
+		return events.Complete
+	case notifyCleanup:
+		return events.Cleanup
+	default:
+		return false
+	}
+}
+
+func notificationStageName(stage notificationStage) string {
+	switch stage {
+	case notifyDiscovery:
+		return "发现"
+	case notifyCache:
+		return "缓存"
+	case notifyExtract:
+		return "解压"
+	case notifyComplete:
+		return "完成"
+	case notifyCleanup:
+		return "清理"
+	default:
+		return "未知"
+	}
 }
 func formatUINotification(status ExtractStatus, item *Extract) string {
 	icon, title := "\u26aa", "\u4efb\u52a1\u72b6\u6001"

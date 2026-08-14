@@ -20,9 +20,29 @@ function renderList(element, values, render, empty) {
   element.innerHTML = values && values.length ? values.map(render).join('') : `<p class="empty">${empty}</p>`;
 }
 
+function ensureNotificationOptions() {
+  if ($('notify-options')) return;
+  const options = document.createElement('div');
+  options.id = 'notify-options';
+  options.innerHTML = '<h3>通知阶段</h3>' +
+    '<label class="check-row"><input id="notify-discovery" type="checkbox"> 发现压缩包</label>' +
+    '<label class="check-row"><input id="notify-cache" type="checkbox"> 缓存完成</label>' +
+    '<label class="check-row"><input id="notify-extract" type="checkbox"> 开始解压</label>' +
+    '<label class="check-row"><input id="notify-complete" type="checkbox"> 完成结果（成功或失败）</label>' +
+    '<label class="check-row"><input id="notify-cleanup" type="checkbox"> 清理完成</label>';
+  $('notify-url').closest('.field').insertAdjacentElement('afterend', options);
+}
+
 function fillForms(data) {
+  ensureNotificationOptions();
   $('notify-enabled').checked = !!data.notification.enabled;
   $('notify-url').value = data.notification.url || '';
+  const notifyEvents = data.notification.events || {discovery: true, cache: true, extract: true, complete: true, cleanup: true};
+  $('notify-discovery').checked = !!notifyEvents.discovery;
+  $('notify-cache').checked = !!notifyEvents.cache;
+  $('notify-extract').checked = !!notifyEvents.extract;
+  $('notify-complete').checked = !!notifyEvents.complete;
+  $('notify-cleanup').checked = !!notifyEvents.cleanup;
   $('workers').value = data.totals.workers || 1;
   $('cd2-enabled').checked = !!data.clouddrive2.enabled;
   $('cd2-url').value = data.clouddrive2.url || '';
@@ -142,7 +162,17 @@ $('history').addEventListener('click', async event => {
 });
 
 $('notify-save').addEventListener('click', async () => {
-  const response = await fetch('api/notification', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: $('notify-enabled').checked, url: $('notify-url').value.trim()})});
+  const response = await fetch('api/notification', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
+    enabled: $('notify-enabled').checked,
+    url: $('notify-url').value.trim(),
+    events: {
+      discovery: $('notify-discovery').checked,
+      cache: $('notify-cache').checked,
+      extract: $('notify-extract').checked,
+      complete: $('notify-complete').checked,
+      cleanup: $('notify-cleanup').checked,
+    },
+  })});
   $('notify-message').textContent = response.ok ? zh.saved : zh.saveFailed;
 });
 $('notify-test').addEventListener('click', async () => {

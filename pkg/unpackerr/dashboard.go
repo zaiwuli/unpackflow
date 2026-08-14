@@ -258,8 +258,12 @@ func (u *Unpackerr) notificationAPI(w http.ResponseWriter, r *http.Request, _ ht
 	u.writeJSON(w, map[string]any{"success": true})
 }
 func (u *Unpackerr) notificationTestAPI(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
-	item := &Extract{Path: "notification-test", App: FolderString, Updated: time.Now()}
-	u.notifyUI(QUEUED, item)
+	settings := u.notificationSettings()
+	if !settings.Enabled || settings.URL == "" {
+		http.Error(w, "通知功能未启用或通知地址为空", http.StatusBadRequest)
+		return
+	}
+	u.sendNotification(settings, "✅", "通知测试", "UnpackFlow 本地测试", "notification-test")
 	u.writeJSON(w, map[string]any{"success": true, "message": "\u6d4b\u8bd5\u901a\u77e5\u5df2\u63d0\u4ea4"})
 }
 
