@@ -574,7 +574,15 @@ func (u *Unpackerr) processEvent(event *eventData, now time.Time) {
 		return
 	}
 	if event.cnfg != nil && !event.cnfg.ExternalOnly {
-		version, err := sourceVersion("local", event.file)
+		// Match the identity recorded after extraction. Root-level archives are
+		// processed as files; archives below a child directory are processed as
+		// that directory. Using the raw event file for both made nested archives
+		// bypass their successful history entry.
+		identityPath := event.file
+		if filepath.Dir(event.file) != event.cnfg.Path {
+			identityPath = filepath.Dir(event.file)
+		}
+		version, err := sourceVersion("local", identityPath)
 		if err == nil && u.wasProcessed(version) {
 			u.Debugf("本地压缩包已处理，忽略重复事件: %s", event.file)
 			return

@@ -69,9 +69,27 @@ func (u *Unpackerr) loadProcessingState() error {
 	if state.Pending == nil {
 		state.Pending = make(map[string]PendingCD2)
 	}
+	state.Processed = compactProcessedSources(state.Processed)
 	state.Path = filepath.Join(base, "unpackflow-state.json")
 	u.state = state
 	return nil
+}
+
+func compactProcessedSources(processed map[string]ProcessedSource) map[string]ProcessedSource {
+	compacted := make(map[string]ProcessedSource, len(processed))
+	identities := make(map[string]string, len(processed))
+	for key, item := range processed {
+		identity := strings.ToLower(item.Source) + "|" + strings.ToLower(filepath.ToSlash(filepath.Clean(item.Path)))
+		if previousKey, exists := identities[identity]; exists {
+			if !item.CompletedAt.After(compacted[previousKey].CompletedAt) {
+				continue
+			}
+			delete(compacted, previousKey)
+		}
+		compacted[key] = item
+		identities[identity] = key
+	}
+	return compacted
 }
 
 func (u *Unpackerr) saveProcessingState() error {
@@ -137,8 +155,33 @@ func (u *Unpackerr) wasProcessed(version ProcessedSource) bool {
 	}
 	u.state.mu.RLock()
 	_, ok := u.state.Processed[version.Key]
+	if !ok {
+		// A successful history entry owns this source path until the user
+		// deletes it from the UI. CloudDrive/FUSE can change mtime while merely
+		// refreshing metadata, so version-only matching caused the same archive
+		// to be copied and extracted repeatedly. Keep size/mtime in the record
+		// for display and diagnosis, but use source + normalized primary path as
+		// the durable de-duplication identity.
+		for _, processed := range u.state.Processed {
+			if processed.Source == version.Source && sameSourcePath(processed.Path, version.Path) {
+				ok = true
+				break
+			}
+		}
+	}
 	u.state.mu.RUnlock()
 	return ok
+}
+
+func sameSourcePath(left, right string) bool {
+	left, right = filepath.Clean(left), filepath.Clean(right)
+	if left == right {
+		return true
+	}
+	// CD2 paths can cross Windows during local testing and Linux in Docker.
+	// Treat path casing consistently so the same remote archive cannot bypass
+	// history just because a mount reports different letter casing.
+	return strings.EqualFold(filepath.ToSlash(left), filepath.ToSlash(right))
 }
 
 func (u *Unpackerr) markProcessed(version ProcessedSource) {
@@ -147,6 +190,11 @@ func (u *Unpackerr) markProcessed(version ProcessedSource) {
 	}
 	version.CompletedAt = time.Now()
 	u.state.mu.Lock()
+	for key, processed := range u.state.Processed {
+		if processed.Source == version.Source && sameSourcePath(processed.Path, version.Path) {
+			delete(u.state.Processed, key)
+		}
+	}
 	u.state.Processed[version.Key] = version
 	u.state.mu.Unlock()
 	if err := u.saveProcessingState(); err != nil {
@@ -176,7 +224,13 @@ func (u *Unpackerr) deleteProcessed(key string) (ProcessedSource, bool) {
 	}
 	u.state.mu.Lock()
 	item, ok := u.state.Processed[key]
-	delete(u.state.Processed, key)
+	if ok {
+		for processedKey, processed := range u.state.Processed {
+			if processed.Source == item.Source && sameSourcePath(processed.Path, item.Path) {
+				delete(u.state.Processed, processedKey)
+			}
+		}
+	}
 	u.state.mu.Unlock()
 	if ok {
 		if err := u.saveProcessingState(); err != nil {
