@@ -79,7 +79,7 @@ func compactProcessedSources(processed map[string]ProcessedSource) map[string]Pr
 	compacted := make(map[string]ProcessedSource, len(processed))
 	identities := make(map[string]string, len(processed))
 	for key, item := range processed {
-		identity := strings.ToLower(item.Source) + "|" + strings.ToLower(filepath.ToSlash(filepath.Clean(item.Path)))
+		identity := processedIdentity(item)
 		if previousKey, exists := identities[identity]; exists {
 			if !item.CompletedAt.After(compacted[previousKey].CompletedAt) {
 				continue
@@ -90,6 +90,16 @@ func compactProcessedSources(processed map[string]ProcessedSource) map[string]Pr
 		identities[identity] = key
 	}
 	return compacted
+}
+
+// processedIdentity is intentionally cheap: same archive file name and same
+// total byte size means the archive has already been handled. It avoids a
+// second full read for hashing and avoids CloudDrive metadata-only mtime
+// changes retriggering extraction. The source is not included so a copy of an
+// archive arriving through CD2 and later through a local folder is still only
+// processed once.
+func processedIdentity(item ProcessedSource) string {
+	return strings.ToLower(filepath.Base(filepath.Clean(item.Path))) + "|" + fmt.Sprintf("%d", item.Size)
 }
 
 func (u *Unpackerr) saveProcessingState() error {
@@ -122,7 +132,7 @@ func sourceVersion(source, sourcePath string) (ProcessedSource, error) {
 	if err != nil {
 		return ProcessedSource{}, err
 	}
-	key := fmt.Sprintf("%s|%s|%d|%d", source, clean, stat.Size(), stat.ModTime().UnixNano())
+	key := fmt.Sprintf("%s|%d", strings.ToLower(filepath.Base(clean)), stat.Size())
 	return ProcessedSource{Key: key, Source: source, Path: clean, Size: stat.Size(), ModifiedNS: stat.ModTime().UnixNano()}, nil
 }
 
@@ -130,7 +140,6 @@ func sourceGroupVersion(source string, files []string) (ProcessedSource, error) 
 	files = append([]string(nil), files...)
 	sort.Strings(files)
 	var size, modified int64
-	parts := make([]string, 0, len(files))
 	for _, file := range files {
 		stat, err := os.Stat(file)
 		if err != nil {
@@ -140,11 +149,10 @@ func sourceGroupVersion(source string, files []string) (ProcessedSource, error) 
 		if stat.ModTime().UnixNano() > modified {
 			modified = stat.ModTime().UnixNano()
 		}
-		parts = append(parts, fmt.Sprintf("%s:%d:%d", filepath.Clean(file), stat.Size(), stat.ModTime().UnixNano()))
 	}
 	primary := archivePrimary(files)
 	return ProcessedSource{
-		Key: fmt.Sprintf("%s|%s", source, strings.Join(parts, "|")), Source: source,
+		Key: fmt.Sprintf("%s|%d", strings.ToLower(filepath.Base(primary)), size), Source: source,
 		Path: filepath.Clean(primary), Files: files, Size: size, ModifiedNS: modified,
 	}, nil
 }
@@ -156,14 +164,11 @@ func (u *Unpackerr) wasProcessed(version ProcessedSource) bool {
 	u.state.mu.RLock()
 	_, ok := u.state.Processed[version.Key]
 	if !ok {
-		// A successful history entry owns this source path until the user
-		// deletes it from the UI. CloudDrive/FUSE can change mtime while merely
-		// refreshing metadata, so version-only matching caused the same archive
-		// to be copied and extracted repeatedly. Keep size/mtime in the record
-		// for display and diagnosis, but use source + normalized primary path as
-		// the durable de-duplication identity.
+		// A successful history entry owns this archive name + total size until
+		// the user deletes it from the UI. Keep the source path and mtime only
+		// for history display and diagnosis.
 		for _, processed := range u.state.Processed {
-			if processed.Source == version.Source && sameSourcePath(processed.Path, version.Path) {
+			if processedIdentity(processed) == processedIdentity(version) {
 				ok = true
 				break
 			}
@@ -173,17 +178,6 @@ func (u *Unpackerr) wasProcessed(version ProcessedSource) bool {
 	return ok
 }
 
-func sameSourcePath(left, right string) bool {
-	left, right = filepath.Clean(left), filepath.Clean(right)
-	if left == right {
-		return true
-	}
-	// CD2 paths can cross Windows during local testing and Linux in Docker.
-	// Treat path casing consistently so the same remote archive cannot bypass
-	// history just because a mount reports different letter casing.
-	return strings.EqualFold(filepath.ToSlash(left), filepath.ToSlash(right))
-}
-
 func (u *Unpackerr) markProcessed(version ProcessedSource) {
 	if u.state == nil || version.Key == "" {
 		return
@@ -191,7 +185,7 @@ func (u *Unpackerr) markProcessed(version ProcessedSource) {
 	version.CompletedAt = time.Now()
 	u.state.mu.Lock()
 	for key, processed := range u.state.Processed {
-		if processed.Source == version.Source && sameSourcePath(processed.Path, version.Path) {
+		if processedIdentity(processed) == processedIdentity(version) {
 			delete(u.state.Processed, key)
 		}
 	}
@@ -226,7 +220,7 @@ func (u *Unpackerr) deleteProcessed(key string) (ProcessedSource, bool) {
 	item, ok := u.state.Processed[key]
 	if ok {
 		for processedKey, processed := range u.state.Processed {
-			if processed.Source == item.Source && sameSourcePath(processed.Path, item.Path) {
+			if processedIdentity(processed) == processedIdentity(item) {
 				delete(u.state.Processed, processedKey)
 			}
 		}

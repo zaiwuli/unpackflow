@@ -306,7 +306,7 @@ func TestPersistentHistoryDeleteDoesNotRetryAndRetryDoes(t *testing.T) {
 	}
 }
 
-func TestProcessedHistoryDeduplicatesSameLocalPathAfterMetadataChange(t *testing.T) {
+func TestProcessedHistoryDeduplicatesSameNameAndSizeAfterMetadataChange(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "same-name.zip")
 	if err := os.WriteFile(archive, []byte("first"), 0o600); err != nil {
@@ -322,26 +322,23 @@ func TestProcessedHistoryDeduplicatesSameLocalPathAfterMetadataChange(t *testing
 		t.Fatal(err)
 	}
 	u.markProcessed(first)
-	if err := os.WriteFile(archive, []byte("changed-content"), 0o600); err != nil {
+	if err := os.WriteFile(archive, []byte("other"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	changed, err := sourceVersion("local", archive)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Key == changed.Key {
-		t.Fatal("test setup did not change the file version")
-	}
 	if !u.wasProcessed(changed) {
-		t.Fatal("same local source path must remain deduplicated until history is deleted")
+		t.Fatal("same archive name and size must remain deduplicated until history is deleted")
 	}
 	u.deleteProcessed(first.Key)
 	if u.wasProcessed(changed) {
-		t.Fatal("deleting history must allow the same local path to be processed again")
+		t.Fatal("deleting history must allow the same name and size to be processed again")
 	}
 }
 
-func TestProcessedHistoryDeduplicatesSameCD2PrimaryAfterMetadataChange(t *testing.T) {
+func TestProcessedHistoryDeduplicatesSameNameAndSizeAcrossSources(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "same-name.7z")
 	if err := os.WriteFile(archive, []byte("first"), 0o600); err != nil {
@@ -357,19 +354,16 @@ func TestProcessedHistoryDeduplicatesSameCD2PrimaryAfterMetadataChange(t *testin
 		t.Fatal(err)
 	}
 	u.markProcessed(first)
-	if err := os.WriteFile(archive, []byte("changed-content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	changed, err := sourceGroupVersion("cd2", []string{archive})
+	changed, err := sourceVersion("local", archive)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !u.wasProcessed(changed) {
-		t.Fatal("same CD2 primary path must remain deduplicated until history is deleted")
+		t.Fatal("same name and size must be deduplicated across CD2 and local sources")
 	}
 }
 
-func TestStartupScanSkipsPersistedArchiveUntilHistoryDeleted(t *testing.T) {
+func TestStartupScanSkipsPersistedArchiveUntilSizeChanges(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -408,20 +402,11 @@ func TestStartupScanSkipsPersistedArchiveUntilHistoryDeleted(t *testing.T) {
 	u.scanExistingFolderArchives()
 	select {
 	case event := <-u.folders.Events:
-		t.Fatalf("same archive path must remain deduplicated after metadata changes: %+v", event)
-	default:
-	}
-	if _, ok := u.deleteProcessed(version.Key); !ok {
-		t.Fatal("failed to delete processing history")
-	}
-	u.scanExistingFolderArchives()
-	select {
-	case event := <-u.folders.Events:
 		if event.file != archive {
-			t.Fatalf("unexpected archive event after history deletion: %+v", event)
+			t.Fatalf("unexpected archive event after size change: %+v", event)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("archive was not submitted after history deletion")
+		t.Fatal("archive was not submitted after size change")
 	}
 }
 
