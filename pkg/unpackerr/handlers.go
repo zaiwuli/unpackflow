@@ -129,10 +129,13 @@ func (u *Unpackerr) extractCompletedDownload(name string, now time.Time, item *E
 		archiveTypes = append(archiveTypes, ".cue")
 	}
 
+	mapper := newArchiveNameMapper()
+	u.nameMappers.Store(name, mapper)
 	queueSize, _ := u.Extract(&xtractr.Xtract{
-		Password:  u.getPasswordFromPath(item.Path),
-		Passwords: u.Passwords,
-		Name:      name,
+		Password:   u.getPasswordFromPath(item.Path),
+		Passwords:  u.Passwords,
+		Name:       name,
+		NameMapper: mapper.Map,
 		Filter: xtractr.Filter{
 			Path:          item.Path,
 			ExcludeSuffix: xtractr.AllExcept(archiveTypes...),
@@ -228,6 +231,12 @@ func (u *Unpackerr) checkExtractDone(now time.Time) {
 // handleXtractrCallback handles callbacks from the xtractr library for starr apps (not folders).
 // This takes the provided info and logs it then sends it the queue update method.
 func (u *Unpackerr) handleXtractrCallback(resp *xtractr.Response) {
+	if _, cancelled := u.cancelled.Load(resp.X.Name); cancelled {
+		if resp.Done {
+			u.cleanupCancelledExtraction(resp)
+		}
+		return
+	}
 	item := u.Map[resp.X.Name]
 	if resp.Done && item != nil {
 		u.updateMetrics(resp, item.App, item.URL)
@@ -251,6 +260,13 @@ func (u *Unpackerr) handleXtractrCallback(resp *xtractr.Response) {
 
 		if item != nil && item.App == starr.Lidarr && item.SplitFlac && resp.Size > 0 {
 			go u.importSplitFlacTracks(item, u.lidarrServerByURL(item.URL))
+		}
+	}
+	if resp.Done {
+		if resp.Error == nil {
+			u.writeNameManifest(resp.X.Name, resp.Output)
+		} else {
+			u.nameMappers.Delete(resp.X.Name)
 		}
 	}
 }

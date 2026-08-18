@@ -98,6 +98,7 @@ func (u *Unpackerr) webRoutes() {
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/clouddrive2/refresh"), u.cd2RefreshAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/settings"), u.settingsAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/history/delete"), u.historyAPI)
+	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/tasks/cancel"), u.cancelTaskAPI)
 
 	if u.Webserver.Pprof {
 		u.registerPprof()

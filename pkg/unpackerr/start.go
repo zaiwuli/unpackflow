@@ -65,17 +65,20 @@ type Unpackerr struct {
 	uiRequests     chan chan DashboardSnapshot
 	historyActions chan historyAction
 	*Logger
-	rotatorr  *rotatorr.Logger
-	menu      map[string]ui.MenuItem
-	uiStore   *UIStore
-	state     *ProcessingState
-	cd2Cache  sync.Map // cache archive path -> []mounted CloudDrive source files
-	cd2Copy   sync.Map // source group key -> struct{} while a cache copy is in progress
-	cd2Resume sync.Map // cached primary path -> struct{} after resume submission
-	cd2Tasks  sync.Map // group key -> *CD2Transfer while copying or verifying
-	cd2Notice sync.Map // cached primary path -> discovery notification already sent
-	cd2Mu     sync.RWMutex
-	cd2Client *clouddrive.Client
+	rotatorr    *rotatorr.Logger
+	menu        map[string]ui.MenuItem
+	uiStore     *UIStore
+	state       *ProcessingState
+	cd2Cache    sync.Map // cache archive path -> []mounted CloudDrive source files
+	cd2Copy     sync.Map // source group key -> struct{} while a cache copy is in progress
+	cd2Resume   sync.Map // cached primary path -> struct{} after resume submission
+	cd2Tasks    sync.Map // group key -> *CD2Transfer while copying or verifying
+	cd2Cancel   sync.Map // group key -> context.CancelFunc for active copies
+	cd2Notice   sync.Map // cached primary path -> discovery notification already sent
+	cancelled   sync.Map // task path/key -> struct{} for user-cancelled work
+	nameMappers sync.Map // task path/key -> *archiveNameMapper
+	cd2Mu       sync.RWMutex
+	cd2Client   *clouddrive.Client
 }
 
 type fileDeleteReq struct {
@@ -364,6 +367,31 @@ func (u *Unpackerr) ParseFlags() *Unpackerr {
 	flag.Parse()
 
 	return u // so you can chain into ParseConfig.
+}
+
+func (u *Unpackerr) cleanupCancelledExtraction(resp *xtractr.Response) {
+	if resp == nil || u.Xtractr == nil {
+		return
+	}
+	if resp.Output != "" {
+		u.Xtractr.DeleteFiles(resp.Output)
+	}
+	if len(resp.NewFiles) > 0 {
+		u.Xtractr.DeleteFiles(resp.NewFiles...)
+	}
+	u.cancelled.Delete(resp.X.Name)
+}
+
+func (u *Unpackerr) writeNameManifest(task, output string) {
+	value, ok := u.nameMappers.LoadAndDelete(task)
+	if !ok || output == "" {
+		return
+	}
+	if mapper, valid := value.(*archiveNameMapper); valid {
+		if err := mapper.WriteManifest(output); err != nil {
+			u.Errorf("写入名称映射失败：%v", err)
+		}
+	}
 }
 
 // Run starts the loop that does the work.

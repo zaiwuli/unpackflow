@@ -383,8 +383,16 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return err
 	}
+	defer func() {
+		if _, cancelled := u.cancelled.Load(key); cancelled {
+			_ = os.RemoveAll(staging)
+			u.updateCD2Transfer(key, archivePrimary(files), "已取消", func(transfer *CD2Transfer) { transfer.Error = "用户取消" })
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), u.CloudDrive2.CopyTimeout.Duration)
 	defer cancel()
+	u.cd2Cancel.Store(key, cancel)
+	defer u.cd2Cancel.Delete(key)
 	startedAt := time.Now()
 	if current, ok := u.cd2Tasks.Load(key); ok {
 		if transfer, valid := current.(*CD2Transfer); valid && transfer != nil && !transfer.StartedAt.IsZero() {
@@ -679,6 +687,9 @@ func sameFileMetadata(source, target string) (bool, error) {
 }
 
 func (u *Unpackerr) queueCD2Retry(groupKey string, files []string, copyErr error) {
+	if _, cancelled := u.cancelled.Load(groupKey); cancelled {
+		return
+	}
 	key := "copy|" + filepath.Clean(groupKey)
 	attempts := 1
 	for _, item := range u.pendingCD2() {

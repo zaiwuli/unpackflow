@@ -245,12 +245,13 @@ function renderTask(task) {
     if (task.speed) detail += ' · ' + formatBytes(task.speed) + '/s';
     if (task.eta_seconds) detail += ' · 预计 ' + formatDuration(task.eta_seconds);
   }
+  const canCancel = ['已取消', '已完成', '已解压', '已导入', '解压失败', '清理失败'].indexOf(task.status) < 0;
   return '<article class="task"><div style="min-width:0;flex:1"><div class="task-name">' + esc(task.name) + '</div>' +
     '<div class="task-meta">' + esc(task.source) + ' · ' + esc(task.updated) + '</div>' +
     (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
-    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span></div></article>';
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (canCancel ? '<button data-cancel-task="' + esc(task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
 }
 
 function renderStatus(data) {
@@ -354,6 +355,15 @@ $('history').addEventListener('click', async event => {
   if (!key || !action) return;
   const response = await fetch('api/history/delete', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key, action})});
   if (response.ok) load(false);
+});
+
+$('tasks').addEventListener('click', async event => {
+  const key = event.target.dataset.cancelTask;
+  if (!key) return;
+  event.target.disabled = true;
+  const response = await fetch('api/tasks/cancel', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key})});
+  if (response.ok) load(false);
+  else event.target.disabled = false;
 });
 
 $('notify-save').addEventListener('click', async () => {

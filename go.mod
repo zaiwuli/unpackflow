@@ -1,5 +1,7 @@
 module github.com/Unpackerr/unpackerr
 
+replace golift.io/xtractr => ./third_party/xtractr
+
 go 1.26.4
 
 require (

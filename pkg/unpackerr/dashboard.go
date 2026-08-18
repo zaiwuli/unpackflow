@@ -2,6 +2,7 @@ package unpackerr
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -71,6 +72,7 @@ type DashboardTotals struct {
 }
 
 type DashboardTask struct {
+	Key        string `json:"key"`
 	Name       string `json:"name"`
 	Source     string `json:"source"`
 	Status     string `json:"status"`
@@ -119,6 +121,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			source = "CloudDrive2"
 		}
 		task := DashboardTask{
+			Key:     name,
 			Name:    name,
 			Source:  source,
 			Status:  statusName(item.Status),
@@ -130,16 +133,24 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 				task.Progress = progress
 			}
 		}
+		if _, cancelled := u.cancelled.Load(name); cancelled {
+			task.Status = "已取消"
+		}
 		if item.Status == QUEUED || item.Status == EXTRACTING || item.Status == WAITING {
 			snapshot.Totals.Active++
 		}
 		snapshot.Tasks = append(snapshot.Tasks, task)
 	}
 	for _, transfer := range snapshot.Transfers {
+		status := transfer.State
+		if _, cancelled := u.cancelled.Load(transfer.Key); cancelled {
+			status = "已取消"
+		}
 		snapshot.Tasks = append(snapshot.Tasks, DashboardTask{
+			Key:        transfer.Key,
 			Name:       filepath.Base(transfer.Path),
 			Source:     "CloudDrive2",
-			Status:     transfer.State,
+			Status:     status,
 			Updated:    transfer.UpdatedAt.Format("2006-01-02 15:04:05"),
 			Bytes:      transfer.Bytes,
 			Total:      transfer.Total,
@@ -478,6 +489,30 @@ func (u *Unpackerr) historyAPI(w http.ResponseWriter, r *http.Request, _ httprou
 	if err := <-action.result; err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	u.writeJSON(w, map[string]any{"success": true})
+}
+
+func (u *Unpackerr) cancelTaskAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var input struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Key) == "" {
+		http.Error(w, "请求格式错误", http.StatusBadRequest)
+		return
+	}
+	key := strings.TrimSpace(input.Key)
+	if cancel, ok := u.cd2Cancel.Load(key); ok {
+		cancel.(context.CancelFunc)()
+	}
+	u.cancelled.Store(key, struct{}{})
+	u.cd2Copy.Delete(key)
+	u.removePendingCD2("copy|" + filepath.Clean(key))
+	if transfer, ok := u.cd2Tasks.Load(key); ok {
+		if item, valid := transfer.(*CD2Transfer); valid && item != nil && item.CachedPath != "" {
+			_ = os.Remove(item.CachedPath)
+		}
+		u.updateCD2Transfer(key, key, "已取消", func(item *CD2Transfer) { item.Error = "用户取消" })
 	}
 	u.writeJSON(w, map[string]any{"success": true})
 }

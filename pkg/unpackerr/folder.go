@@ -387,12 +387,15 @@ func (u *Unpackerr) extractTrackedItem(name string, folder *Folder, now time.Tim
 	u.updateHistory(FolderString + ": " + name)
 
 	exclude := folderExcludeSuffixes(name, folder.config)
+	mapper := newArchiveNameMapper()
+	u.nameMappers.Store(name, mapper)
 
 	// extract it.
 	queueSize, err := u.Extract(&xtractr.Xtract{
 		Password:         u.getPasswordFromPath(name),
 		Passwords:        u.Passwords,
 		Name:             name,
+		NameMapper:       mapper.Map,
 		Filter:           xtractr.Filter{Path: name, ExcludeSuffix: exclude},
 		TempFolder:       !folder.config.MoveBack,
 		ExtractTo:        folder.config.ExtractPath,
@@ -453,6 +456,12 @@ func getFileList(path string) []os.FileInfo {
 
 // folderXtractrCallback is run twice by the xtractr library when the extraction begins, and finishes.
 func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
+	if _, cancelled := u.cancelled.Load(resp.X.Name); cancelled {
+		if resp.Done {
+			u.cleanupCancelledExtraction(resp)
+		}
+		return
+	}
 	folder, ok := u.folders.Folders[resp.X.Name]
 
 	switch item := u.Map[resp.X.Name]; {
@@ -505,6 +514,13 @@ func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
 	}
 
 	folder.updated = resp.Started.Add(resp.Elapsed)
+	if resp.Done {
+		if resp.Error == nil {
+			u.writeNameManifest(resp.X.Name, resp.Output)
+		} else {
+			u.nameMappers.Delete(resp.X.Name)
+		}
+	}
 	u.updateQueueStatus(&newStatus{Name: resp.X.Name, Resp: resp, Status: folder.status}, folder.updated, true)
 	if folder.status == EXTRACTED && folder.config.DeleteAfter.Duration <= 0 &&
 		(folder.config.DeleteOrig || folder.config.ArchivePath != "") {

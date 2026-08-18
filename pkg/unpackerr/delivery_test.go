@@ -18,6 +18,7 @@ import (
 	"github.com/Unpackerr/unpackerr/pkg/clouddrive"
 	"github.com/julienschmidt/httprouter"
 	"golift.io/cnfg"
+	"golift.io/xtractr"
 )
 
 func TestDockerDefaultFolderEnvironment(t *testing.T) {
@@ -497,6 +498,52 @@ func TestNotificationUsesGETAndEncodedText(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for notification request")
+	}
+}
+
+func TestArchiveNameMapperShortensLongUTF8Names(t *testing.T) {
+	mapper := newArchiveNameMapper()
+	original := strings.Repeat("测试", 140) + ".txt"
+	mapped := mapper.Map("资料/" + original)
+	if mapped == "资料/"+original || len([]byte(filepath.Base(mapped))) > maxArchiveNameBytes || !strings.HasSuffix(mapped, ".txt") {
+		t.Fatalf("long UTF-8 name was not safely shortened: %q", mapped)
+	}
+	if mapper.Map("资料/"+original) != mapped {
+		t.Fatal("name mapping must be deterministic")
+	}
+	if err := mapper.WriteManifest(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLongZIPEntryExtractsWithMappedName(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "long.zip")
+	original := "目录/" + strings.Repeat("长", 130) + ".txt"
+	createZipFixture(t, archive, original, "content")
+	output := filepath.Join(dir, "output")
+	mapper := newArchiveNameMapper()
+	_, files, _, err := xtractr.ExtractFile(&xtractr.XFile{FilePath: archive, OutputDir: output, FileMode: 0o644, DirMode: 0o755, NameMapper: mapper.Map})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || len([]byte(filepath.Base(files[0]))) > maxArchiveNameBytes {
+		t.Fatalf("unexpected mapped output: %#v", files)
+	}
+	if content, err := os.ReadFile(files[0]); err != nil || string(content) != "content" {
+		t.Fatalf("mapped file was not extracted: %v, %q", err, content)
+	}
+}
+
+func TestRARFixtureExtractsThroughMappedXtractr(t *testing.T) {
+	archive := filepath.Join("third_party", "xtractr", "test_data", "archive.rar")
+	if _, err := os.Stat(archive); err != nil {
+		t.Skip("RAR fixture unavailable")
+	}
+	mapper := newArchiveNameMapper()
+	_, _, _, err := xtractr.ExtractFile(&xtractr.XFile{FilePath: archive, OutputDir: t.TempDir(), FileMode: 0o644, DirMode: 0o755, NameMapper: mapper.Map})
+	if err != nil {
+		t.Fatalf("RAR fixture extraction failed: %v", err)
 	}
 }
 
