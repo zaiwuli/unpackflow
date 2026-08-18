@@ -54,6 +54,9 @@ function ensureNotificationOptions() {
     '<label class="check-row"><input id="notify-complete" type="checkbox"> 完成结果（成功或失败）</label>' +
     '<label class="check-row"><input id="notify-cleanup" type="checkbox"> 清理完成</label>';
   $('notify-url').closest('.field').insertAdjacentElement('afterend', options);
+  const style = document.createElement('style');
+  style.textContent = '.active-provider{background:#e9efff;color:var(--brand);border-color:var(--brand);font-weight:700}';
+  document.head.appendChild(style);
 
   const templates = document.createElement('div');
   templates.id = 'notify-templates';
@@ -116,6 +119,61 @@ async function saveNotificationTemplate() {
 }
 async function selectNotificationTemplate() { const id = $('notify-template-select').value; if (id) await templateAction({action: 'select', id}); }
 async function deleteNotificationTemplate() { const id = $('notify-template-select').value; if (id && id !== 'default') await templateAction({action: 'delete', id}); }
+
+// Fixed notification providers: keep the page simple while allowing the
+// transport details to evolve independently in the backend.
+function ensureNotificationOptions() {
+  if ($('notify-provider-options')) return;
+  const options = document.createElement('div');
+  options.id = 'notify-provider-options';
+  options.innerHTML = '<h3>通知阶段</h3>' +
+    '<label class="check-row"><input id="notify-discovery" type="checkbox"> 发现压缩包</label>' +
+    '<label class="check-row"><input id="notify-cache" type="checkbox"> 缓存完成</label>' +
+    '<label class="check-row"><input id="notify-extract" type="checkbox"> 开始解压</label>' +
+    '<label class="check-row"><input id="notify-complete" type="checkbox"> 完成结果（成功或失败）</label>' +
+    '<label class="check-row"><input id="notify-cleanup" type="checkbox"> 清理完成</label>' +
+    '<h3>通知方式</h3>' +
+    '<div class="form-actions" style="margin-top:8px"><button id="notify-mp" type="button">MP 模板通知</button><button id="notify-ms" type="button">MS 模板通知</button></div>' +
+    '<label class="field" id="notify-api-key-row"><span>API Key</span><input id="notify-api-key" type="text" autocomplete="off" placeholder="MS 接口的 apiKey"></label>';
+  $('notify-url').closest('.field').insertAdjacentElement('afterend', options);
+  $('notify-mp').addEventListener('click', () => selectNotificationProvider('mp'));
+  $('notify-ms').addEventListener('click', () => selectNotificationProvider('ms'));
+}
+
+function renderNotificationTemplates(settings) {
+  const provider = settings.provider === 'ms' ? 'ms' : 'mp';
+  $('notify-api-key').value = settings.api_key || '';
+  $('notify-mp').classList.toggle('active-provider', provider === 'mp');
+  $('notify-ms').classList.toggle('active-provider', provider === 'ms');
+  $('notify-api-key-row').style.display = provider === 'ms' ? 'flex' : 'none';
+  $('notify-mp').dataset.provider = provider;
+  $('notify-ms').dataset.provider = provider;
+}
+
+async function saveNotificationSettings() {
+  const response = await fetch('api/notification', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
+    enabled: $('notify-enabled').checked,
+    url: $('notify-url').value.trim(),
+    provider: $('notify-ms').classList.contains('active-provider') ? 'ms' : 'mp',
+    api_key: $('notify-api-key').value.trim(),
+    events: {
+      discovery: $('notify-discovery').checked,
+      cache: $('notify-cache').checked,
+      extract: $('notify-extract').checked,
+      complete: $('notify-complete').checked,
+      cleanup: $('notify-cleanup').checked,
+    },
+  })});
+  $('notify-message').textContent = response.ok ? zh.saved : zh.saveFailed;
+  return response.ok;
+}
+
+async function selectNotificationProvider(provider) {
+  $('notify-mp').classList.toggle('active-provider', provider === 'mp');
+  $('notify-ms').classList.toggle('active-provider', provider === 'ms');
+  $('notify-api-key-row').style.display = provider === 'ms' ? 'flex' : 'none';
+  await saveNotificationSettings();
+}
 
 function ensureLocalSettings() {
   if ($('local-source-action')) return;
@@ -299,18 +357,7 @@ $('history').addEventListener('click', async event => {
 });
 
 $('notify-save').addEventListener('click', async () => {
-  const response = await fetch('api/notification', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
-    enabled: $('notify-enabled').checked,
-    url: $('notify-url').value.trim(),
-    events: {
-      discovery: $('notify-discovery').checked,
-      cache: $('notify-cache').checked,
-      extract: $('notify-extract').checked,
-      complete: $('notify-complete').checked,
-      cleanup: $('notify-cleanup').checked,
-    },
-  })});
-  $('notify-message').textContent = response.ok ? zh.saved : zh.saveFailed;
+  await saveNotificationSettings();
 });
 $('notify-test').addEventListener('click', async () => {
   const response = await fetch('api/notification/test', {method: 'POST'});

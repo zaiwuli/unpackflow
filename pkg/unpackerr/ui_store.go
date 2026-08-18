@@ -1,6 +1,7 @@
 package unpackerr
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,8 @@ type UIStore struct {
 type UINotification struct {
 	Enabled          bool                   `json:"enabled"`
 	URL              string                 `json:"url"`
+	Provider         string                 `json:"provider,omitempty"`
+	APIKey           string                 `json:"api_key,omitempty"`
 	Events           *UINotificationEvents  `json:"events,omitempty"`
 	Templates        []NotificationTemplate `json:"templates,omitempty"`
 	ActiveTemplateID string                 `json:"active_template_id,omitempty"`
@@ -39,9 +42,20 @@ type NotificationTemplate struct {
 }
 
 const defaultNotificationTemplateID = "default"
+const (
+	notificationProviderMP = "mp"
+	notificationProviderMS = "ms"
+)
 
 func defaultNotificationTemplate() NotificationTemplate {
-	return NotificationTemplate{ID: defaultNotificationTemplateID, Name: "默认模板", Remark: "兼容原有通知格式", Content: "{{icon}} UnpackFlow {{title}}\n{{separator}}\n⏱️ 时间: {{time}}\n📦 来源: {{source}}\n📄 任务: {{task}}"}
+	return NotificationTemplate{ID: notificationProviderMP, Name: "MP 模板通知", Remark: "GET 文本通知", Content: "{{icon}} UnpackFlow {{title}}\n{{separator}}\n⏱️ 时间: {{time}}\n📦 来源: {{source}}\n📄 任务: {{task}}"}
+}
+
+func notificationTemplates() []NotificationTemplate {
+	return []NotificationTemplate{
+		defaultNotificationTemplate(),
+		{ID: notificationProviderMS, Name: "MS 模板通知", Remark: "POST JSON 通知", Content: "{{icon}} {{title}}\n{{separator}}\n⏱️ 时间：{{time}}\n📦 来源：{{source}}\n📄 任务：{{task}}"},
+	}
 }
 
 type UINotificationEvents struct {
@@ -70,37 +84,11 @@ func normalizeNotification(settings UINotification) UINotification {
 	if settings.Events == nil {
 		settings.Events = defaultNotificationEvents()
 	}
-	if len(settings.Templates) == 0 {
-		settings.Templates = []NotificationTemplate{defaultNotificationTemplate()}
+	if settings.Provider != notificationProviderMS {
+		settings.Provider = notificationProviderMP
 	}
-	hasDefault := false
-	for _, item := range settings.Templates {
-		if item.ID == defaultNotificationTemplateID {
-			hasDefault = true
-			break
-		}
-	}
-	if !hasDefault {
-		settings.Templates = append([]NotificationTemplate{defaultNotificationTemplate()}, settings.Templates...)
-	}
-	found := false
-	for i := range settings.Templates {
-		if strings.TrimSpace(settings.Templates[i].ID) == "" {
-			settings.Templates[i].ID = fmt.Sprintf("template-%d", time.Now().UnixNano()+int64(i))
-		}
-		if strings.TrimSpace(settings.Templates[i].Name) == "" {
-			settings.Templates[i].Name = "未命名模板"
-		}
-		if strings.TrimSpace(settings.Templates[i].Content) == "" {
-			settings.Templates[i].Content = defaultNotificationTemplate().Content
-		}
-		if settings.Templates[i].ID == settings.ActiveTemplateID {
-			found = true
-		}
-	}
-	if !found {
-		settings.ActiveTemplateID = settings.Templates[0].ID
-	}
+	settings.Templates = notificationTemplates()
+	settings.ActiveTemplateID = settings.Provider
 	return settings
 }
 
@@ -442,8 +430,11 @@ func (u *Unpackerr) saveNotification(s UINotification) error {
 	if s.Templates == nil {
 		s.Templates = current.Templates
 	}
-	if s.ActiveTemplateID == "" {
-		s.ActiveTemplateID = current.ActiveTemplateID
+	if s.Provider == "" {
+		s.Provider = current.Provider
+	}
+	if s.APIKey == "" {
+		s.APIKey = current.APIKey
 	}
 	s = normalizeNotification(s)
 	u.uiStore.mu.Lock()
@@ -497,6 +488,10 @@ func (u *Unpackerr) notifyEvent(stage notificationStage, icon, title, source, ta
 }
 
 func (u *Unpackerr) sendNotification(s UINotification, icon, title, source, task string) {
+	if s.Provider == notificationProviderMS {
+		u.sendMSNotification(s, icon, title, source, task)
+		return
+	}
 	message := renderNotificationTemplate(s, icon, title, source, task)
 	go func() {
 		parsed, err := url.Parse(s.URL)
@@ -531,6 +526,50 @@ func (u *Unpackerr) sendNotification(s UINotification, icon, title, source, task
 			}
 		}
 		u.Errorf("发送通知失败（已重试 3 次）：%s：%v", title, lastError)
+	}()
+}
+
+func (u *Unpackerr) sendMSNotification(s UINotification, icon, title, source, task string) {
+	message := renderNotificationTemplate(s, icon, title, source, task)
+	go func() {
+		payload, err := json.Marshal(struct {
+			Title    string `json:"title"`
+			Content  string `json:"content"`
+			ImageURL string `json:"imageUrl"`
+			Proxy    bool   `json:"proxy"`
+		}{Title: title, Content: message, ImageURL: "", Proxy: false})
+		if err != nil {
+			u.Errorf("通知内容生成失败：%v", err)
+			return
+		}
+		client := &http.Client{Timeout: 10 * time.Second}
+		var lastError error
+		for attempt := 1; attempt <= 3; attempt++ {
+			req, requestErr := http.NewRequestWithContext(context.Background(), http.MethodPost, s.URL, bytes.NewReader(payload))
+			if requestErr != nil {
+				u.Errorf("创建通知请求失败：%v", requestErr)
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			if s.APIKey != "" {
+				req.Header.Set("apiKey", s.APIKey)
+			}
+			res, requestErr := client.Do(req)
+			if requestErr == nil {
+				_ = res.Body.Close()
+				if res.StatusCode >= 200 && res.StatusCode < 300 {
+					u.Printf("MS 通知已发送：%s（%s）", title, source)
+					return
+				}
+				lastError = fmt.Errorf("HTTP %s", res.Status)
+			} else {
+				lastError = requestErr
+			}
+			if attempt < 3 {
+				time.Sleep(time.Duration(attempt) * time.Second)
+			}
+		}
+		u.Errorf("MS 通知发送失败（已重试 3 次）：%s：%v", title, lastError)
 	}()
 }
 

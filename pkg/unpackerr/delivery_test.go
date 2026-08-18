@@ -266,14 +266,13 @@ func TestNotificationTemplatesPersistAndRender(t *testing.T) {
 	}
 
 	initial := u.notificationSettings()
-	if len(initial.Templates) != 1 || initial.Templates[0].ID != defaultNotificationTemplateID || initial.ActiveTemplateID != defaultNotificationTemplateID {
-		t.Fatalf("default notification template was not generated: %#v", initial)
+	if initial.Provider != notificationProviderMP || len(initial.Templates) != 2 || initial.Templates[0].Name != "MP 模板通知" || initial.Templates[1].Name != "MS 模板通知" {
+		t.Fatalf("fixed notification templates were not generated: %#v", initial)
 	}
-	custom := NotificationTemplate{ID: "brief", Name: "简洁模板", Remark: "仅显示结果", Content: "{{icon}} {{title}} | {{source}} | {{task}}"}
 	initial.Enabled = true
 	initial.URL = "http://notify.local/webhook"
-	initial.Templates = append(initial.Templates, custom)
-	initial.ActiveTemplateID = custom.ID
+	initial.Provider = notificationProviderMS
+	initial.APIKey = "ms-secret"
 	if err := u.saveNotification(initial); err != nil {
 		t.Fatal(err)
 	}
@@ -284,20 +283,12 @@ func TestNotificationTemplatesPersistAndRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings := restarted.notificationSettings()
-	if settings.ActiveTemplateID != custom.ID || len(settings.Templates) != 2 || settings.Templates[1].Remark != custom.Remark {
-		t.Fatalf("notification templates were not restored: %#v", settings)
+	if settings.Provider != notificationProviderMS || settings.APIKey != "ms-secret" || settings.ActiveTemplateID != notificationProviderMS || len(settings.Templates) != 2 {
+		t.Fatalf("fixed notification settings were not restored: %#v", settings)
 	}
 	message := renderNotificationTemplate(settings, "OK", "解压完成", "CloudDrive2", "sample.7z")
-	if message != "OK 解压完成 | CloudDrive2 | sample.7z" {
+	if !strings.Contains(message, "OK 解压完成") || !strings.Contains(message, "sample.7z") {
 		t.Fatalf("unexpected rendered notification: %q", message)
-	}
-}
-
-func TestNotificationTemplateInvalidContentFallsBack(t *testing.T) {
-	settings := normalizeNotification(UINotification{Templates: []NotificationTemplate{{ID: "broken", Name: "损坏模板", Content: "{{.missing}}"}}, ActiveTemplateID: "broken"})
-	message := renderNotificationTemplate(settings, "OK", "完成", "本地目录", "sample.zip")
-	if !strings.Contains(message, "UnpackFlow") || !strings.Contains(message, "sample.zip") {
-		t.Fatalf("invalid template did not fall back to the default message: %q", message)
 	}
 }
 
@@ -506,6 +497,46 @@ func TestNotificationUsesGETAndEncodedText(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for notification request")
+	}
+}
+
+func TestNotificationUsesMSJSONAndAPIKey(t *testing.T) {
+	t.Parallel()
+	requestReceived := make(chan *http.Request, 1)
+	bodyReceived := make(chan []byte, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived <- r.Clone(r.Context())
+		body, _ := io.ReadAll(r.Body)
+		bodyReceived <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	u := New()
+	u.uiStore = &UIStore{Notification: UINotification{Enabled: true, URL: server.URL, Provider: notificationProviderMS, APIKey: "ms-test"}}
+	u.notifyEvent(notifyComplete, "✅", "解压完成", "本地目录", "sample.7z")
+	select {
+	case request := <-requestReceived:
+		if request.Method != http.MethodPost || request.Header.Get("Content-Type") != "application/json" || request.Header.Get("apiKey") != "ms-test" {
+			t.Fatalf("unexpected MS request: method=%s content-type=%s apiKey=%s", request.Method, request.Header.Get("Content-Type"), request.Header.Get("apiKey"))
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for MS notification request")
+	}
+	select {
+	case body := <-bodyReceived:
+		var payload struct {
+			Title   string `json:"title"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Title != "解压完成" || !strings.Contains(payload.Content, "sample.7z") {
+			t.Fatalf("unexpected MS payload: %s", body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for MS notification body")
 	}
 }
 
