@@ -285,7 +285,100 @@ func (u *Unpackerr) notificationAPI(w http.ResponseWriter, r *http.Request, _ ht
 		http.Error(w, "\u4fdd\u5b58\u901a\u77e5\u8bbe\u7f6e\u5931\u8d25", http.StatusInternalServerError)
 		return
 	}
-	u.writeJSON(w, map[string]any{"success": true})
+	u.writeJSON(w, map[string]any{"success": true, "notification": u.notificationSettings()})
+}
+
+func (u *Unpackerr) notificationTemplatesAPI(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	var input struct {
+		Action  string `json:"action"`
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Remark  string `json:"remark"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "请求格式错误", http.StatusBadRequest)
+		return
+	}
+	settings := u.notificationSettings()
+	switch input.Action {
+	case "create":
+		if strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Content) == "" {
+			http.Error(w, "模板名称和内容不能为空", http.StatusBadRequest)
+			return
+		}
+		input.ID = fmt.Sprintf("template-%d", time.Now().UnixNano())
+		settings.Templates = append(settings.Templates, NotificationTemplate{ID: input.ID, Name: strings.TrimSpace(input.Name), Remark: strings.TrimSpace(input.Remark), Content: input.Content})
+		settings.ActiveTemplateID = input.ID
+	case "update":
+		if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Content) == "" {
+			http.Error(w, "模板名称和内容不能为空", http.StatusBadRequest)
+			return
+		}
+		updated := false
+		for i := range settings.Templates {
+			if settings.Templates[i].ID == input.ID {
+				settings.Templates[i].Name, settings.Templates[i].Remark, settings.Templates[i].Content = strings.TrimSpace(input.Name), strings.TrimSpace(input.Remark), input.Content
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			http.Error(w, "模板不存在", http.StatusNotFound)
+			return
+		}
+	case "delete":
+		id := input.ID
+		if id == "" {
+			id = ps.ByName("id")
+		}
+		if id == defaultNotificationTemplateID {
+			http.Error(w, "默认模板不能删除", http.StatusBadRequest)
+			return
+		}
+		found := false
+		filtered := settings.Templates[:0]
+		for _, item := range settings.Templates {
+			if item.ID == id {
+				found = true
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		if !found {
+			http.Error(w, "模板不存在", http.StatusNotFound)
+			return
+		}
+		settings.Templates = filtered
+		if settings.ActiveTemplateID == id {
+			settings.ActiveTemplateID = defaultNotificationTemplateID
+		}
+	case "select":
+		id := input.ID
+		if id == "" {
+			id = ps.ByName("id")
+		}
+		found := false
+		for _, item := range settings.Templates {
+			if item.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			http.Error(w, "模板不存在", http.StatusNotFound)
+			return
+		}
+		settings.ActiveTemplateID = id
+	default:
+		http.Error(w, "未知模板操作", http.StatusBadRequest)
+		return
+	}
+	if err := u.saveNotification(settings); err != nil {
+		http.Error(w, "保存模板失败", http.StatusInternalServerError)
+		return
+	}
+	u.writeJSON(w, map[string]any{"success": true, "notification": u.notificationSettings()})
 }
 func (u *Unpackerr) notificationTestAPI(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
 	settings := u.notificationSettings()

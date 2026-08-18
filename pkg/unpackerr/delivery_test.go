@@ -256,6 +256,51 @@ func TestUISettingsPersistAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestNotificationTemplatesPersistAndRender(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "unpackerr.conf")
+	u := New()
+	u.ConfigFile = configPath
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+
+	initial := u.notificationSettings()
+	if len(initial.Templates) != 1 || initial.Templates[0].ID != defaultNotificationTemplateID || initial.ActiveTemplateID != defaultNotificationTemplateID {
+		t.Fatalf("default notification template was not generated: %#v", initial)
+	}
+	custom := NotificationTemplate{ID: "brief", Name: "简洁模板", Remark: "仅显示结果", Content: "{{icon}} {{title}} | {{source}} | {{task}}"}
+	initial.Enabled = true
+	initial.URL = "http://notify.local/webhook"
+	initial.Templates = append(initial.Templates, custom)
+	initial.ActiveTemplateID = custom.ID
+	if err := u.saveNotification(initial); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := New()
+	restarted.ConfigFile = configPath
+	if err := restarted.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	settings := restarted.notificationSettings()
+	if settings.ActiveTemplateID != custom.ID || len(settings.Templates) != 2 || settings.Templates[1].Remark != custom.Remark {
+		t.Fatalf("notification templates were not restored: %#v", settings)
+	}
+	message := renderNotificationTemplate(settings, "OK", "解压完成", "CloudDrive2", "sample.7z")
+	if message != "OK 解压完成 | CloudDrive2 | sample.7z" {
+		t.Fatalf("unexpected rendered notification: %q", message)
+	}
+}
+
+func TestNotificationTemplateInvalidContentFallsBack(t *testing.T) {
+	settings := normalizeNotification(UINotification{Templates: []NotificationTemplate{{ID: "broken", Name: "损坏模板", Content: "{{.missing}}"}}, ActiveTemplateID: "broken"})
+	message := renderNotificationTemplate(settings, "OK", "完成", "本地目录", "sample.zip")
+	if !strings.Contains(message, "UnpackFlow") || !strings.Contains(message, "sample.zip") {
+		t.Fatalf("invalid template did not fall back to the default message: %q", message)
+	}
+}
+
 func TestUIPasswordAddDeletePersistsAcrossRestart(t *testing.T) {
 	t.Parallel()
 

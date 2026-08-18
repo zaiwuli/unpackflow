@@ -9,6 +9,8 @@ const zh = {
 let formLoaded = false;
 let latestLogs = [];
 let logView = 'user';
+let notificationTemplates = [];
+let activeNotificationTemplateID = '';
 
 function esc(value) {
   const element = document.createElement('div');
@@ -52,7 +54,68 @@ function ensureNotificationOptions() {
     '<label class="check-row"><input id="notify-complete" type="checkbox"> 完成结果（成功或失败）</label>' +
     '<label class="check-row"><input id="notify-cleanup" type="checkbox"> 清理完成</label>';
   $('notify-url').closest('.field').insertAdjacentElement('afterend', options);
+
+  const templates = document.createElement('div');
+  templates.id = 'notify-templates';
+  templates.style.cssText = 'margin-top:22px;padding-top:18px;border-top:1px solid var(--line,#e5e7eb)';
+  templates.innerHTML = '<div class="panel-heading"><div><h3>\u901a\u77e5\u6a21\u677f</h3><p>\u53ef\u4f7f\u7528 {{icon}}\u3001{{title}}\u3001{{source}}\u3001{{task}}\u3001{{time}} \u548c {{separator}}</p></div></div>' +
+    '<label class="field"><span>\u5f53\u524d\u6a21\u677f</span><select id="notify-template-select"></select></label>' +
+    '<label class="field"><span>\u6a21\u677f\u540d\u79f0</span><input id="notify-template-name" type="text" placeholder="\u4f8b\u5982\uff1a\u7b80\u6d01\u901a\u77e5"></label>' +
+    '<label class="field"><span>\u5907\u6ce8</span><input id="notify-template-remark" type="text" placeholder="\u8bf4\u660e\u6a21\u677f\u7528\u9014"></label>' +
+    '<label class="field"><span>\u6a21\u677f\u5185\u5bb9</span><textarea id="notify-template-content" rows="8" style="width:100%;resize:vertical;border:1px solid #d8dce5;border-radius:8px;padding:10px;font:inherit;line-height:1.6"></textarea></label>' +
+    '<div class="form-actions"><button id="notify-template-new" type="button">\u65b0\u589e\u6a21\u677f</button><button id="notify-template-save" type="button">\u4fdd\u5b58\u6a21\u677f</button><button id="notify-template-select-button" type="button">\u8bbe\u4e3a\u5f53\u524d</button><button id="notify-template-delete" type="button">\u5220\u9664\u6a21\u677f</button></div>';
+  options.insertAdjacentElement('afterend', templates);
+  $('notify-template-select').addEventListener('change', event => showNotificationTemplate(event.target.value));
+  $('notify-template-new').addEventListener('click', newNotificationTemplate);
+  $('notify-template-save').addEventListener('click', saveNotificationTemplate);
+  $('notify-template-select-button').addEventListener('click', selectNotificationTemplate);
+  $('notify-template-delete').addEventListener('click', deleteNotificationTemplate);
 }
+
+function renderNotificationTemplates(settings) {
+  notificationTemplates = (settings.templates || []).slice();
+  activeNotificationTemplateID = settings.active_template_id || (notificationTemplates[0] && notificationTemplates[0].id) || '';
+  const select = $('notify-template-select');
+  select.innerHTML = notificationTemplates.map(item => '<option value="' + esc(item.id) + '">' + esc(item.name) + (item.id === activeNotificationTemplateID ? ' \u00b7 \u5f53\u524d' : '') + '</option>').join('');
+  select.value = activeNotificationTemplateID;
+  showNotificationTemplate(select.value || (notificationTemplates[0] && notificationTemplates[0].id));
+}
+
+function showNotificationTemplate(id) {
+  const item = notificationTemplates.find(template => template.id === id);
+  if (!item) return;
+  $('notify-template-select').value = item.id;
+  $('notify-template-name').value = item.name || '';
+  $('notify-template-remark').value = item.remark || '';
+  $('notify-template-content').value = item.content || '';
+  $('notify-template-delete').disabled = item.id === 'default';
+}
+
+function newNotificationTemplate() {
+  $('notify-template-select').value = '';
+  $('notify-template-name').value = '';
+  $('notify-template-remark').value = '';
+  $('notify-template-content').value = '{{icon}} UnpackFlow {{title}}\n{{separator}}\n\u23f1\ufe0f \u65f6\u95f4: {{time}}\n\ud83d\udce6 \u6765\u6e90: {{source}}\n\ud83d\udcc4 \u4efb\u52a1: {{task}}';
+  $('notify-template-delete').disabled = true;
+  $('notify-template-name').focus();
+}
+
+async function templateAction(body) {
+  const response = await fetch('api/notification/templates', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const raw = await response.text();
+  let data = {}; try { data = JSON.parse(raw); } catch (_) {}
+  if (!response.ok) { $('notify-message').textContent = raw || zh.saveFailed; return null; }
+  renderNotificationTemplates(data.notification);
+  $('notify-message').textContent = zh.saved;
+  return data;
+}
+
+async function saveNotificationTemplate() {
+  const id = $('notify-template-select').value;
+  await templateAction({action: id ? 'update' : 'create', id, name: $('notify-template-name').value.trim(), remark: $('notify-template-remark').value.trim(), content: $('notify-template-content').value});
+}
+async function selectNotificationTemplate() { const id = $('notify-template-select').value; if (id) await templateAction({action: 'select', id}); }
+async function deleteNotificationTemplate() { const id = $('notify-template-select').value; if (id && id !== 'default') await templateAction({action: 'delete', id}); }
 
 function ensureLocalSettings() {
   if ($('local-source-action')) return;
@@ -92,6 +155,7 @@ function fillForms(data) {
   $('notify-extract').checked = !!notifyEvents.extract;
   $('notify-complete').checked = !!notifyEvents.complete;
   $('notify-cleanup').checked = !!notifyEvents.cleanup;
+  renderNotificationTemplates(data.notification);
   $('workers').value = data.totals.workers || 1;
   $('local-source-action').value = (data.settings && data.settings.local_source_action) || 'keep';
   $('local-archive-dir').value = (data.settings && data.settings.local_archive_dir) || '/data/\u5f52\u6863\u76ee\u5f55';

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"golift.io/cnfg"
@@ -24,10 +25,25 @@ type UIStore struct {
 	mu           sync.RWMutex
 }
 type UINotification struct {
-	Enabled bool                  `json:"enabled"`
-	URL     string                `json:"url"`
-	Events  *UINotificationEvents `json:"events,omitempty"`
+	Enabled          bool                   `json:"enabled"`
+	URL              string                 `json:"url"`
+	Events           *UINotificationEvents  `json:"events,omitempty"`
+	Templates        []NotificationTemplate `json:"templates,omitempty"`
+	ActiveTemplateID string                 `json:"active_template_id,omitempty"`
 }
+type NotificationTemplate struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Remark  string `json:"remark,omitempty"`
+	Content string `json:"content"`
+}
+
+const defaultNotificationTemplateID = "default"
+
+func defaultNotificationTemplate() NotificationTemplate {
+	return NotificationTemplate{ID: defaultNotificationTemplateID, Name: "默认模板", Remark: "兼容原有通知格式", Content: "{{icon}} UnpackFlow {{title}}\n{{separator}}\n⏱️ 时间: {{time}}\n📦 来源: {{source}}\n📄 任务: {{task}}"}
+}
+
 type UINotificationEvents struct {
 	Discovery bool `json:"discovery"`
 	Cache     bool `json:"cache"`
@@ -53,6 +69,37 @@ func defaultNotificationEvents() *UINotificationEvents {
 func normalizeNotification(settings UINotification) UINotification {
 	if settings.Events == nil {
 		settings.Events = defaultNotificationEvents()
+	}
+	if len(settings.Templates) == 0 {
+		settings.Templates = []NotificationTemplate{defaultNotificationTemplate()}
+	}
+	hasDefault := false
+	for _, item := range settings.Templates {
+		if item.ID == defaultNotificationTemplateID {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault {
+		settings.Templates = append([]NotificationTemplate{defaultNotificationTemplate()}, settings.Templates...)
+	}
+	found := false
+	for i := range settings.Templates {
+		if strings.TrimSpace(settings.Templates[i].ID) == "" {
+			settings.Templates[i].ID = fmt.Sprintf("template-%d", time.Now().UnixNano()+int64(i))
+		}
+		if strings.TrimSpace(settings.Templates[i].Name) == "" {
+			settings.Templates[i].Name = "未命名模板"
+		}
+		if strings.TrimSpace(settings.Templates[i].Content) == "" {
+			settings.Templates[i].Content = defaultNotificationTemplate().Content
+		}
+		if settings.Templates[i].ID == settings.ActiveTemplateID {
+			found = true
+		}
+	}
+	if !found {
+		settings.ActiveTemplateID = settings.Templates[0].ID
 	}
 	return settings
 }
@@ -386,6 +433,18 @@ func (u *Unpackerr) applyLocalUIOverrides(overrides UIOverrides) {
 	}
 }
 func (u *Unpackerr) saveNotification(s UINotification) error {
+	if u.uiStore == nil {
+		return fmt.Errorf("UI 存储未初始化")
+	}
+	u.uiStore.mu.RLock()
+	current := u.uiStore.Notification
+	u.uiStore.mu.RUnlock()
+	if s.Templates == nil {
+		s.Templates = current.Templates
+	}
+	if s.ActiveTemplateID == "" {
+		s.ActiveTemplateID = current.ActiveTemplateID
+	}
 	s = normalizeNotification(s)
 	u.uiStore.mu.Lock()
 	u.uiStore.Notification = s
@@ -438,7 +497,7 @@ func (u *Unpackerr) notifyEvent(stage notificationStage, icon, title, source, ta
 }
 
 func (u *Unpackerr) sendNotification(s UINotification, icon, title, source, task string) {
-	message := formatNotificationMessage(icon, title, source, task)
+	message := renderNotificationTemplate(s, icon, title, source, task)
 	go func() {
 		parsed, err := url.Parse(s.URL)
 		if err != nil {
@@ -529,6 +588,32 @@ func formatUINotification(status ExtractStatus, item *Extract) string {
 func formatNotificationMessage(icon, title, source, task string) string {
 	return fmt.Sprintf("%s UnpackFlow %s\n--------------------\n⏱️ 时间: %s\n📁 来源: %s\n🆔 任务: %s", icon, title, time.Now().Format("2006-01-02 15:04:05"), source, task)
 }
+func renderNotificationTemplate(settings UINotification, icon, title, source, task string) string {
+	settings = normalizeNotification(settings)
+	selected := defaultNotificationTemplate()
+	for _, item := range settings.Templates {
+		if item.ID == settings.ActiveTemplateID {
+			selected = item
+			break
+		}
+	}
+	values := map[string]string{"icon": icon, "title": title, "source": source, "task": task, "time": time.Now().Format("2006-01-02 15:04:05"), "separator": "--------------------"}
+	funcs := template.FuncMap{}
+	for key, value := range values {
+		captured := value
+		funcs[key] = func() string { return captured }
+	}
+	tmpl, err := template.New(selected.ID).Funcs(funcs).Option("missingkey=error").Parse(selected.Content)
+	if err != nil {
+		return formatNotificationMessage(icon, title, source, task)
+	}
+	var out strings.Builder
+	if err = tmpl.Execute(&out, values); err != nil {
+		return formatNotificationMessage(icon, title, source, task)
+	}
+	return out.String()
+}
+
 func sortedPasswords(p []string) []string {
 	r := append([]string{}, p...)
 	sort.Strings(r)
