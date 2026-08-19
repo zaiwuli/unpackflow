@@ -516,6 +516,25 @@ func TestArchiveNameMapperShortensLongUTF8Names(t *testing.T) {
 	}
 }
 
+func TestArchiveNameMapperDoesNotKeepLongPseudoExtension(t *testing.T) {
+	mapper := newArchiveNameMapper()
+	original := "www.98T.la@" + strings.Repeat("长标题", 110)
+	mapped := mapper.Map(original)
+	if len([]byte(filepath.Base(mapped))) > maxArchiveNameBytes {
+		t.Fatalf("mapped name still exceeds component limit: %d bytes", len([]byte(filepath.Base(mapped))))
+	}
+	if !strings.Contains(mapped, "~") {
+		t.Fatalf("shortened name is missing collision-safe hash: %q", mapped)
+	}
+}
+
+func TestSafeArchiveExtensionRejectsLongPseudoExtension(t *testing.T) {
+	name := "www.98T.la@" + strings.Repeat("very-long-title", 10)
+	if ext := safeArchiveExtension(name); ext != "" {
+		t.Fatalf("expected no extension, got %q", ext)
+	}
+}
+
 func TestLongZIPEntryExtractsWithMappedName(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "long.zip")

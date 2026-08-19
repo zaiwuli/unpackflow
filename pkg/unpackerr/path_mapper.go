@@ -58,7 +58,7 @@ func shortenArchiveComponent(name string, limit int, seed string) string {
 	if len([]byte(name)) <= limit {
 		return name
 	}
-	ext := filepath.Ext(name)
+	ext := safeArchiveExtension(name)
 	hash := sha256.Sum256([]byte(seed + "\x00" + name))
 	suffix := "~" + hex.EncodeToString(hash[:])[:8] + ext
 	budget := limit - len([]byte(suffix))
@@ -71,6 +71,16 @@ func shortenArchiveComponent(name string, limit int, seed string) string {
 	}
 	prefix := string(prefixRunes)
 	return prefix + suffix
+}
+
+// safeArchiveExtension keeps ordinary short extensions while avoiding treating
+// a title such as "www.example.com@long text" as one enormous extension.
+func safeArchiveExtension(name string) string {
+	ext := filepath.Ext(name)
+	if ext == "" || ext == name || len([]byte(ext)) > 32 || strings.ContainsAny(ext, `/\\`) {
+		return ""
+	}
+	return ext
 }
 
 func (m *archiveNameMapper) Manifest() map[string]string {
