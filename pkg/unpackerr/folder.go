@@ -845,6 +845,11 @@ func (u *Unpackerr) updateQueueStatus(data *newStatus, now time.Time, sendHook b
 	if data.Resp != nil {
 		u.Map[data.Name].Resp = data.Resp
 	}
+	// A CD2 cache transfer may have created this task before the folder event
+	// was delivered. Clear the transfer on every status update, not only when
+	// the task is first inserted, so completed work cannot remain stuck as
+	// "排队中" in the dashboard.
+	u.clearCD2TransferForCachedPath(data.Name)
 
 	u.Map[data.Name].Status = data.Status
 	u.Map[data.Name].Updated = now
