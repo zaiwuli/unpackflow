@@ -2,6 +2,8 @@ FROM golang:1-alpine AS builder
 
 WORKDIR /src
 COPY main.go settings.sh go.mod go.sum ./
+# xtractr is maintained in-tree and referenced by go.mod via a local replace.
+COPY third_party/xtractr third_party/xtractr
 RUN go mod download
 COPY pkg pkg
 COPY examples examples
