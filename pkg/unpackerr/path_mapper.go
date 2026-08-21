@@ -34,7 +34,10 @@ func (m *archiveNameMapper) Map(name string) string {
 	}
 	parts := strings.Split(strings.TrimPrefix(original, "/"), "/")
 	for i := range parts {
-		parts[i] = shortenArchiveComponent(parts[i], maxArchiveNameBytes, original)
+		// Hash each component by its own name. Using the complete archive path
+		// here gives every file a different mapped parent directory when the
+		// archive contains one long directory with many children.
+		parts[i] = shortenArchiveComponent(parts[i], maxArchiveNameBytes, parts[i])
 	}
 	mapped := strings.Join(parts, string(filepath.Separator))
 	for len([]byte(mapped)) > maxArchivePathBytes {
@@ -47,7 +50,7 @@ func (m *archiveNameMapper) Map(name string) string {
 		if longest < 0 || len([]byte(parts[longest])) <= 32 {
 			break
 		}
-		parts[longest] = shortenArchiveComponent(parts[longest], len([]byte(parts[longest]))-32, original)
+		parts[longest] = shortenArchiveComponent(parts[longest], len([]byte(parts[longest]))-32, parts[longest])
 		mapped = strings.Join(parts, string(filepath.Separator))
 	}
 	m.entries[original] = mapped

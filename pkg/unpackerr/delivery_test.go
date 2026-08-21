@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -525,6 +526,22 @@ func TestArchiveNameMapperDoesNotKeepLongPseudoExtension(t *testing.T) {
 	}
 	if !strings.Contains(mapped, "~") {
 		t.Fatalf("shortened name is missing collision-safe hash: %q", mapped)
+	}
+}
+
+func TestArchiveNameMapperKeepsChildrenInOneLongDirectory(t *testing.T) {
+	mapper := newArchiveNameMapper()
+	longDir := strings.Repeat("目录名称", 100)
+	var mappedParent string
+	for i := 0; i < 100; i++ {
+		original := filepath.ToSlash(filepath.Join(longDir, fmt.Sprintf("文件-%03d.txt", i)))
+		mapped := mapper.Map(original)
+		parent := filepath.Dir(mapped)
+		if i == 0 {
+			mappedParent = parent
+		} else if parent != mappedParent {
+			t.Fatalf("long directory was split into multiple mapped parents: %q != %q", parent, mappedParent)
+		}
 	}
 }
 
