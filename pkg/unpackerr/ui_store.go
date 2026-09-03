@@ -87,9 +87,33 @@ func normalizeNotification(settings UINotification) UINotification {
 	if settings.Provider != notificationProviderMS {
 		settings.Provider = notificationProviderMP
 	}
+	if settings.Provider == notificationProviderMS {
+		settings.URL = normalizeMSNotificationURL(settings.URL)
+	}
 	settings.Templates = notificationTemplates()
 	settings.ActiveTemplateID = settings.Provider
 	return settings
+}
+
+// normalizeMSNotificationURL accepts either the MS service root
+// (http://host:8888/) or the full openSend endpoint and stores the latter.
+func normalizeMSNotificationURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return raw
+	}
+	const endpoint = "/api/v1/message/openSend"
+	cleanPath := strings.TrimRight(parsed.Path, "/")
+	if cleanPath == "" || cleanPath == "/" || strings.TrimRight(cleanPath, "/") == endpoint {
+		parsed.Path = endpoint
+	} else if !strings.HasSuffix(cleanPath, endpoint) {
+		parsed.Path = cleanPath + endpoint
+	}
+	return parsed.String()
 }
 
 type UIOverrides struct {

@@ -22,6 +22,20 @@ import (
 	"golift.io/xtractr"
 )
 
+func TestNormalizeMSNotificationURL(t *testing.T) {
+	cases := map[string]string{
+		"http://192.168.31.2:8888/":                         "http://192.168.31.2:8888/api/v1/message/openSend",
+		"http://192.168.31.2:8888":                          "http://192.168.31.2:8888/api/v1/message/openSend",
+		"http://192.168.31.2:8888/api/v1/message/openSend":  "http://192.168.31.2:8888/api/v1/message/openSend",
+		"http://192.168.31.2:8888/api/v1/message/openSend/": "http://192.168.31.2:8888/api/v1/message/openSend",
+	}
+	for input, expected := range cases {
+		if got := normalizeMSNotificationURL(input); got != expected {
+			t.Fatalf("normalizeMSNotificationURL(%q) = %q, want %q", input, got, expected)
+		}
+	}
+}
+
 func TestDockerDefaultFolderEnvironment(t *testing.T) {
 	t.Setenv("UN_FOLDER_0_PATH", "/downloads")
 	t.Setenv("UN_FOLDER_0_EXTRACT_PATH", "/output")

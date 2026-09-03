@@ -84,6 +84,15 @@ function renderNotificationTemplates(settings) {
   showNotificationTemplate(select.value || (notificationTemplates[0] && notificationTemplates[0].id));
 }
 
+function updateNotificationAddressLabel() {
+  const ms = $('notify-ms') && $('notify-ms').classList.contains('active-provider');
+  const field = $('notify-url').closest('.field');
+  if (!field) return;
+  const label = field.querySelector('span');
+  if (label) label.textContent = ms ? 'MS 服务地址' : '通知地址';
+  $('notify-url').placeholder = ms ? '例如：http://192.168.31.2:8888/' : '';
+}
+
 function showNotificationTemplate(id) {
   const item = notificationTemplates.find(template => template.id === id);
   if (!item) return;
@@ -134,7 +143,7 @@ function ensureNotificationOptions() {
     '<label class="check-row"><input id="notify-cleanup" type="checkbox"> 清理完成</label>' +
     '<h3>通知方式</h3>' +
     '<div class="form-actions" style="margin-top:8px"><button id="notify-mp" type="button">MP 模板通知</button><button id="notify-ms" type="button">MS 模板通知</button></div>' +
-    '<label class="field" id="notify-api-key-row"><span>API Key</span><input id="notify-api-key" type="text" autocomplete="off" placeholder="MS 接口的 apiKey"></label>';
+    '<label class="field" id="notify-api-key-row"><span>MS 密钥</span><input id="notify-api-key" type="text" autocomplete="off" placeholder="输入 MS 的 apiKey"></label>';
   $('notify-url').closest('.field').insertAdjacentElement('afterend', options);
   $('notify-mp').addEventListener('click', () => selectNotificationProvider('mp'));
   $('notify-ms').addEventListener('click', () => selectNotificationProvider('ms'));
@@ -172,6 +181,7 @@ async function selectNotificationProvider(provider) {
   $('notify-mp').classList.toggle('active-provider', provider === 'mp');
   $('notify-ms').classList.toggle('active-provider', provider === 'ms');
   $('notify-api-key-row').style.display = provider === 'ms' ? 'flex' : 'none';
+  updateNotificationAddressLabel();
   await saveNotificationSettings();
 }
 
@@ -214,6 +224,7 @@ function fillForms(data) {
   $('notify-complete').checked = !!notifyEvents.complete;
   $('notify-cleanup').checked = !!notifyEvents.cleanup;
   renderNotificationTemplates(data.notification);
+  updateNotificationAddressLabel();
   $('workers').value = data.totals.workers || 1;
   $('local-source-action').value = (data.settings && data.settings.local_source_action) || 'keep';
   $('local-archive-dir').value = (data.settings && data.settings.local_archive_dir) || '/data/\u5f52\u6863\u76ee\u5f55';

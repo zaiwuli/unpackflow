@@ -234,6 +234,7 @@ func (u *Unpackerr) dashboardPage(w http.ResponseWriter, _ *http.Request, _ http
 
 func (u *Unpackerr) dashboardIcon(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
 	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", "inline; filename=\"favicon.svg\"")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(dashboardIcon)
 }
@@ -288,6 +289,9 @@ func (u *Unpackerr) notificationAPI(w http.ResponseWriter, r *http.Request, _ ht
 		return
 	}
 	settings.URL = strings.TrimSpace(settings.URL)
+	if settings.Provider == notificationProviderMS {
+		settings.URL = normalizeMSNotificationURL(settings.URL)
+	}
 	if settings.Enabled && settings.URL == "" {
 		http.Error(w, "\u901a\u77e5\u5730\u5740\u4e0d\u80fd\u4e3a\u7a7a", http.StatusBadRequest)
 		return

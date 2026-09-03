@@ -90,6 +90,14 @@ func (u *Unpackerr) startWebServer() {
 func (u *Unpackerr) webRoutes() {
 	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/"), u.dashboardPage)
 	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/icon.svg"), u.dashboardIcon)
+	// Most browsers and external dashboard tools discover site icons through
+	// the conventional favicon.ico path. Keep it as an alias of the embedded
+	// SVG so deployments with a URL base work the same way.
+	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/favicon.ico"), u.dashboardIcon)
+	if u.Webserver.URLBase != "/" {
+		u.Webserver.router.GET("/favicon.ico", u.dashboardIcon)
+		u.Webserver.router.GET("/icon.svg", u.dashboardIcon)
+	}
 	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/health"), u.healthAPI)
 	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/api/status"), u.dashboardAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/passwords"), u.passwordAPI)
