@@ -554,6 +554,7 @@ func (u *Unpackerr) sendNotification(s UINotification, icon, title, source, task
 }
 
 func (u *Unpackerr) sendMSNotification(s UINotification, icon, title, source, task string) {
+	s.URL = normalizeMSNotificationURL(s.URL)
 	message := renderNotificationTemplate(s, icon, title, source, task)
 	go func() {
 		payload, err := json.Marshal(struct {

@@ -119,8 +119,27 @@ func (u *Unpackerr) saveProcessingState() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+	// CD2 events can persist state concurrently. A shared .tmp path lets one
+	// writer rename the file while another writer is still preparing it.
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".unpackflow-state-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := tmpFile.Name()
+	defer os.Remove(tmp)
+	if err := tmpFile.Chmod(0o600); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if _, err := tmpFile.Write(append(data, '\n')); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
