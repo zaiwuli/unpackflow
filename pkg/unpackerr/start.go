@@ -384,12 +384,12 @@ func (u *Unpackerr) cleanupCancelledExtraction(resp *xtractr.Response) {
 
 func (u *Unpackerr) writeNameManifest(task, output string) {
 	value, ok := u.nameMappers.LoadAndDelete(task)
-	if !ok || output == "" {
+	if !ok {
 		return
 	}
 	if mapper, valid := value.(*archiveNameMapper); valid {
-		if err := mapper.WriteManifest(output); err != nil {
-			u.Errorf("写入名称映射失败：%v", err)
+		for original, mapped := range mapper.Manifest() {
+			u.Printf("超长名称已缩短：%s -> %s", original, mapped)
 		}
 	}
 }
