@@ -478,7 +478,14 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	u.cd2Cache.Store(filepath.Clean(primaryPath), append([]string(nil), files...))
 	version, _ := sourceGroupVersion("cd2", files)
 	version.CachedAt = time.Now()
-	u.savePendingCD2(PendingCD2{Key: filepath.Clean(primaryPath), Files: append([]string(nil), files...), CachedPrimary: primaryPath, Version: version})
+	pending := PendingCD2{Key: filepath.Clean(primaryPath), Files: append([]string(nil), files...), CachedPrimary: primaryPath, Version: version}
+	if fallback, ok := u.pending115Fallback(key); ok {
+		pending.N115Fallback = fallback.Key
+		pending.N115SourceCID = fallback.SourceCID
+		pending.N115FID = fallback.FID
+		pending.N115FileName = fallback.FileName
+	}
+	u.savePendingCD2(pending)
 	u.updateCD2Transfer(key, archivePrimary(files), "排队中", func(transfer *CD2Transfer) {
 		transfer.CachedPath = primaryPath
 		transfer.Bytes = totalBytes

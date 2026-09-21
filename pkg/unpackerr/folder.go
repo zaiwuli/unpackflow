@@ -495,14 +495,15 @@ func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
 		folder.status = EXTRACTED
 		folder.files = resp.NewFiles
 		var cd2Sources []string
-		if pending, ok := u.pendingCD2ForPath(resp.X.Name); ok {
+		pending, hasPending := u.pendingCD2ForPath(resp.X.Name)
+		if hasPending {
 			cd2Sources = append(cd2Sources, pending.Files...)
 		}
 		if sources, cached := u.cd2Cache.Load(filepath.Clean(resp.X.Name)); cached {
 			if mapped, ok := sources.([]string); ok && len(mapped) > 0 {
 				cd2Sources = append([]string(nil), mapped...)
 			}
-			if pending, ok := u.pendingCD2ForPath(resp.X.Name); ok && pending.Version.Key != "" {
+			if hasPending && pending.Version.Key != "" {
 				u.markProcessed(pending.Version)
 			} else if version, err := sourceGroupVersion("cd2", cd2Sources); err == nil {
 				u.markProcessed(version)
@@ -510,6 +511,9 @@ func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
 			u.removePendingCD2(filepath.Clean(resp.X.Name))
 			u.cd2Resume.Delete(filepath.Clean(resp.X.Name))
 			go u.deleteCachedSource(resp.X.Name, cd2Sources)
+			if hasPending && pending.N115FID != "" && pending.N115SourceCID != "" {
+				go u.handle115FallbackLocalSuccess(pending)
+			}
 		} else if version, err := sourceVersion("local", resp.X.Name); err == nil {
 			u.markProcessed(version)
 		}

@@ -75,3 +75,19 @@ func TestN115QueueHasSingleSlot(t *testing.T) {
 	}
 	<-u.n115Queue
 }
+
+func TestPending115FallbackSurvivesStateRoundTrip(t *testing.T) {
+	u := New()
+	u.ConfigFile = t.TempDir() + "/unpackerr.conf"
+	if err := u.loadProcessingState(); err != nil {
+		t.Fatal(err)
+	}
+	u.savePending115Fallback(Pending115{Key: "fallback-key", SourceCID: "200", FID: "300", FileName: "test.7z"})
+	if err := u.loadProcessingState(); err != nil {
+		t.Fatal(err)
+	}
+	item, ok := u.pending115Fallback("fallback-key")
+	if !ok || item.SourceCID != "200" || item.FID != "300" {
+		t.Fatalf("fallback state was not restored: %#v, %v", item, ok)
+	}
+}

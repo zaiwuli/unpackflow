@@ -274,31 +274,40 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	}
 	u.Printf("115 云解压失败，已移动到兜底目录：%s", file.Name)
 	u.update115Transfer(version.Key, file.Name, "等待 CD2 本地兜底", nil)
-	u.refresh115Fallback(mapping, file.Name)
+	u.refresh115Fallback(mapping, file)
 }
 
 func (u *Unpackerr) handle115SuccessSource(mapping N115Mapping, file n115File) {
+	u.handle115SuccessFile(mapping.SourceCID, file.FID, file.Name)
+}
+
+func (u *Unpackerr) handle115SuccessFile(sourceCID, fid, fileName string) {
 	switch strings.ToLower(strings.TrimSpace(u.CloudDrive2.N115SuccessAction)) {
 	case "", "keep":
 		return
 	case "delete":
-		if err := u.n115DeleteFile(mapping.SourceCID, file.FID); err != nil {
-			u.Errorf("115 云解压成功后删除原包失败：%s：%v", file.Name, err)
+		if err := u.n115DeleteFile(sourceCID, fid); err != nil {
+			u.Errorf("115 解压成功后删除原包失败：%s：%v", fileName, err)
 		} else {
-			u.Printf("115 云解压成功后已删除原包：%s", file.Name)
+			u.Printf("115 解压成功后已删除原包：%s", fileName)
 		}
 	case "archive":
 		archiveCID := strings.TrimSpace(u.CloudDrive2.N115ArchiveCID)
 		if archiveCID == "" {
-			u.Errorf("115 云解压成功后归档原包失败：未填写归档 CID")
+			u.Errorf("115 解压成功后归档原包失败：未填写归档 CID")
 			return
 		}
-		if err := u.n115MoveToFallback(file.FID, archiveCID); err != nil {
-			u.Errorf("115 云解压成功后归档原包失败：%s：%v", file.Name, err)
+		if err := u.n115MoveToFallback(fid, archiveCID); err != nil {
+			u.Errorf("115 解压成功后归档原包失败：%s：%v", fileName, err)
 		} else {
-			u.Printf("115 云解压成功后已归档原包：%s", file.Name)
+			u.Printf("115 解压成功后已归档原包：%s", fileName)
 		}
 	}
+}
+
+func (u *Unpackerr) handle115FallbackLocalSuccess(pending PendingCD2) {
+	u.handle115SuccessFile(pending.N115SourceCID, pending.N115FID, pending.N115FileName)
+	u.removePending115FallbackForFile(pending.N115SourceCID, pending.N115FID)
 }
 
 func (u *Unpackerr) update115Transfer(key, fileName, state string, update func(*CD2Transfer)) {
@@ -476,9 +485,15 @@ func (u *Unpackerr) n115DeleteFile(sourceCID, fid string) error {
 	return err
 }
 
-func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, fileName string) {
-	remoteFile := path.Join(mapping.CD2Path, fileName)
+func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, file n115File) {
+	remoteFile := path.Join(mapping.CD2Path, file.Name)
 	paths := clouddrive.MapCloudPathWithOverrides(remoteFile, nil, u.CloudDrive2.PathOverrides)
+	fallback := Pending115{SourceCID: mapping.FallbackCID, FID: file.FID, FileName: file.Name}
+	fallbackKeys := n115FallbackKeys(paths, remoteFile)
+	for _, key := range fallbackKeys {
+		fallback.Key = key
+		u.savePending115Fallback(fallback)
+	}
 	u.cd2Mu.RLock()
 	client := u.cd2Client
 	u.cd2Mu.RUnlock()
@@ -487,6 +502,16 @@ func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, fileName string) {
 		return
 	}
 	go u.handleCloudDriveChange(client, clouddrive.Change{Path: remoteFile}, paths)
+}
+
+func n115FallbackKeys(paths []string, remoteFile string) []string {
+	keys := []string{"remote|" + strings.ToLower(path.Clean("/"+strings.TrimLeft(remoteFile, "/")))}
+	for _, item := range paths {
+		if isCloudDriveArchiveEvent(item) {
+			keys = append(keys, cloudDriveTaskKey(item))
+		}
+	}
+	return keys
 }
 
 func (u *Unpackerr) validate115Cookie() error {

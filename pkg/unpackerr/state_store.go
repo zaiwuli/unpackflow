@@ -15,10 +15,11 @@ import (
 // successfully processed archive from being extracted again after a restart.
 // It deliberately remains a JSON file instead of introducing a database.
 type ProcessingState struct {
-	Path      string                     `json:"-"`
-	Processed map[string]ProcessedSource `json:"processed"`
-	Pending   map[string]PendingCD2      `json:"pending_cd2"`
-	mu        sync.RWMutex               `json:"-"`
+	Path        string                     `json:"-"`
+	Processed   map[string]ProcessedSource `json:"processed"`
+	Pending     map[string]PendingCD2      `json:"pending_cd2"`
+	Fallback115 map[string]Pending115      `json:"pending_115_fallback"`
+	mu          sync.RWMutex               `json:"-"`
 }
 
 type ProcessedSource struct {
@@ -40,6 +41,21 @@ type PendingCD2 struct {
 	NextAttempt   time.Time       `json:"next_attempt"`
 	LastError     string          `json:"last_error,omitempty"`
 	Version       ProcessedSource `json:"version,omitempty"`
+	N115Fallback  string          `json:"115_fallback_key,omitempty"`
+	N115SourceCID string          `json:"115_source_cid,omitempty"`
+	N115FID       string          `json:"115_fid,omitempty"`
+	N115FileName  string          `json:"115_file_name,omitempty"`
+}
+
+// Pending115 tracks a cloud file moved to a CD2 fallback folder before its
+// local extraction has succeeded. It is kept separately because the cache may
+// not be visible until after a restart.
+type Pending115 struct {
+	Key       string    `json:"key"`
+	SourceCID string    `json:"source_cid"`
+	FID       string    `json:"fid"`
+	FileName  string    `json:"file_name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func (u *Unpackerr) loadProcessingState() error {
@@ -48,9 +64,10 @@ func (u *Unpackerr) loadProcessingState() error {
 		base, _ = os.Getwd()
 	}
 	state := &ProcessingState{
-		Path:      filepath.Join(base, "unpackflow-state.json"),
-		Processed: make(map[string]ProcessedSource),
-		Pending:   make(map[string]PendingCD2),
+		Path:        filepath.Join(base, "unpackflow-state.json"),
+		Processed:   make(map[string]ProcessedSource),
+		Pending:     make(map[string]PendingCD2),
+		Fallback115: make(map[string]Pending115),
 	}
 	data, err := os.ReadFile(state.Path)
 	if err == nil {
@@ -59,6 +76,7 @@ func (u *Unpackerr) loadProcessingState() error {
 			_ = os.Rename(state.Path, state.Path+".corrupt-"+time.Now().Format("20060102-150405"))
 			state.Processed = make(map[string]ProcessedSource)
 			state.Pending = make(map[string]PendingCD2)
+			state.Fallback115 = make(map[string]Pending115)
 		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("processing state: %w", err)
@@ -68,6 +86,9 @@ func (u *Unpackerr) loadProcessingState() error {
 	}
 	if state.Pending == nil {
 		state.Pending = make(map[string]PendingCD2)
+	}
+	if state.Fallback115 == nil {
+		state.Fallback115 = make(map[string]Pending115)
 	}
 	state.Processed = compactProcessedSources(state.Processed)
 	state.Path = filepath.Join(base, "unpackflow-state.json")
@@ -108,9 +129,10 @@ func (u *Unpackerr) saveProcessingState() error {
 	}
 	u.state.mu.RLock()
 	data, err := json.MarshalIndent(struct {
-		Processed map[string]ProcessedSource `json:"processed"`
-		Pending   map[string]PendingCD2      `json:"pending_cd2"`
-	}{u.state.Processed, u.state.Pending}, "", "  ")
+		Processed   map[string]ProcessedSource `json:"processed"`
+		Pending     map[string]PendingCD2      `json:"pending_cd2"`
+		Fallback115 map[string]Pending115      `json:"pending_115_fallback"`
+	}{u.state.Processed, u.state.Pending, u.state.Fallback115}, "", "  ")
 	path := u.state.Path
 	u.state.mu.RUnlock()
 	if err != nil {
@@ -286,6 +308,64 @@ func (u *Unpackerr) removePendingCD2(key string) {
 	u.state.mu.Unlock()
 	if err := u.saveProcessingState(); err != nil {
 		u.Errorf("清理 CD2 待处理任务失败: %v", err)
+	}
+}
+
+func (u *Unpackerr) savePending115Fallback(items ...Pending115) {
+	if u.state == nil {
+		return
+	}
+	u.state.mu.Lock()
+	for _, item := range items {
+		if item.Key == "" || item.FID == "" || item.SourceCID == "" {
+			continue
+		}
+		if item.CreatedAt.IsZero() {
+			item.CreatedAt = time.Now()
+		}
+		u.state.Fallback115[item.Key] = item
+	}
+	u.state.mu.Unlock()
+	if err := u.saveProcessingState(); err != nil {
+		u.Errorf("保存 115 兜底任务失败: %v", err)
+	}
+}
+
+func (u *Unpackerr) pending115Fallback(key string) (Pending115, bool) {
+	if u.state == nil || key == "" {
+		return Pending115{}, false
+	}
+	u.state.mu.RLock()
+	item, ok := u.state.Fallback115[key]
+	u.state.mu.RUnlock()
+	return item, ok
+}
+
+func (u *Unpackerr) removePending115Fallback(key string) {
+	if u.state == nil || key == "" {
+		return
+	}
+	u.state.mu.Lock()
+	delete(u.state.Fallback115, key)
+	u.state.mu.Unlock()
+	if err := u.saveProcessingState(); err != nil {
+		u.Errorf("清理 115 兜底任务失败: %v", err)
+	}
+}
+
+func (u *Unpackerr) removePending115FallbackForFile(sourceCID, fid string) {
+	if u.state == nil || sourceCID == "" || fid == "" {
+		return
+	}
+	u.state.mu.Lock()
+	for key, item := range u.state.Fallback115 {
+		if item.SourceCID == sourceCID && item.FID == fid {
+			delete(u.state.Fallback115, key)
+		}
+	}
+	u.state.mu.Unlock()
+	if err := u.saveProcessingState(); err != nil {
+		u.Errorf("清理 115 兜底任务失败: %v", err)
 	}
 }
 
