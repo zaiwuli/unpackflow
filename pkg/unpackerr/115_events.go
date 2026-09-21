@@ -273,8 +273,18 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 		return
 	}
 	u.Printf("115 云解压失败，已移动到兜底目录：%s", file.Name)
-	u.update115Transfer(version.Key, file.Name, "等待 CD2 本地兜底", nil)
-	u.refresh115Fallback(mapping, file)
+	// The file now lives in FallbackCID. Persist that identity before deciding
+	// whether to start a local copy, so a restart never loses the manual path.
+	u.save115FallbackTask(version.Key, mapping, file)
+	if u.CloudDrive2.N115AutoFallback {
+		u.update115Transfer(version.Key, file.Name, "等待 CD2 本地兜底", func(task *CD2Transfer) { task.CanFallback = false })
+		u.refresh115Fallback(mapping, file)
+		return
+	}
+	u.update115Transfer(version.Key, file.Name, "云解压失败，等待手动本地兜底", func(task *CD2Transfer) {
+		task.Error = err.Error()
+		task.CanFallback = true
+	})
 }
 
 func (u *Unpackerr) handle115SuccessSource(mapping N115Mapping, file n115File) {
@@ -488,12 +498,6 @@ func (u *Unpackerr) n115DeleteFile(sourceCID, fid string) error {
 func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, file n115File) {
 	remoteFile := path.Join(mapping.CD2Path, file.Name)
 	paths := clouddrive.MapCloudPathWithOverrides(remoteFile, nil, u.CloudDrive2.PathOverrides)
-	fallback := Pending115{SourceCID: mapping.FallbackCID, FID: file.FID, FileName: file.Name}
-	fallbackKeys := n115FallbackKeys(paths, remoteFile)
-	for _, key := range fallbackKeys {
-		fallback.Key = key
-		u.savePending115Fallback(fallback)
-	}
 	u.cd2Mu.RLock()
 	client := u.cd2Client
 	u.cd2Mu.RUnlock()
@@ -501,7 +505,24 @@ func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, file n115File) {
 		u.Errorf("115 兜底文件已移动，但 CloudDrive2 未连接：%s", remoteFile)
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if err := client.ForceRefresh(ctx, mapping.CD2Path); err != nil {
+		u.Errorf("115 兜底路径刷新失败：%s：%v", mapping.CD2Path, err)
+	} else {
+		u.Systemf("115 兜底路径已刷新：%s", mapping.CD2Path)
+	}
 	go u.handleCloudDriveChange(client, clouddrive.Change{Path: remoteFile}, paths)
+}
+
+func (u *Unpackerr) save115FallbackTask(taskKey string, mapping N115Mapping, file n115File) {
+	remoteFile := path.Join(mapping.CD2Path, file.Name)
+	paths := clouddrive.MapCloudPathWithOverrides(remoteFile, nil, u.CloudDrive2.PathOverrides)
+	fallback := Pending115{TaskKey: taskKey, SourceCID: mapping.FallbackCID, FallbackCID: mapping.FallbackCID, CD2Path: mapping.CD2Path, FID: file.FID, FileName: file.Name}
+	for _, key := range n115FallbackKeys(paths, remoteFile) {
+		fallback.Key = key
+		u.savePending115Fallback(fallback)
+	}
 }
 
 func n115FallbackKeys(paths []string, remoteFile string) []string {

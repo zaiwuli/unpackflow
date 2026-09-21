@@ -51,11 +51,14 @@ type PendingCD2 struct {
 // local extraction has succeeded. It is kept separately because the cache may
 // not be visible until after a restart.
 type Pending115 struct {
-	Key       string    `json:"key"`
-	SourceCID string    `json:"source_cid"`
-	FID       string    `json:"fid"`
-	FileName  string    `json:"file_name"`
-	CreatedAt time.Time `json:"created_at"`
+	Key         string    `json:"key"`
+	TaskKey     string    `json:"task_key,omitempty"`
+	SourceCID   string    `json:"source_cid"`
+	FallbackCID string    `json:"fallback_cid,omitempty"`
+	CD2Path     string    `json:"cd2_path,omitempty"`
+	FID         string    `json:"fid"`
+	FileName    string    `json:"file_name"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (u *Unpackerr) loadProcessingState() error {

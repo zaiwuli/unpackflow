@@ -145,6 +145,7 @@ type UIOverrides struct {
 	N115Mappings        []string `json:"115_mappings,omitempty"`
 	N115SuccessAction   string   `json:"115_success_action,omitempty"`
 	N115ArchiveCID      string   `json:"115_archive_cid,omitempty"`
+	N115AutoFallback    *bool    `json:"115_auto_fallback,omitempty"`
 }
 
 func (u *Unpackerr) loadUIStore() error {
@@ -249,6 +250,9 @@ func (u *Unpackerr) loadUIStore() error {
 	}
 	if store.Overrides.N115ArchiveCID != "" {
 		u.CloudDrive2.N115ArchiveCID = store.Overrides.N115ArchiveCID
+	}
+	if store.Overrides.N115AutoFallback != nil {
+		u.CloudDrive2.N115AutoFallback = *store.Overrides.N115AutoFallback
 	}
 	u.uiStore = store
 	return nil
@@ -380,6 +384,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115Mappings:        append([]string(nil), u.CloudDrive2.N115Mappings...),
 		N115SuccessAction:   u.CloudDrive2.N115SuccessAction,
 		N115ArchiveCID:      u.CloudDrive2.N115ArchiveCID,
+		N115AutoFallback:    func() *bool { v := u.CloudDrive2.N115AutoFallback; return &v }(),
 	}
 	if folder := u.localFolder(); folder != nil {
 		settings.LocalSourceAction = localSourceAction(folder)
@@ -468,6 +473,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.N115ArchiveCID != "" {
 		settings.N115ArchiveCID = overrides.N115ArchiveCID
+	}
+	if overrides.N115AutoFallback != nil {
+		settings.N115AutoFallback = overrides.N115AutoFallback
 	}
 	if overrides.N115Cookie != "" {
 		settings.N115Cookie = "********"

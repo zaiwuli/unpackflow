@@ -187,6 +187,7 @@ async function selectNotificationProvider(provider) {
 
 function ensureLocalSettings() {
   if ($('local-source-action')) return;
+	$('cd2-refresh').textContent = '同步 115 并刷新 CD2';
   const workers = $('workers').closest('.field');
   if (!workers) return;
   const oldDeleteSource = $('delete-source');
@@ -215,6 +216,7 @@ function ensureLocalSettings() {
     '<div class="form-actions"><button id="115-sync" type="button">\u624b\u52a8\u540c\u6b65 115</button></div><p id="115-sync-message" class="form-message"></p>' +
     '<label class="field"><span>\u4e91\u89e3\u538b\u6210\u529f\u540e\u7684\u539f\u5305\u5904\u7406</span><select id="115-success-action"><option value="keep">\u4fdd\u7559\u539f\u5305</option><option value="delete">\u5220\u9664\u539f\u5305</option><option value="archive">\u5f52\u6863\u539f\u5305</option></select></label>' +
     '<label class="field" id="115-archive-cid-row"><span>\u5f52\u6863\u538b\u7f29\u5305 CID</span><input id="115-archive-cid" type="text" placeholder="\u586b\u5199 115 \u5f52\u6863\u6587\u4ef6\u5939 CID"></label>' +
+    '<label class="check-row"><input id="115-auto-fallback" type="checkbox"> \u4e91\u89e3\u538b\u5931\u8d25\u540e\u81ea\u52a8\u8f6c\u672c\u5730\u5160\u5e95</label><small style="color:var(--muted);font-size:12px">\u5173\u95ed\u65f6\uff0c\u5931\u8d25\u4efb\u52a1\u4f1a\u4fdd\u7559\u5728\u4efb\u52a1\u5217\u8868\uff0c\u53ef\u624b\u52a8\u8f6c\u672c\u5730\u89e3\u538b</small>' +
     '<div class="field"><span>115 云解压与 CD2 兜底映射</span><div id="115-mappings" class="mapping-list"></div><div class="form-actions"><button id="115-mapping-add" type="button">添加文件夹</button></div><small style="color:var(--muted);font-size:12px">每个文件夹独立配置。云解压失败后，文件会移动到兜底 CID，并刷新对应 CD2 路径。</small></div>';
   workers.insertAdjacentElement('afterend', block);
   if (!document.getElementById('115-mapping-style')) {
@@ -229,6 +231,43 @@ function ensureLocalSettings() {
 	$('115-mapping-add').addEventListener('click', () => add115MappingRow());
 	$('115-success-action').addEventListener('change', update115ArchiveCIDVisibility);
 	$('115-sync').addEventListener('click', sync115Now);
+	buildSettingsSections(block, workers);
+}
+
+function buildSettingsSections(localBlock, workers) {
+  if ($('settings-switch')) return;
+  const view = $('settings-view');
+  const heading = view.querySelector('.panel-heading');
+  const nav = document.createElement('div');
+  nav.id = 'settings-switch'; nav.className = 'settings-switch';
+  nav.innerHTML = '<button class="settings-switch-button active" data-settings-view="settings-basic" type="button">基础</button><button class="settings-switch-button" data-settings-view="settings-local" type="button">本地</button><button class="settings-switch-button" data-settings-view="settings-cloud" type="button">云端</button>';
+  const basic = document.createElement('section'); basic.id = 'settings-basic'; basic.className = 'settings-section active-settings-section';
+  const local = document.createElement('section'); local.id = 'settings-local'; local.className = 'settings-section';
+  const cloud = document.createElement('section'); cloud.id = 'settings-cloud'; cloud.className = 'settings-section';
+  heading.insertAdjacentElement('afterend', nav); nav.insertAdjacentElement('afterend', basic); basic.insertAdjacentElement('afterend', local); local.insertAdjacentElement('afterend', cloud);
+  basic.appendChild(workers);
+  const all = Array.from(view.children);
+  const save = $('settings-save').closest('.form-actions');
+  const message = $('settings-message');
+  for (const node of all) {
+    if (node === heading || node === nav || node === basic || node === local || node === cloud || node === save || node === message || node === localBlock) continue;
+    cloud.appendChild(node);
+  }
+  const localChildren = Array.from(localBlock.children);
+  const splitAt = localChildren.findIndex(node => node.tagName === 'H3' && node.textContent.indexOf('CD2') >= 0);
+  local.appendChild(localBlock);
+  if (splitAt >= 0) {
+    const cloudPart = document.createElement('div');
+    cloudPart.className = 'cloud-extra-settings';
+    localChildren.slice(splitAt).forEach(node => cloudPart.appendChild(node));
+    cloud.appendChild(cloudPart);
+  }
+  cloud.appendChild(save); cloud.appendChild(message);
+  nav.querySelectorAll('.settings-switch-button').forEach(button => button.addEventListener('click', () => {
+    nav.querySelectorAll('.settings-switch-button').forEach(item => item.classList.remove('active'));
+    view.querySelectorAll('.settings-section').forEach(item => item.classList.remove('active-settings-section'));
+    button.classList.add('active'); $(button.dataset.settingsView).classList.add('active-settings-section');
+  }));
 }
 
 function update115ArchiveCIDVisibility() {
@@ -324,6 +363,7 @@ function fillForms(data) {
   $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
   $('115-success-action').value = (data.settings && data.settings['115_success_action']) || 'keep';
   $('115-archive-cid').value = (data.settings && data.settings['115_archive_cid']) || '';
+	$('115-auto-fallback').checked = !!(data.settings && data.settings['115_auto_fallback']);
   fill115MappingRows((data.settings && data.settings['115_mappings']) || []);
   const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
   $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
@@ -359,7 +399,7 @@ function renderTask(task) {
     (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
-    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (canCancel ? '<button data-cancel-task="' + esc(task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.key) + '" type="button" style="margin-left:8px">转本地兜底</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
 }
 
 function renderStatus(data) {
@@ -434,11 +474,11 @@ document.querySelectorAll('.log-switch-button').forEach(button => button.addEven
 $('refresh').addEventListener('click', () => load(false));
 $('cd2-refresh').addEventListener('click', async () => {
   $('cd2-refresh').disabled = true;
-  $('refresh-message').textContent = '正在刷新 CD2…';
+  $('refresh-message').textContent = '正在同步 115 并刷新 CD2…';
   try {
     const response = await fetch('api/clouddrive2/refresh', {method: 'POST'});
     const data = await response.json().catch(() => ({}));
-    $('refresh-message').textContent = response.ok ? '刷新完成，发现 ' + (data.found || 0) + ' 个压缩文件' : (data.error || '刷新失败');
+    $('refresh-message').textContent = response.ok ? (data.message || ('同步完成，发现 ' + (data.found || 0) + ' 个压缩文件')) : (data.error || '同步失败');
     load(false);
   } catch (_) { $('refresh-message').textContent = '刷新失败'; }
   $('cd2-refresh').disabled = false;
@@ -466,7 +506,14 @@ $('history').addEventListener('click', async event => {
 });
 
 $('tasks').addEventListener('click', async event => {
-  const key = event.target.dataset.cancelTask;
+	const fallbackKey = event.target.dataset.fallbackTask;
+	if (fallbackKey) {
+		event.target.disabled = true;
+		const response = await fetch('api/115/fallback', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: fallbackKey})});
+		if (response.ok) load(false); else { $('refresh-message').textContent = await response.text() || '转本地兜底失败'; event.target.disabled = false; }
+		return;
+	}
+	const key = event.target.dataset.cancelTask;
   if (!key) return;
   event.target.disabled = true;
   const response = await fetch('api/tasks/cancel', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key})});
@@ -498,6 +545,7 @@ $('settings-save').addEventListener('click', async () => {
     '115_event_interval': $('115-event-interval').value.trim(),
     '115_success_action': $('115-success-action').value,
     '115_archive_cid': $('115-archive-cid').value.trim(),
+    '115_auto_fallback': $('115-auto-fallback').checked,
     '115_mappings': collect115Mappings(),
     cd2_enabled: $('cd2-enabled').checked,
     cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),

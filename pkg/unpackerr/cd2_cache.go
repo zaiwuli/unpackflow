@@ -17,18 +17,19 @@ import (
 )
 
 type CD2Transfer struct {
-	Key        string    `json:"key"`
-	Path       string    `json:"path"`
-	Source     string    `json:"source,omitempty"`
-	CachedPath string    `json:"cached_path,omitempty"`
-	State      string    `json:"state"`
-	Bytes      int64     `json:"bytes"`
-	Total      int64     `json:"total"`
-	StartedAt  time.Time `json:"started_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Speed      int64     `json:"speed"`
-	ETA        int64     `json:"eta_seconds"`
-	Error      string    `json:"error,omitempty"`
+	Key         string    `json:"key"`
+	Path        string    `json:"path"`
+	Source      string    `json:"source,omitempty"`
+	CachedPath  string    `json:"cached_path,omitempty"`
+	State       string    `json:"state"`
+	Bytes       int64     `json:"bytes"`
+	Total       int64     `json:"total"`
+	StartedAt   time.Time `json:"started_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Speed       int64     `json:"speed"`
+	ETA         int64     `json:"eta_seconds"`
+	Error       string    `json:"error,omitempty"`
+	CanFallback bool      `json:"can_fallback,omitempty"`
 }
 
 var (

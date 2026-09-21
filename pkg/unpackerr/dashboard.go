@@ -72,18 +72,19 @@ type DashboardTotals struct {
 }
 
 type DashboardTask struct {
-	Key        string `json:"key"`
-	Name       string `json:"name"`
-	Source     string `json:"source"`
-	Status     string `json:"status"`
-	Updated    string `json:"updated"`
-	Retries    uint   `json:"retries"`
-	Progress   string `json:"progress,omitempty"`
-	Bytes      int64  `json:"bytes,omitempty"`
-	Total      int64  `json:"total,omitempty"`
-	Speed      int64  `json:"speed,omitempty"`
-	ETASeconds int64  `json:"eta_seconds,omitempty"`
-	Error      string `json:"error,omitempty"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Source      string `json:"source"`
+	Status      string `json:"status"`
+	Updated     string `json:"updated"`
+	Retries     uint   `json:"retries"`
+	Progress    string `json:"progress,omitempty"`
+	Bytes       int64  `json:"bytes,omitempty"`
+	Total       int64  `json:"total,omitempty"`
+	Speed       int64  `json:"speed,omitempty"`
+	ETASeconds  int64  `json:"eta_seconds,omitempty"`
+	Error       string `json:"error,omitempty"`
+	CanFallback bool   `json:"can_fallback,omitempty"`
 }
 
 type DashboardFolder struct {
@@ -151,16 +152,17 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			source = "CloudDrive2"
 		}
 		snapshot.Tasks = append(snapshot.Tasks, DashboardTask{
-			Key:        transfer.Key,
-			Name:       filepath.Base(transfer.Path),
-			Source:     source,
-			Status:     status,
-			Updated:    transfer.UpdatedAt.Format("2006-01-02 15:04:05"),
-			Bytes:      transfer.Bytes,
-			Total:      transfer.Total,
-			Speed:      transfer.Speed,
-			ETASeconds: transfer.ETA,
-			Error:      transfer.Error,
+			Key:         transfer.Key,
+			Name:        filepath.Base(transfer.Path),
+			Source:      source,
+			Status:      status,
+			Updated:     transfer.UpdatedAt.Format("2006-01-02 15:04:05"),
+			Bytes:       transfer.Bytes,
+			Total:       transfer.Total,
+			Speed:       transfer.Speed,
+			ETASeconds:  transfer.ETA,
+			Error:       transfer.Error,
+			CanFallback: transfer.CanFallback,
 		})
 		snapshot.Totals.Active++
 	}
@@ -203,12 +205,30 @@ func formatDashboardTime(value time.Time) string {
 
 func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 	items := make([]CD2Transfer, 0)
+	seen := make(map[string]struct{})
 	u.cd2Tasks.Range(func(_, value any) bool {
 		if transfer, ok := value.(*CD2Transfer); ok && transfer != nil {
 			items = append(items, *transfer)
+			seen[transfer.Key] = struct{}{}
 		}
 		return true
 	})
+	// Manual 115 fallback tasks survive a restart in the state file. Rebuild a
+	// lightweight task row here so the user does not lose the "转本地兜底" action.
+	if u.state != nil && !u.CloudDrive2.N115AutoFallback {
+		u.state.mu.RLock()
+		for _, item := range u.state.Fallback115 {
+			if item.TaskKey == "" {
+				continue
+			}
+			if _, exists := seen[item.TaskKey]; exists {
+				continue
+			}
+			items = append(items, CD2Transfer{Key: item.TaskKey, Path: item.FileName, Source: "115 云端", State: "云解压失败，等待手动本地兜底", StartedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, CanFallback: true})
+			seen[item.TaskKey] = struct{}{}
+		}
+		u.state.mu.RUnlock()
+	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 	return items
 }
@@ -412,25 +432,37 @@ func (u *Unpackerr) notificationTestAPI(w http.ResponseWriter, _ *http.Request, 
 }
 
 func (u *Unpackerr) cd2RefreshAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	// A manual cloud sync is deliberately ordered: first inspect the 115 source
+	// folders, then ask CloudDrive2 to refresh the mounted fallback path. This
+	// makes the button useful even when CD2 has not yet surfaced a new file.
+	messages := make([]string, 0, 2)
+	if u.CloudDrive2.N115Enabled && strings.TrimSpace(u.CloudDrive2.N115Cookie) != "" && len(parse115Mappings(u.CloudDrive2.N115Mappings)) > 0 {
+		u.poll115RecentOperations()
+		messages = append(messages, "已同步 115 生活记录")
+	} else {
+		messages = append(messages, "115 未配置，已跳过")
+	}
 	u.cd2Mu.RLock()
 	client := u.cd2Client
 	u.cd2Mu.RUnlock()
-	if !u.CloudDrive2.Enabled || client == nil {
-		http.Error(w, "CloudDrive2 未启用或尚未连接", http.StatusBadRequest)
-		return
+	found := 0
+	if u.CloudDrive2.Enabled && client != nil {
+		refreshPath := u.CloudDrive2.RefreshPath
+		if strings.TrimSpace(refreshPath) == "" {
+			refreshPath = "/"
+		}
+		if err := client.ForceRefresh(r.Context(), refreshPath); err != nil {
+			u.Errorf("CloudDrive2 手动刷新失败：%v", err)
+			messages = append(messages, "CD2 刷新失败："+err.Error())
+		} else {
+			found = u.cloudDriveFallbackScan(client, u.CloudDrive2.WatchPath, u.CloudDrive2.PathOverrides)
+			messages = append(messages, fmt.Sprintf("已刷新 CD2 指定路径，发现 %d 个压缩文件", found))
+		}
+	} else {
+		messages = append(messages, "CD2 未连接，已跳过")
 	}
-	refreshPath := u.CloudDrive2.RefreshPath
-	if strings.TrimSpace(refreshPath) == "" {
-		refreshPath = "/"
-	}
-	if err := client.ForceRefresh(r.Context(), refreshPath); err != nil {
-		u.Errorf("CloudDrive2 手动刷新失败：%v", err)
-		http.Error(w, "CloudDrive2 刷新失败："+err.Error(), http.StatusBadGateway)
-		return
-	}
-	found := u.cloudDriveFallbackScan(client, u.CloudDrive2.WatchPath, u.CloudDrive2.PathOverrides)
-	u.Printf("CloudDrive2 手动刷新完成：发现 %d 个压缩文件", found)
-	u.writeJSON(w, map[string]any{"success": true, "found": found})
+	u.Printf("手动云端同步完成：%s", strings.Join(messages, "；"))
+	u.writeJSON(w, map[string]any{"success": true, "found": found, "message": strings.Join(messages, "；")})
 }
 
 func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
@@ -442,9 +474,38 @@ func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, _ *http.Request, _ httpro
 		http.Error(w, "请至少配置一个 115 文件夹映射", http.StatusBadRequest)
 		return
 	}
-	go u.poll115RecentOperations()
-	u.Printf("已手动提交 115 同步")
+	u.poll115RecentOperations()
+	u.Printf("115 手动同步完成")
 	u.writeJSON(w, map[string]any{"success": true})
+}
+
+func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var input struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Key) == "" {
+		http.Error(w, "请求格式错误", http.StatusBadRequest)
+		return
+	}
+	var pending Pending115
+	found := false
+	if u.state != nil {
+		u.state.mu.RLock()
+		for _, item := range u.state.Fallback115 {
+			if item.TaskKey == input.Key || item.Key == input.Key {
+				pending, found = item, true
+				break
+			}
+		}
+		u.state.mu.RUnlock()
+	}
+	if !found || pending.CD2Path == "" {
+		http.Error(w, "未找到可本地兜底的云端任务", http.StatusNotFound)
+		return
+	}
+	u.update115Transfer(input.Key, pending.FileName, "正在转本地兜底解压", func(task *CD2Transfer) { task.CanFallback = false })
+	u.refresh115Fallback(N115Mapping{FallbackCID: pending.FallbackCID, CD2Path: pending.CD2Path}, n115File{FID: pending.FID, Name: pending.FileName})
+	u.writeJSON(w, map[string]any{"success": true, "message": "已刷新 CD2 兜底路径，等待缓存"})
 }
 
 func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {

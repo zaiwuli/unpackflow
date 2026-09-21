@@ -108,6 +108,7 @@ type CloudDriveConfig struct {
 	N115Mappings         []string      `json:"115_mappings" toml:"115_mappings" xml:"115_mapping" yaml:"115_mappings"`
 	N115SuccessAction    string        `json:"115_success_action" toml:"115_success_action" xml:"115_success_action" yaml:"115_success_action"`
 	N115ArchiveCID       string        `json:"115_archive_cid" toml:"115_archive_cid" xml:"115_archive_cid" yaml:"115_archive_cid"`
+	N115AutoFallback     bool          `json:"115_auto_fallback" toml:"115_auto_fallback" xml:"115_auto_fallback" yaml:"115_auto_fallback"`
 }
 
 type FoldersConfig struct {
