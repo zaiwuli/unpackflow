@@ -132,10 +132,12 @@ func (u *Unpackerr) extractCompletedDownload(name string, now time.Time, item *E
 	mapper := newArchiveNameMapper()
 	u.nameMappers.Store(name, mapper)
 	queueSize, _ := u.Extract(&xtractr.Xtract{
-		Password:   u.getPasswordFromPath(item.Path),
-		Passwords:  u.Passwords,
-		Name:       name,
-		NameMapper: mapper.Map,
+		Password:       u.getPasswordFromPath(item.Path),
+		Passwords:      u.Passwords,
+		Name:           name,
+		SquashRoot:     true,
+		SquashRootName: true,
+		NameMapper:     mapper.Map,
 		Filter: xtractr.Filter{
 			Path:          item.Path,
 			ExcludeSuffix: xtractr.AllExcept(archiveTypes...),

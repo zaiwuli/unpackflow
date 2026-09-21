@@ -20,7 +20,9 @@ type Xtract struct {
 	Filter
 
 	// Unused in this app; exposed for calling library.
-	Name string
+	Name           string
+	SquashRoot     bool
+	SquashRootName bool
 	// NameMapper converts an archive-relative path to a safe output-relative path.
 	NameMapper func(string) string
 	// Archive password. Only supported with RAR and 7zip files. Prepended to Passwords.
@@ -189,6 +191,8 @@ func (x *Xtractr) decompressFolders(resp *Response) error {
 				DeleteOrig:       resp.X.DeleteOrig,
 				TempFolder:       resp.X.TempFolder,
 				LogFile:          resp.X.LogFile,
+				SquashRoot:       resp.X.SquashRoot,
+				SquashRootName:   resp.X.SquashRootName,
 				Updates:          resp.X.Updates,
 				Progress:         resp.X.Progress,
 			},
@@ -320,11 +324,13 @@ func (x *Xtractr) decompressFiles(resp *Response) error {
 	resp.Extras = excludePathsFromArchiveList(resp.Extras, resp.SkipOnRecursion)
 	nre := &Response{
 		X: &Xtract{
-			Password:   resp.X.Password,
-			Passwords:  resp.X.Passwords,
-			NameMapper: resp.X.NameMapper,
-			Progress:   resp.X.Progress,
-			Updates:    resp.X.Updates,
+			Password:       resp.X.Password,
+			Passwords:      resp.X.Passwords,
+			NameMapper:     resp.X.NameMapper,
+			Progress:       resp.X.Progress,
+			Updates:        resp.X.Updates,
+			SquashRoot:     resp.X.SquashRoot,
+			SquashRootName: resp.X.SquashRootName,
 		},
 		Started:  resp.Started,
 		Output:   resp.Output,
@@ -386,17 +392,19 @@ func (x *Xtractr) processArchive(filename string, resp *Response) (uint64, []str
 	x.config.Debugf("Extracting File: %v to %v", filename, resp.Output)
 
 	xFile := &XFile{
-		FilePath:    filename,
-		OutputDir:   resp.Output,
-		NameMapper:  resp.X.NameMapper,
-		FileMode:    x.config.FileMode,
-		DirMode:     x.config.DirMode,
-		Passwords:   resp.X.Passwords,
-		Password:    resp.X.Password,
-		FileWorkers: x.config.FileWorkers,
-		log:         x.config.Logger,
-		Updates:     resp.X.Updates,
-		Progress:    resp.X.Progress,
+		FilePath:       filename,
+		OutputDir:      resp.Output,
+		NameMapper:     resp.X.NameMapper,
+		FileMode:       x.config.FileMode,
+		DirMode:        x.config.DirMode,
+		Passwords:      resp.X.Passwords,
+		Password:       resp.X.Password,
+		FileWorkers:    x.config.FileWorkers,
+		log:            x.config.Logger,
+		Updates:        resp.X.Updates,
+		Progress:       resp.X.Progress,
+		SquashRoot:     resp.X.SquashRoot,
+		SquashRootName: resp.X.SquashRootName,
 	}
 
 	bytes, files, archives, err := ExtractFile(xFile)

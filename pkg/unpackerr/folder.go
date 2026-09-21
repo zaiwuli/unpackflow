@@ -403,7 +403,9 @@ func (u *Unpackerr) extractTrackedItem(name string, folder *Folder, now time.Tim
 		CBChannel:        u.folders.Updates,
 		CBFunction:       nil,
 		Progress:         u.progressUpdateCallback(item),
-		LogFile:          !folder.config.DisableLog,
+		LogFile:          false,
+		SquashRoot:       true,
+		SquashRootName:   true,
 		DisableRecursion: folder.config.DisableRecursion,
 	})
 	if err != nil {

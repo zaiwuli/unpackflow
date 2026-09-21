@@ -135,7 +135,8 @@ type XFile struct {
 	// If the archive only has one directory in the root, then setting
 	// this true will cause the extracted content to be moved into the
 	// output folder, and the root folder in the archive to be removed.
-	SquashRoot bool
+	SquashRoot     bool
+	SquashRootName bool
 	// SkipOnRecursion, if set by an extractor, lists paths that were copied into
 	// the output (e.g. a CUE sheet) and must not be re-extracted when recursing.
 	SkipOnRecursion []string
@@ -703,11 +704,24 @@ func (x *XFile) squashRoot(files []string) ([]string, error) {
 
 	if len(roots) == 1 { // only 1 root folder...
 		for root := range roots { // ...move it's content up a level.
+			if x.SquashRootName && !strings.EqualFold(root, archiveStem(x.FilePath)) {
+				return files, nil
+			}
 			return x.moveFiles(filepath.Join(x.OutputDir, root), x.OutputDir, false)
 		}
 	}
 
 	return files, nil
+}
+
+func archiveStem(path string) string {
+	name := strings.ToLower(filepath.Base(path))
+	for _, ext := range []string{".7z.001", ".part01.rar", ".part1.rar", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz", ".rar", ".zip", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso"} {
+		if strings.HasSuffix(name, ext) {
+			return strings.TrimSuffix(name, ext)
+		}
+	}
+	return strings.TrimSuffix(name, filepath.Ext(name))
 }
 
 func (x *XFile) safeDirMode(current os.FileMode) os.FileMode {
