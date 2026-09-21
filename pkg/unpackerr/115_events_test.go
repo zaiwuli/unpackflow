@@ -61,3 +61,17 @@ func TestN115SeparateFolderName(t *testing.T) {
 		t.Fatalf("archive folder = %q", got)
 	}
 }
+
+func TestN115QueueHasSingleSlot(t *testing.T) {
+	u := New()
+	if cap(u.n115Queue) != 1 {
+		t.Fatalf("115 queue capacity = %d, want 1", cap(u.n115Queue))
+	}
+	u.n115Queue <- struct{}{}
+	select {
+	case u.n115Queue <- struct{}{}:
+		t.Fatal("a second 115 extraction must wait for the active extraction")
+	default:
+	}
+	<-u.n115Queue
+}

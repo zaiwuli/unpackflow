@@ -210,11 +210,61 @@ function ensureLocalSettings() {
     '<label class="field"><span>Cookie \u6765\u6e90\u5907\u6ce8</span><input id="115-cookie-remark" type="text" placeholder="\u4f8b\u5982\uff1a115 \u7f51\u9875\u5f00\u53d1\u8005\u5de5\u5177"></label>' +
     '<label class="check-row"><input id="115-event-enabled" type="checkbox"> \u542f\u7528\u6700\u8fd1\u64cd\u4f5c\u4e8b\u4ef6</label>' +
     '<label class="field"><span>\u4e8b\u4ef6\u540c\u6b65\u95f4\u9694</span><input id="115-event-interval" type="text" placeholder="5m"></label>' +
-    '<label class="field"><span>115 云解压与 CD2 兜底映射</span><textarea id="115-mappings" rows="4" placeholder="每行一条：来源 CID => 兜底 CID => /115open/上传下载/下载本地"></textarea><small style="color:var(--muted);font-size:12px">云解压失败后会移动到兜底 CID，并刷新右侧的 CD2 路径。旧格式“来源 CID => CD2 路径”仍可用。</small></label>';
+    '<div class="field"><span>115 云解压与 CD2 兜底映射</span><div id="115-mappings" class="mapping-list"></div><div class="form-actions"><button id="115-mapping-add" type="button">添加文件夹</button></div><small style="color:var(--muted);font-size:12px">每个文件夹独立配置。云解压失败后，文件会移动到兜底 CID，并刷新对应 CD2 路径。</small></div>';
   workers.insertAdjacentElement('afterend', block);
+  if (!document.getElementById('115-mapping-style')) {
+    const style = document.createElement('style');
+    style.id = '115-mapping-style';
+    style.textContent = '.mapping-list{display:grid;gap:8px;margin-top:8px}.mapping-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(110px,1fr) minmax(180px,2fr) 34px;gap:8px;align-items:center}.115-mapping-input{min-width:0;width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit}.mapping-remove{width:34px;height:34px;padding:0;border:1px solid #d8dce5;border-radius:8px;background:#fff;color:#b42318;font-size:22px;line-height:1}@media(max-width:680px){.mapping-row{grid-template-columns:1fr}.mapping-remove{width:100%;font-size:16px}}';
+    document.head.appendChild(style);
+  }
   const select = $('local-source-action');
   select.style.cssText = 'width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit';
   select.addEventListener('change', updateLocalArchiveVisibility);
+	$('115-mapping-add').addEventListener('click', () => add115MappingRow());
+}
+
+function mappingInput(placeholder, value, field) {
+  return '<input class="115-mapping-input" data-mapping-field="' + field + '" type="text" placeholder="' + placeholder + '" value="' + esc(value || '') + '">';
+}
+
+function parse115Mapping(value) {
+  const parts = String(value || '').split('=>').map(item => item.trim());
+  if (parts.length >= 3) return {source: parts[0], fallback: parts[1], path: parts.slice(2).join('=>').trim()};
+  if (parts.length === 2) return {source: parts[0], fallback: '', path: parts[1]};
+  return {source: '', fallback: '', path: ''};
+}
+
+function add115MappingRow(value) {
+  const list = $('115-mappings');
+  if (!list) return;
+  const item = typeof value === 'string' ? parse115Mapping(value) : (value || {});
+  const row = document.createElement('div');
+  row.className = 'mapping-row';
+  row.innerHTML = mappingInput('来源 CID', item.source, 'source') +
+    mappingInput('兜底 CID', item.fallback, 'fallback') +
+    mappingInput('CD2 路径，例如 /115open/解压兜底', item.path, 'path') +
+    '<button class="mapping-remove" type="button" title="删除此文件夹">×</button>';
+  row.querySelector('.mapping-remove').addEventListener('click', () => row.remove());
+  list.appendChild(row);
+}
+
+function fill115MappingRows(values) {
+  const list = $('115-mappings');
+  if (!list) return;
+  list.innerHTML = '';
+  (values || []).forEach(value => add115MappingRow(value));
+  if (!list.children.length) add115MappingRow();
+}
+
+function collect115Mappings() {
+  return Array.from(document.querySelectorAll('#115-mappings .mapping-row')).map(row => {
+    const source = row.querySelector('[data-mapping-field="source"]').value.trim();
+    const fallback = row.querySelector('[data-mapping-field="fallback"]').value.trim();
+    const path = row.querySelector('[data-mapping-field="path"]').value.trim();
+    if (!source || !path) return '';
+    return fallback ? source + ' => ' + fallback + ' => ' + path : source + ' => ' + path;
+  }).filter(Boolean);
 }
 
 function updateLocalArchiveVisibility() {
@@ -248,7 +298,7 @@ function fillForms(data) {
   $('115-cookie').placeholder = (data.settings && data.settings['115_cookie']) || '已保存，留空表示不修改';
   $('115-cookie-remark').value = (data.settings && data.settings['115_cookie_remark']) || '';
   $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
-  $('115-mappings').value = ((data.settings && data.settings['115_mappings']) || []).join('\\n');
+  fill115MappingRows((data.settings && data.settings['115_mappings']) || []);
   const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
   $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
   updateLocalArchiveVisibility();
@@ -420,7 +470,7 @@ $('settings-save').addEventListener('click', async () => {
     '115_cookie': $('115-cookie').value.trim(),
     '115_cookie_remark': $('115-cookie-remark').value.trim(),
     '115_event_interval': $('115-event-interval').value.trim(),
-    '115_mappings': $('115-mappings').value.split('\\n').map(item => item.trim()).filter(Boolean),
+    '115_mappings': collect115Mappings(),
     cd2_enabled: $('cd2-enabled').checked,
     cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),
     watch_path: $('watch-path').value.trim(), refresh_interval: $('refresh-interval').value.trim(),

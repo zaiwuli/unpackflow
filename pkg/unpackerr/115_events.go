@@ -15,7 +15,10 @@ import (
 	"github.com/Unpackerr/unpackerr/pkg/clouddrive"
 )
 
-const n115APIBase = "https://webapi.115.com"
+const (
+	n115APIBase   = "https://webapi.115.com"
+	n115FilesBase = "https://aps.115.com"
+)
 
 // N115Mapping maps a monitored 115 folder to its local-extraction fallback.
 // The two-part legacy format (source CID => CD2 path) remains accepted.
@@ -117,8 +120,11 @@ func (u *Unpackerr) poll115RecentOperations() {
 			if _, loaded := u.n115Running.LoadOrStore(version.Key, struct{}{}); loaded {
 				continue
 			}
+			u.update115Transfer(version.Key, file.Name, "等待 115 云解压", nil)
 			go func(mapping N115Mapping, file n115File, version ProcessedSource) {
 				defer u.n115Running.Delete(version.Key)
+				u.n115Queue <- struct{}{}
+				defer func() { <-u.n115Queue }()
 				u.run115CloudExtract(mapping, file, version)
 			}(mapping, file, version)
 		}
@@ -176,7 +182,7 @@ func (u *Unpackerr) n115Request(ctx context.Context, method, endpoint string, fo
 }
 
 func (u *Unpackerr) n115ListFiles(ctx context.Context, cid string) ([]n115File, error) {
-	response, err := u.n115Request(ctx, http.MethodGet, n115APIBase+"/natsort/files.php", url.Values{
+	response, err := u.n115Request(ctx, http.MethodGet, n115FilesBase+"/natsort/files.php", url.Values{
 		"cid": {cid}, "aid": {"1"}, "o": {"user_ptime"}, "asc": {"0"}, "offset": {"0"},
 		"show_dir": {"1"}, "limit": {"115"}, "type": {"5"}, "natsort": {"1"}, "format": {"json"},
 	})

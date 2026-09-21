@@ -69,15 +69,16 @@ type Unpackerr struct {
 	menu        map[string]ui.MenuItem
 	uiStore     *UIStore
 	state       *ProcessingState
-	cd2Cache    sync.Map // cache archive path -> []mounted CloudDrive source files
-	cd2Copy     sync.Map // source group key -> struct{} while a cache copy is in progress
-	cd2Resume   sync.Map // cached primary path -> struct{} after resume submission
-	cd2Tasks    sync.Map // group key -> *CD2Transfer while copying or verifying
-	cd2Cancel   sync.Map // group key -> context.CancelFunc for active copies
-	cd2Notice   sync.Map // cached primary path -> discovery notification already sent
-	n115Running sync.Map // 115 source identity -> struct{} while cloud extraction is active
-	cancelled   sync.Map // task path/key -> struct{} for user-cancelled work
-	nameMappers sync.Map // task path/key -> *archiveNameMapper
+	cd2Cache    sync.Map      // cache archive path -> []mounted CloudDrive source files
+	cd2Copy     sync.Map      // source group key -> struct{} while a cache copy is in progress
+	cd2Resume   sync.Map      // cached primary path -> struct{} after resume submission
+	cd2Tasks    sync.Map      // group key -> *CD2Transfer while copying or verifying
+	cd2Cancel   sync.Map      // group key -> context.CancelFunc for active copies
+	cd2Notice   sync.Map      // cached primary path -> discovery notification already sent
+	n115Running sync.Map      // 115 source identity -> struct{} while cloud extraction is active
+	n115Queue   chan struct{} // one 115 cloud extraction at a time
+	cancelled   sync.Map      // task path/key -> struct{} for user-cancelled work
+	nameMappers sync.Map      // task path/key -> *archiveNameMapper
 	cd2Mu       sync.RWMutex
 	cd2Client   *clouddrive.Client
 }
@@ -122,6 +123,7 @@ func New() *Unpackerr {
 		History:        &History{Map: make(map[string]*Extract)},
 		updates:        make(chan *xtractr.Response, updateChanBuf),
 		progChan:       make(chan *ExtractProgress),
+		n115Queue:      make(chan struct{}, 1),
 		menu:           make(map[string]ui.MenuItem),
 		Config: &Config{
 			Folder:      FoldersConfig{Interval: cnfg.Duration{Duration: time.Minute}},
