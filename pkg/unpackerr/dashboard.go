@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -214,7 +218,7 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 		return true
 	})
 	// Manual 115 fallback tasks survive a restart in the state file. Rebuild a
-	// lightweight task row here so the user does not lose the "转本地兜底" action.
+	// Rebuild a lightweight task row so the user does not lose the manual local-extraction action.
 	if u.state != nil && !u.CloudDrive2.N115AutoFallback {
 		u.state.mu.RLock()
 		for _, item := range u.state.Fallback115 {
@@ -224,7 +228,7 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 			if _, exists := seen[item.TaskKey]; exists {
 				continue
 			}
-			items = append(items, CD2Transfer{Key: item.TaskKey, Path: item.FileName, Source: "115 云端", State: "云解压失败，等待手动本地兜底", StartedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, CanFallback: true})
+			items = append(items, CD2Transfer{Key: item.TaskKey, Path: item.FileName, Source: "115 云端", State: "云解压失败，等待手动本地解压", StartedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, CanFallback: true})
 			seen[item.TaskKey] = struct{}{}
 		}
 		u.state.mu.RUnlock()
@@ -263,6 +267,48 @@ func (u *Unpackerr) dashboardIcon(w http.ResponseWriter, _ *http.Request, _ http
 	w.Header().Set("Content-Disposition", "inline; filename=\"favicon.svg\"")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(dashboardIcon)
+}
+
+// Redirect conventional .ico requests to the real SVG icon. Serving SVG bytes
+// as an .ico response prevents several dashboard applications from detecting it.
+func (u *Unpackerr) dashboardFavicon(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	w.Header().Set("Content-Type", "image/x-icon")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(dashboardFaviconICO())
+}
+
+func dashboardFaviconICO() []byte {
+	// ICO files may embed PNG. This produces an actual application/x-icon
+	// response rather than relying on consumers accepting an SVG at .ico.
+	img := image.NewRGBA(image.Rect(0, 0, 32, 32))
+	blue, white := color.RGBA{23, 105, 224, 255}, color.RGBA{255, 255, 255, 255}
+	for y := 0; y < 32; y++ {
+		for x := 0; x < 32; x++ {
+			img.SetRGBA(x, y, blue)
+		}
+	}
+	for y := 9; y < 23; y++ {
+		for x := 7; x < 25; x++ {
+			if x == 7 || x == 24 || y == 9 || y == 22 || (y >= 15 && x >= 12 && x <= 19) {
+				img.SetRGBA(x, y, white)
+			}
+		}
+	}
+	var pngData bytes.Buffer
+	if png.Encode(&pngData, img) != nil {
+		return nil
+	}
+	data := pngData.Bytes()
+	ico := make([]byte, 22+len(data))
+	binary.LittleEndian.PutUint16(ico[2:4], 1)
+	binary.LittleEndian.PutUint16(ico[4:6], 1)
+	ico[6], ico[7] = 32, 32
+	binary.LittleEndian.PutUint16(ico[10:12], 1)
+	binary.LittleEndian.PutUint16(ico[12:14], 32)
+	binary.LittleEndian.PutUint32(ico[14:18], uint32(len(data)))
+	binary.LittleEndian.PutUint32(ico[18:22], 22)
+	copy(ico[22:], data)
+	return ico
 }
 
 func (u *Unpackerr) dashboardAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -500,12 +546,12 @@ func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ ht
 		u.state.mu.RUnlock()
 	}
 	if !found || pending.CD2Path == "" {
-		http.Error(w, "未找到可本地兜底的云端任务", http.StatusNotFound)
+		http.Error(w, "未找到可本地解压的云端任务", http.StatusNotFound)
 		return
 	}
-	u.update115Transfer(input.Key, pending.FileName, "正在转本地兜底解压", func(task *CD2Transfer) { task.CanFallback = false })
+	u.update115Transfer(input.Key, pending.FileName, "正在转本地解压", func(task *CD2Transfer) { task.CanFallback = false })
 	u.refresh115Fallback(N115Mapping{FallbackCID: pending.FallbackCID, CD2Path: pending.CD2Path}, n115File{FID: pending.FID, Name: pending.FileName})
-	u.writeJSON(w, map[string]any{"success": true, "message": "已刷新 CD2 兜底路径，等待缓存"})
+	u.writeJSON(w, map[string]any{"success": true, "message": "已刷新 CD2 指定路径，等待缓存"})
 }
 
 func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -531,14 +577,14 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 	if overrides.FolderInterval != "" {
 		duration, err := time.ParseDuration(overrides.FolderInterval)
 		if err != nil || duration < 0 {
-			http.Error(w, "补偿扫描间隔格式无效，例如：1s、30s、2m；填写 0s 可关闭补偿扫描", http.StatusBadRequest)
+			http.Error(w, "定时扫描间隔格式无效，例如：1s、30s、2m；填写 0s 可关闭定时扫描", http.StatusBadRequest)
 			return
 		}
 	}
 	if overrides.CD2FallbackInterval != "" {
 		duration, err := time.ParseDuration(overrides.CD2FallbackInterval)
 		if err != nil || duration < 0 {
-			http.Error(w, "CD2 兜底扫描间隔格式无效，例如：30m；填写 0s 可关闭", http.StatusBadRequest)
+			http.Error(w, "CD2 定时扫描间隔格式无效，例如：30m；填写 0s 可关闭", http.StatusBadRequest)
 			return
 		}
 	}

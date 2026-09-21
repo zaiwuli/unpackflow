@@ -266,22 +266,22 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 		u.update115Transfer(version.Key, file.Name, "115 云解压失败", func(task *CD2Transfer) { task.Error = err.Error() })
 		return
 	}
-	u.update115Transfer(version.Key, file.Name, "正在移动到 CD2 兜底目录", nil)
+	u.update115Transfer(version.Key, file.Name, "正在移动到备用目录", nil)
 	if err := u.n115MoveToFallback(file.FID, mapping.FallbackCID); err != nil {
-		u.Errorf("115 失败文件移动到兜底目录失败：%s：%v", file.Name, err)
-		u.update115Transfer(version.Key, file.Name, "移动到 CD2 兜底目录失败", func(task *CD2Transfer) { task.Error = err.Error() })
+		u.Errorf("115 失败文件移动到备用目录失败：%s：%v", file.Name, err)
+		u.update115Transfer(version.Key, file.Name, "移动到备用目录失败", func(task *CD2Transfer) { task.Error = err.Error() })
 		return
 	}
-	u.Printf("115 云解压失败，已移动到兜底目录：%s", file.Name)
+	u.Printf("115 云解压失败，已移动到备用目录：%s", file.Name)
 	// The file now lives in FallbackCID. Persist that identity before deciding
 	// whether to start a local copy, so a restart never loses the manual path.
 	u.save115FallbackTask(version.Key, mapping, file)
 	if u.CloudDrive2.N115AutoFallback {
-		u.update115Transfer(version.Key, file.Name, "等待 CD2 本地兜底", func(task *CD2Transfer) { task.CanFallback = false })
+		u.update115Transfer(version.Key, file.Name, "等待本地备用解压", func(task *CD2Transfer) { task.CanFallback = false })
 		u.refresh115Fallback(mapping, file)
 		return
 	}
-	u.update115Transfer(version.Key, file.Name, "云解压失败，等待手动本地兜底", func(task *CD2Transfer) {
+	u.update115Transfer(version.Key, file.Name, "云解压失败，等待手动本地解压", func(task *CD2Transfer) {
 		task.Error = err.Error()
 		task.CanFallback = true
 	})
@@ -502,15 +502,15 @@ func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, file n115File) {
 	client := u.cd2Client
 	u.cd2Mu.RUnlock()
 	if client == nil {
-		u.Errorf("115 兜底文件已移动，但 CloudDrive2 未连接：%s", remoteFile)
+		u.Errorf("115 备用文件已移动，但 CloudDrive2 未连接：%s", remoteFile)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	if err := client.ForceRefresh(ctx, mapping.CD2Path); err != nil {
-		u.Errorf("115 兜底路径刷新失败：%s：%v", mapping.CD2Path, err)
+		u.Errorf("115 备用路径刷新失败：%s：%v", mapping.CD2Path, err)
 	} else {
-		u.Systemf("115 兜底路径已刷新：%s", mapping.CD2Path)
+		u.Systemf("115 备用路径已刷新：%s", mapping.CD2Path)
 	}
 	go u.handleCloudDriveChange(client, clouddrive.Change{Path: remoteFile}, paths)
 }

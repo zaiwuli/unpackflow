@@ -187,7 +187,7 @@ async function selectNotificationProvider(provider) {
 
 function ensureLocalSettings() {
   if ($('local-source-action')) return;
-	$('cd2-refresh').textContent = '同步 115 并刷新 CD2';
+	$('cd2-refresh').textContent = '立即刷新';
   const workers = $('workers').closest('.field');
   if (!workers) return;
   const oldDeleteSource = $('delete-source');
@@ -204,9 +204,9 @@ function ensureLocalSettings() {
     '<label class="field" id="local-archive-row"><span>\u672c\u5730\u5f52\u6863\u76ee\u5f55</span><input id="local-archive-dir" type="text" placeholder="/data/\u5f52\u6863\u76ee\u5f55"></label>' +
     '<label class="field"><span>\u8865\u507f\u626b\u63cf\u95f4\u9694</span><input id="folder-interval" type="text" placeholder="60s">' +
     '<small style="color:var(--muted);font-size:12px">0s \u5173\u95ed\u8865\u507f\u626b\u63cf\uff0c\u5b9e\u65f6\u76d1\u542c\u4ecd\u4fdd\u7559</small></label>' +
-    '<h3>CD2 \u5145\u507f\u626b\u63cf</h3>' +
-    '<label class="check-row"><input id="cd2-fallback-enabled" type="checkbox"> \u542f\u7528 CD2 \u5145\u507f\u626b\u63cf</label>' +
-    '<label class="field"><span>CD2 \u5145\u507f\u626b\u63cf\u95f4\u9694</span><input id="cd2-fallback-interval" type="text" placeholder="30m"></label>' +
+    '<h3>CD2 定时扫描</h3>' +
+    '<label class="check-row"><input id="cd2-fallback-enabled" type="checkbox"> 启用 CD2 定时扫描</label>' +
+    '<label class="field"><span>CD2 定时扫描间隔</span><input id="cd2-fallback-interval" type="text" placeholder="30m"></label>' +
     '<h3>115 \u751f\u6d3b\u4e8b\u4ef6</h3>' +
     '<label class="check-row"><input id="115-enabled" type="checkbox"> \u542f\u7528 115 \u4e8b\u4ef6\u76d1\u63a7</label>' +
     '<label class="field"><span>115 Cookie</span><input id="115-cookie" type="text" autocomplete="off"></label>' +
@@ -216,8 +216,8 @@ function ensureLocalSettings() {
     '<div class="form-actions"><button id="115-sync" type="button">\u624b\u52a8\u540c\u6b65 115</button></div><p id="115-sync-message" class="form-message"></p>' +
     '<label class="field"><span>\u4e91\u89e3\u538b\u6210\u529f\u540e\u7684\u539f\u5305\u5904\u7406</span><select id="115-success-action"><option value="keep">\u4fdd\u7559\u539f\u5305</option><option value="delete">\u5220\u9664\u539f\u5305</option><option value="archive">\u5f52\u6863\u539f\u5305</option></select></label>' +
     '<label class="field" id="115-archive-cid-row"><span>\u5f52\u6863\u538b\u7f29\u5305 CID</span><input id="115-archive-cid" type="text" placeholder="\u586b\u5199 115 \u5f52\u6863\u6587\u4ef6\u5939 CID"></label>' +
-    '<label class="check-row"><input id="115-auto-fallback" type="checkbox"> \u4e91\u89e3\u538b\u5931\u8d25\u540e\u81ea\u52a8\u8f6c\u672c\u5730\u5160\u5e95</label><small style="color:var(--muted);font-size:12px">\u5173\u95ed\u65f6\uff0c\u5931\u8d25\u4efb\u52a1\u4f1a\u4fdd\u7559\u5728\u4efb\u52a1\u5217\u8868\uff0c\u53ef\u624b\u52a8\u8f6c\u672c\u5730\u89e3\u538b</small>' +
-    '<div class="field"><span>115 云解压与 CD2 兜底映射</span><div id="115-mappings" class="mapping-list"></div><div class="form-actions"><button id="115-mapping-add" type="button">添加文件夹</button></div><small style="color:var(--muted);font-size:12px">每个文件夹独立配置。云解压失败后，文件会移动到兜底 CID，并刷新对应 CD2 路径。</small></div>';
+    '<label class="check-row"><input id="115-auto-fallback" type="checkbox"> 云解压失败后自动转本地解压</label><small style="color:var(--muted);font-size:12px">关闭时，失败任务会保留在任务列表，可手动转本地解压</small>' +
+    '<div class="field"><span>115 云解压与 CD2 备用目录映射</span><div id="115-mappings" class="mapping-list"></div><div class="form-actions"><button id="115-mapping-add" type="button">添加文件夹</button></div><small style="color:var(--muted);font-size:12px">每个文件夹独立配置。云解压失败后，文件会移动到备用 CID，并刷新对应 CD2 路径。</small></div>';
   workers.insertAdjacentElement('afterend', block);
   if (!document.getElementById('115-mapping-style')) {
     const style = document.createElement('style');
@@ -305,8 +305,8 @@ function add115MappingRow(value) {
   const row = document.createElement('div');
   row.className = 'mapping-row';
   row.innerHTML = mappingInput('来源 CID', item.source, 'source') +
-    mappingInput('兜底 CID', item.fallback, 'fallback') +
-    mappingInput('CD2 路径，例如 /115open/解压兜底', item.path, 'path') +
+    mappingInput('备用 CID', item.fallback, 'fallback') +
+    mappingInput('CD2 路径，例如 /115open/备用目录', item.path, 'path') +
     '<button class="mapping-remove" type="button" title="删除此文件夹">×</button>';
   row.querySelector('.mapping-remove').addEventListener('click', () => row.remove());
   list.appendChild(row);
@@ -399,7 +399,7 @@ function renderTask(task) {
     (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
-    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.key) + '" type="button" style="margin-left:8px">转本地兜底</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.key) + '" type="button" style="margin-left:8px">转本地解压</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
 }
 
 function renderStatus(data) {
@@ -474,7 +474,7 @@ document.querySelectorAll('.log-switch-button').forEach(button => button.addEven
 $('refresh').addEventListener('click', () => load(false));
 $('cd2-refresh').addEventListener('click', async () => {
   $('cd2-refresh').disabled = true;
-  $('refresh-message').textContent = '正在同步 115 并刷新 CD2…';
+  $('refresh-message').textContent = '正在刷新…';
   try {
     const response = await fetch('api/clouddrive2/refresh', {method: 'POST'});
     const data = await response.json().catch(() => ({}));
@@ -510,7 +510,7 @@ $('tasks').addEventListener('click', async event => {
 	if (fallbackKey) {
 		event.target.disabled = true;
 		const response = await fetch('api/115/fallback', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: fallbackKey})});
-		if (response.ok) load(false); else { $('refresh-message').textContent = await response.text() || '转本地兜底失败'; event.target.disabled = false; }
+		if (response.ok) load(false); else { $('refresh-message').textContent = await response.text() || '转本地解压失败'; event.target.disabled = false; }
 		return;
 	}
 	const key = event.target.dataset.cancelTask;
