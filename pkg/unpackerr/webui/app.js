@@ -210,7 +210,7 @@ function ensureLocalSettings() {
     '<label class="field"><span>Cookie \u6765\u6e90\u5907\u6ce8</span><input id="115-cookie-remark" type="text" placeholder="\u4f8b\u5982\uff1a115 \u7f51\u9875\u5f00\u53d1\u8005\u5de5\u5177"></label>' +
     '<label class="check-row"><input id="115-event-enabled" type="checkbox"> \u542f\u7528\u6700\u8fd1\u64cd\u4f5c\u4e8b\u4ef6</label>' +
     '<label class="field"><span>\u4e8b\u4ef6\u540c\u6b65\u95f4\u9694</span><input id="115-event-interval" type="text" placeholder="5m"></label>' +
-    '<label class="field"><span>115 CID 与 CD2 路径映射</span><textarea id="115-mappings" rows="4" placeholder="每行一条：CID => /115open/上传下载/下载本地"></textarea><small style="color:var(--muted);font-size:12px">CID 是 115 网页文件夹编号，右侧填写 CD2 远端路径</small></label>';
+    '<label class="field"><span>115 云解压与 CD2 兜底映射</span><textarea id="115-mappings" rows="4" placeholder="每行一条：来源 CID => 兜底 CID => /115open/上传下载/下载本地"></textarea><small style="color:var(--muted);font-size:12px">云解压失败后会移动到兜底 CID，并刷新右侧的 CD2 路径。旧格式“来源 CID => CD2 路径”仍可用。</small></label>';
   workers.insertAdjacentElement('afterend', block);
   const select = $('local-source-action');
   select.style.cssText = 'width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit';

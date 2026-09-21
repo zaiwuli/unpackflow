@@ -75,6 +75,7 @@ type Unpackerr struct {
 	cd2Tasks    sync.Map // group key -> *CD2Transfer while copying or verifying
 	cd2Cancel   sync.Map // group key -> context.CancelFunc for active copies
 	cd2Notice   sync.Map // cached primary path -> discovery notification already sent
+	n115Running sync.Map // 115 source identity -> struct{} while cloud extraction is active
 	cancelled   sync.Map // task path/key -> struct{} for user-cancelled work
 	nameMappers sync.Map // task path/key -> *archiveNameMapper
 	cd2Mu       sync.RWMutex

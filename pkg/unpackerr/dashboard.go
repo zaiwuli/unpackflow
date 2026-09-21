@@ -146,10 +146,14 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		if _, cancelled := u.cancelled.Load(transfer.Key); cancelled {
 			status = "已取消"
 		}
+		source := transfer.Source
+		if source == "" {
+			source = "CloudDrive2"
+		}
 		snapshot.Tasks = append(snapshot.Tasks, DashboardTask{
 			Key:        transfer.Key,
 			Name:       filepath.Base(transfer.Path),
-			Source:     "CloudDrive2",
+			Source:     source,
 			Status:     status,
 			Updated:    transfer.UpdatedAt.Format("2006-01-02 15:04:05"),
 			Bytes:      transfer.Bytes,
@@ -165,6 +169,8 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		source := "本地目录"
 		if item.Source == "cd2" {
 			source = "CloudDrive2"
+		} else if item.Source == "115" {
+			source = "115 云端"
 		}
 		snapshot.History = append(snapshot.History, DashboardHistory{
 			Key: item.Key, Path: item.Path, Source: source,
