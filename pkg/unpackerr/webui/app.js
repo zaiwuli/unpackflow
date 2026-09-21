@@ -262,7 +262,10 @@ function buildSettingsSections(localBlock, workers) {
     localChildren.slice(splitAt).forEach(node => cloudPart.appendChild(node));
     cloud.appendChild(cloudPart);
   }
-  cloud.appendChild(save); cloud.appendChild(message);
+  // Keep saving outside the three sections. Otherwise changes made on the
+  // 基础 / 本地 tabs have no visible save action after the settings are split.
+  cloud.insertAdjacentElement('afterend', save);
+  save.insertAdjacentElement('afterend', message);
   nav.querySelectorAll('.settings-switch-button').forEach(button => button.addEventListener('click', () => {
     nav.querySelectorAll('.settings-switch-button').forEach(item => item.classList.remove('active'));
     view.querySelectorAll('.settings-section').forEach(item => item.classList.remove('active-settings-section'));
@@ -530,6 +533,9 @@ $('notify-test').addEventListener('click', async () => {
 });
 
 $('settings-save').addEventListener('click', async () => {
+  const button = $('settings-save');
+  button.disabled = true;
+  $('settings-message').textContent = '正在保存…';
   const body = {
     workers: Number($('workers').value) || 1,
     local_source_action: $('local-source-action').value,
@@ -554,8 +560,14 @@ $('settings-save').addEventListener('click', async () => {
     cache_dir: $('cache-dir').value.trim(), cache_extract_path: $('cache-extract-path').value.trim(),
     keep_cache: $('keep-cache').checked, cache_delete_delay: $('cache-delete-delay').value.trim(), copy_timeout: $('copy-timeout').value.trim(),
   };
-  const response = await fetch('api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-  $('settings-message').textContent = response.ok ? zh.restart : zh.saveFailed;
+  try {
+    const response = await fetch('api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const text = await response.text();
+    $('settings-message').textContent = response.ok ? zh.restart : (text || zh.saveFailed);
+  } catch (_) {
+    $('settings-message').textContent = '保存失败：无法连接服务';
+  }
+  button.disabled = false;
 });
 
 ensureBrandIcon();
