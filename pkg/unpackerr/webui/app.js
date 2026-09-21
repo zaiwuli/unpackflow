@@ -536,38 +536,44 @@ $('settings-save').addEventListener('click', async () => {
   const button = $('settings-save');
   button.disabled = true;
   $('settings-message').textContent = '正在保存…';
-  const body = {
-    workers: Number($('workers').value) || 1,
-    local_source_action: $('local-source-action').value,
-    local_archive_dir: $('local-archive-dir').value.trim(),
-    local_source_delay: $('local-source-delay').value.trim(),
-    folder_interval: $('folder-interval').value.trim(),
-    cd2_fallback_enabled: $('cd2-fallback-enabled').checked,
-    cd2_fallback_interval: $('cd2-fallback-interval').value.trim(),
-    '115_enabled': $('115-enabled').checked,
-    '115_event_enabled': $('115-event-enabled').checked,
-    '115_cookie': $('115-cookie').value.trim(),
-    '115_cookie_remark': $('115-cookie-remark').value.trim(),
-    '115_event_interval': $('115-event-interval').value.trim(),
-    '115_success_action': $('115-success-action').value,
-    '115_archive_cid': $('115-archive-cid').value.trim(),
-    '115_auto_fallback': $('115-auto-fallback').checked,
-    '115_mappings': collect115Mappings(),
-    cd2_enabled: $('cd2-enabled').checked,
-    cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),
-    watch_path: $('watch-path').value.trim(), refresh_interval: $('refresh-interval').value.trim(),
-    refresh_path: $('refresh-path').value.trim(), path_overrides: $('path-overrides').value.split(',').map(item => item.trim()).filter(Boolean),
-    cache_dir: $('cache-dir').value.trim(), cache_extract_path: $('cache-extract-path').value.trim(),
-    keep_cache: $('keep-cache').checked, cache_delete_delay: $('cache-delete-delay').value.trim(), copy_timeout: $('copy-timeout').value.trim(),
-  };
   try {
-    const response = await fetch('api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const body = {
+      workers: Number($('workers').value) || 1,
+      local_source_action: $('local-source-action').value,
+      local_archive_dir: $('local-archive-dir').value.trim(),
+      local_source_delay: $('local-source-delay').value.trim(),
+      folder_interval: $('folder-interval').value.trim(),
+      cd2_fallback_enabled: $('cd2-fallback-enabled').checked,
+      cd2_fallback_interval: $('cd2-fallback-interval').value.trim(),
+      '115_enabled': $('115-enabled').checked,
+      '115_event_enabled': $('115-event-enabled').checked,
+      '115_cookie': $('115-cookie').value.trim(),
+      '115_cookie_remark': $('115-cookie-remark').value.trim(),
+      '115_event_interval': $('115-event-interval').value.trim(),
+      '115_success_action': $('115-success-action').value,
+      '115_archive_cid': $('115-archive-cid').value.trim(),
+      '115_auto_fallback': $('115-auto-fallback').checked,
+      '115_mappings': collect115Mappings(),
+      cd2_enabled: $('cd2-enabled').checked,
+      cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),
+      watch_path: $('watch-path').value.trim(), refresh_interval: $('refresh-interval').value.trim(),
+      refresh_path: $('refresh-path').value.trim(), path_overrides: $('path-overrides').value.split(',').map(item => item.trim()).filter(Boolean),
+      cache_dir: $('cache-dir').value.trim(), cache_extract_path: $('cache-extract-path').value.trim(),
+      keep_cache: $('keep-cache').checked, cache_delete_delay: $('cache-delete-delay').value.trim(), copy_timeout: $('copy-timeout').value.trim(),
+    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+      response = await fetch('api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body), signal: controller.signal});
+    } finally { clearTimeout(timer); }
     const text = await response.text();
     $('settings-message').textContent = response.ok ? zh.restart : (text || zh.saveFailed);
-  } catch (_) {
-    $('settings-message').textContent = '保存失败：无法连接服务';
+  } catch (error) {
+    $('settings-message').textContent = error && error.name === 'AbortError' ? '保存超时：请查看容器日志' : '保存失败：请刷新页面后重试';
+  } finally {
+    button.disabled = false;
   }
-  button.disabled = false;
 });
 
 ensureBrandIcon();
