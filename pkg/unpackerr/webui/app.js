@@ -200,7 +200,16 @@ function ensureLocalSettings() {
     '<small style="color:var(--muted);font-size:12px">0s \u8868\u793a\u89e3\u538b\u6210\u529f\u540e\u7acb\u5373\u5904\u7406</small></label>' +
     '<label class="field" id="local-archive-row"><span>\u672c\u5730\u5f52\u6863\u76ee\u5f55</span><input id="local-archive-dir" type="text" placeholder="/data/\u5f52\u6863\u76ee\u5f55"></label>' +
     '<label class="field"><span>\u8865\u507f\u626b\u63cf\u95f4\u9694</span><input id="folder-interval" type="text" placeholder="60s">' +
-    '<small style="color:var(--muted);font-size:12px">0s \u5173\u95ed\u8865\u507f\u626b\u63cf\uff0c\u5b9e\u65f6\u76d1\u542c\u4ecd\u4fdd\u7559</small></label>';
+    '<small style="color:var(--muted);font-size:12px">0s \u5173\u95ed\u8865\u507f\u626b\u63cf\uff0c\u5b9e\u65f6\u76d1\u542c\u4ecd\u4fdd\u7559</small></label>' +
+    '<h3>CD2 \u5145\u507f\u626b\u63cf</h3>' +
+    '<label class="check-row"><input id="cd2-fallback-enabled" type="checkbox"> \u542f\u7528 CD2 \u5145\u507f\u626b\u63cf</label>' +
+    '<label class="field"><span>CD2 \u5145\u507f\u626b\u63cf\u95f4\u9694</span><input id="cd2-fallback-interval" type="text" placeholder="30m"></label>' +
+    '<h3>115 \u751f\u6d3b\u4e8b\u4ef6</h3>' +
+    '<label class="check-row"><input id="115-enabled" type="checkbox"> \u542f\u7528 115 \u4e8b\u4ef6\u76d1\u63a7</label>' +
+    '<label class="field"><span>115 Cookie</span><input id="115-cookie" type="text" autocomplete="off"></label>' +
+    '<label class="field"><span>Cookie \u6765\u6e90\u5907\u6ce8</span><input id="115-cookie-remark" type="text" placeholder="\u4f8b\u5982\uff1a115 \u7f51\u9875\u5f00\u53d1\u8005\u5de5\u5177"></label>' +
+    '<label class="check-row"><input id="115-event-enabled" type="checkbox"> \u542f\u7528\u6700\u8fd1\u64cd\u4f5c\u4e8b\u4ef6</label>' +
+    '<label class="field"><span>\u4e8b\u4ef6\u540c\u6b65\u95f4\u9694</span><input id="115-event-interval" type="text" placeholder="5m"></label>';
   workers.insertAdjacentElement('afterend', block);
   const select = $('local-source-action');
   select.style.cssText = 'width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit';
@@ -230,6 +239,14 @@ function fillForms(data) {
   $('local-archive-dir').value = (data.settings && data.settings.local_archive_dir) || '/data/\u5f52\u6863\u76ee\u5f55';
   $('local-source-delay').value = (data.settings && data.settings.local_source_delay) || '0s';
   $('folder-interval').value = (data.settings && data.settings.folder_interval) || '60s';
+  $('cd2-fallback-enabled').checked = data.settings && data.settings.cd2_fallback_enabled !== false;
+  $('cd2-fallback-interval').value = (data.settings && data.settings.cd2_fallback_interval) || '30m';
+  $('115-enabled').checked = !!(data.settings && data.settings['115_enabled']);
+  $('115-event-enabled').checked = !!(data.settings && data.settings['115_event_enabled']);
+  $('115-cookie').value = '';
+  $('115-cookie').placeholder = (data.settings && data.settings['115_cookie']) || '已保存，留空表示不修改';
+  $('115-cookie-remark').value = (data.settings && data.settings['115_cookie_remark']) || '';
+  $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
   const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
   $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
   updateLocalArchiveVisibility();
@@ -392,6 +409,13 @@ $('settings-save').addEventListener('click', async () => {
     local_archive_dir: $('local-archive-dir').value.trim(),
     local_source_delay: $('local-source-delay').value.trim(),
     folder_interval: $('folder-interval').value.trim(),
+    cd2_fallback_enabled: $('cd2-fallback-enabled').checked,
+    cd2_fallback_interval: $('cd2-fallback-interval').value.trim(),
+    '115_enabled': $('115-enabled').checked,
+    '115_event_enabled': $('115-event-enabled').checked,
+    '115_cookie': $('115-cookie').value.trim(),
+    '115_cookie_remark': $('115-cookie-remark').value.trim(),
+    '115_event_interval': $('115-event-interval').value.trim(),
     cd2_enabled: $('cd2-enabled').checked,
     cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),
     watch_path: $('watch-path').value.trim(), refresh_interval: $('refresh-interval').value.trim(),

@@ -117,24 +117,31 @@ func normalizeMSNotificationURL(raw string) string {
 }
 
 type UIOverrides struct {
-	Workers           uint     `json:"workers,omitempty"`
-	LocalSourceAction string   `json:"local_source_action,omitempty"`
-	LocalArchiveDir   string   `json:"local_archive_dir,omitempty"`
-	LocalSourceDelay  string   `json:"local_source_delay,omitempty"`
-	FolderInterval    string   `json:"folder_interval,omitempty"`
-	CD2Enabled        *bool    `json:"cd2_enabled,omitempty"`
-	CD2URL            string   `json:"cd2_url,omitempty"`
-	CD2Token          string   `json:"cd2_token,omitempty"`
-	RefreshInterval   string   `json:"refresh_interval,omitempty"`
-	RefreshPath       string   `json:"refresh_path,omitempty"`
-	WatchPath         string   `json:"watch_path,omitempty"`
-	PathOverrides     []string `json:"path_overrides,omitempty"`
-	CacheDir          string   `json:"cache_dir,omitempty"`
-	CacheExtractPath  string   `json:"cache_extract_path,omitempty"`
-	KeepCache         *bool    `json:"keep_cache,omitempty"`
-	DeleteSource      *bool    `json:"delete_source,omitempty"`
-	CacheDeleteDelay  string   `json:"cache_delete_delay,omitempty"`
-	CopyTimeout       string   `json:"copy_timeout,omitempty"`
+	Workers             uint     `json:"workers,omitempty"`
+	LocalSourceAction   string   `json:"local_source_action,omitempty"`
+	LocalArchiveDir     string   `json:"local_archive_dir,omitempty"`
+	LocalSourceDelay    string   `json:"local_source_delay,omitempty"`
+	FolderInterval      string   `json:"folder_interval,omitempty"`
+	CD2Enabled          *bool    `json:"cd2_enabled,omitempty"`
+	CD2URL              string   `json:"cd2_url,omitempty"`
+	CD2Token            string   `json:"cd2_token,omitempty"`
+	RefreshInterval     string   `json:"refresh_interval,omitempty"`
+	RefreshPath         string   `json:"refresh_path,omitempty"`
+	WatchPath           string   `json:"watch_path,omitempty"`
+	PathOverrides       []string `json:"path_overrides,omitempty"`
+	CacheDir            string   `json:"cache_dir,omitempty"`
+	CacheExtractPath    string   `json:"cache_extract_path,omitempty"`
+	KeepCache           *bool    `json:"keep_cache,omitempty"`
+	DeleteSource        *bool    `json:"delete_source,omitempty"`
+	CacheDeleteDelay    string   `json:"cache_delete_delay,omitempty"`
+	CopyTimeout         string   `json:"copy_timeout,omitempty"`
+	CD2FallbackEnabled  *bool    `json:"cd2_fallback_enabled,omitempty"`
+	CD2FallbackInterval string   `json:"cd2_fallback_interval,omitempty"`
+	N115Enabled         *bool    `json:"115_enabled,omitempty"`
+	N115EventEnabled    *bool    `json:"115_event_enabled,omitempty"`
+	N115Cookie          string   `json:"115_cookie,omitempty"`
+	N115CookieRemark    string   `json:"115_cookie_remark,omitempty"`
+	N115EventInterval   string   `json:"115_event_interval,omitempty"`
 }
 
 func (u *Unpackerr) loadUIStore() error {
@@ -206,6 +213,31 @@ func (u *Unpackerr) loadUIStore() error {
 		if d, e := time.ParseDuration(store.Overrides.CopyTimeout); e == nil {
 			u.CloudDrive2.CopyTimeout.Duration = d
 		}
+	}
+	if store.Overrides.CD2FallbackEnabled != nil {
+		u.CloudDrive2.FallbackScanEnabled = *store.Overrides.CD2FallbackEnabled
+	}
+	if store.Overrides.CD2FallbackInterval != "" {
+		if d, e := time.ParseDuration(store.Overrides.CD2FallbackInterval); e == nil {
+			u.CloudDrive2.FallbackScanInterval.Duration = d
+		}
+	}
+	if store.Overrides.N115Enabled != nil {
+		u.CloudDrive2.N115Enabled = *store.Overrides.N115Enabled
+	}
+	if store.Overrides.N115EventEnabled != nil {
+		u.CloudDrive2.N115EventEnabled = *store.Overrides.N115EventEnabled
+	}
+	if store.Overrides.N115Cookie != "" {
+		u.CloudDrive2.N115Cookie = store.Overrides.N115Cookie
+	}
+	if store.Overrides.N115EventInterval != "" {
+		if d, e := time.ParseDuration(store.Overrides.N115EventInterval); e == nil {
+			u.CloudDrive2.N115EventInterval.Duration = d
+		}
+	}
+	if store.Overrides.N115CookieRemark != "" {
+		u.CloudDrive2.N115CookieRemark = store.Overrides.N115CookieRemark
 	}
 	u.uiStore = store
 	return nil
@@ -309,20 +341,26 @@ func (u *Unpackerr) notificationSettings() UINotification {
 func (u *Unpackerr) uiSettings() UIOverrides {
 	enabled, keepCache, deleteSource := u.CloudDrive2.Enabled, u.CloudDrive2.KeepCache, u.CloudDrive2.DeleteSource
 	settings := UIOverrides{
-		Workers:          u.Parallel,
-		FolderInterval:   u.Folder.Interval.Duration.String(),
-		CD2Enabled:       &enabled,
-		CD2URL:           u.CloudDrive2.URL,
-		RefreshInterval:  u.CloudDrive2.RefreshInterval.Duration.String(),
-		RefreshPath:      u.CloudDrive2.RefreshPath,
-		WatchPath:        u.CloudDrive2.WatchPath,
-		PathOverrides:    append([]string{}, u.CloudDrive2.PathOverrides...),
-		CacheDir:         u.CloudDrive2.CacheDir,
-		CacheExtractPath: u.CloudDrive2.CacheExtractPath,
-		KeepCache:        &keepCache,
-		DeleteSource:     &deleteSource,
-		CacheDeleteDelay: u.CloudDrive2.CacheDeleteDelay.Duration.String(),
-		CopyTimeout:      u.CloudDrive2.CopyTimeout.Duration.String(),
+		Workers:             u.Parallel,
+		FolderInterval:      u.Folder.Interval.Duration.String(),
+		CD2Enabled:          &enabled,
+		CD2URL:              u.CloudDrive2.URL,
+		RefreshInterval:     u.CloudDrive2.RefreshInterval.Duration.String(),
+		RefreshPath:         u.CloudDrive2.RefreshPath,
+		WatchPath:           u.CloudDrive2.WatchPath,
+		PathOverrides:       append([]string{}, u.CloudDrive2.PathOverrides...),
+		CacheDir:            u.CloudDrive2.CacheDir,
+		CacheExtractPath:    u.CloudDrive2.CacheExtractPath,
+		KeepCache:           &keepCache,
+		DeleteSource:        &deleteSource,
+		CacheDeleteDelay:    u.CloudDrive2.CacheDeleteDelay.Duration.String(),
+		CopyTimeout:         u.CloudDrive2.CopyTimeout.Duration.String(),
+		CD2FallbackEnabled:  func() *bool { v := u.CloudDrive2.FallbackScanEnabled; return &v }(),
+		CD2FallbackInterval: u.CloudDrive2.FallbackScanInterval.Duration.String(),
+		N115Enabled:         func() *bool { v := u.CloudDrive2.N115Enabled; return &v }(),
+		N115EventEnabled:    func() *bool { v := u.CloudDrive2.N115EventEnabled; return &v }(),
+		N115CookieRemark:    u.CloudDrive2.N115CookieRemark,
+		N115EventInterval:   u.CloudDrive2.N115EventInterval.Duration.String(),
 	}
 	if folder := u.localFolder(); folder != nil {
 		settings.LocalSourceAction = localSourceAction(folder)
@@ -387,6 +425,27 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.CopyTimeout != "" {
 		settings.CopyTimeout = overrides.CopyTimeout
+	}
+	if overrides.CD2FallbackEnabled != nil {
+		settings.CD2FallbackEnabled = overrides.CD2FallbackEnabled
+	}
+	if overrides.CD2FallbackInterval != "" {
+		settings.CD2FallbackInterval = overrides.CD2FallbackInterval
+	}
+	if overrides.N115Enabled != nil {
+		settings.N115Enabled = overrides.N115Enabled
+	}
+	if overrides.N115EventEnabled != nil {
+		settings.N115EventEnabled = overrides.N115EventEnabled
+	}
+	if overrides.N115CookieRemark != "" {
+		settings.N115CookieRemark = overrides.N115CookieRemark
+	}
+	if overrides.N115EventInterval != "" {
+		settings.N115EventInterval = overrides.N115EventInterval
+	}
+	if overrides.N115Cookie != "" {
+		settings.N115Cookie = "********"
 	}
 	return settings
 }
@@ -473,6 +532,9 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	// existing token", not "erase it".
 	if strings.TrimSpace(s.CD2Token) == "" {
 		s.CD2Token = u.uiStore.Overrides.CD2Token
+	}
+	if strings.TrimSpace(s.N115Cookie) == "" {
+		s.N115Cookie = u.uiStore.Overrides.N115Cookie
 	}
 	u.uiStore.Overrides = s
 	u.uiStore.mu.Unlock()

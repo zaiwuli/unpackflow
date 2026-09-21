@@ -142,16 +142,19 @@ func New() *Unpackerr {
 				URLBase:    "/",
 			},
 			CloudDrive2: CloudDriveConfig{
-				URL:              "http://localhost:19798",
-				RefreshInterval:  cnfg.Duration{Duration: 10 * time.Minute},
-				RefreshPath:      "/",
-				WatchPath:        "/",
-				ReconnectMin:     cnfg.Duration{Duration: 5 * time.Second},
-				ReconnectMax:     cnfg.Duration{Duration: 2 * time.Minute},
-				CacheDir:         "",
-				CacheExtractPath: "/output",
-				CacheDeleteDelay: cnfg.Duration{Duration: time.Minute},
-				CopyTimeout:      cnfg.Duration{Duration: 24 * time.Hour},
+				URL:                  "http://localhost:19798",
+				RefreshInterval:      cnfg.Duration{Duration: 10 * time.Minute},
+				RefreshPath:          "/",
+				WatchPath:            "/",
+				ReconnectMin:         cnfg.Duration{Duration: 5 * time.Second},
+				ReconnectMax:         cnfg.Duration{Duration: 2 * time.Minute},
+				CacheDir:             "",
+				CacheExtractPath:     "/output",
+				CacheDeleteDelay:     cnfg.Duration{Duration: time.Minute},
+				CopyTimeout:          cnfg.Duration{Duration: 24 * time.Hour},
+				FallbackScanEnabled:  true,
+				FallbackScanInterval: cnfg.Duration{Duration: 30 * time.Minute},
+				N115EventInterval:    cnfg.Duration{Duration: 5 * time.Minute},
 			},
 		},
 		Logger: &Logger{
@@ -414,6 +417,7 @@ func (u *Unpackerr) Run() {
 
 	u.PollFolders() // This initializes channel(s) used below.
 	u.startCloudDriveMonitor()
+	u.start115Events()
 	u.retrieveAppQueues(now) // Get in-app queues on startup.
 
 	// This is the "main go routine" in start.go.

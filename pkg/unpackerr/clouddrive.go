@@ -57,10 +57,15 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 	u.cd2Mu.Unlock()
 	go monitor.Run(context.Background())
 	u.Printf("CloudDrive2 监控已连接：%s", cfg.URL)
-	go u.cloudDriveFallbackScan(monitor.Client, cfg.WatchPath, cfg.PathOverrides)
+	if cfg.FallbackScanEnabled {
+		go u.cloudDriveFallbackScan(monitor.Client, cfg.WatchPath, cfg.PathOverrides)
+	}
 	go u.cloudDriveRetryLoop()
 	if cfg.RefreshInterval.Duration > 0 {
 		go u.cloudDriveRefreshLoop(monitor.Client, cfg.RefreshInterval.Duration, cfg.RefreshPath, cfg.WatchPath, cfg.PathOverrides)
+	}
+	if cfg.FallbackScanEnabled && cfg.FallbackScanInterval.Duration > 0 {
+		go u.cloudDriveFallbackLoop(monitor.Client, cfg.FallbackScanInterval.Duration, cfg.WatchPath, cfg.PathOverrides)
 	}
 }
 
@@ -147,7 +152,16 @@ func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval ti
 		} else {
 			u.Debugf("CloudDrive2 定时刷新完成")
 		}
-		u.cloudDriveFallbackScan(client, watchPath, overrides)
+	}
+}
+
+func (u *Unpackerr) cloudDriveFallbackLoop(client *clouddrive.Client, interval time.Duration, watchPath string, overrides []string) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if u.CloudDrive2.FallbackScanEnabled {
+			u.cloudDriveFallbackScan(client, watchPath, overrides)
+		}
 	}
 }
 

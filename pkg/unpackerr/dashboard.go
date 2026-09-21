@@ -453,6 +453,20 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 			return
 		}
 	}
+	if overrides.CD2FallbackInterval != "" {
+		duration, err := time.ParseDuration(overrides.CD2FallbackInterval)
+		if err != nil || duration < 0 {
+			http.Error(w, "CD2 兜底扫描间隔格式无效，例如：30m；填写 0s 可关闭", http.StatusBadRequest)
+			return
+		}
+	}
+	if overrides.N115EventInterval != "" {
+		duration, err := time.ParseDuration(overrides.N115EventInterval)
+		if err != nil || duration <= 0 {
+			http.Error(w, "115 事件间隔格式无效，例如：5m", http.StatusBadRequest)
+			return
+		}
+	}
 	if overrides.LocalSourceDelay != "" {
 		duration, err := time.ParseDuration(overrides.LocalSourceDelay)
 		if err != nil || duration < 0 {
