@@ -254,6 +254,8 @@ function fillForms(data) {
   updateLocalArchiveVisibility();
   $('cd2-enabled').checked = !!data.clouddrive2.enabled;
   $('cd2-url').value = data.clouddrive2.url || '';
+  $('cd2-token').value = (data.settings && data.settings.cd2_token) || '';
+  $('cd2-token').placeholder = data.settings && data.settings.cd2_token ? '已保存，输入新 Token 可替换' : '请输入 CD2 Token';
   $('watch-path').value = (data.settings && data.settings.watch_path) || '/';
   $('refresh-interval').value = (data.settings && data.settings.refresh_interval) || '10m';
   $('refresh-path').value = (data.settings && data.settings.refresh_path) || '/';

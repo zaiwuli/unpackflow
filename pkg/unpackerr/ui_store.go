@@ -345,10 +345,16 @@ func (u *Unpackerr) notificationSettings() UINotification {
 func (u *Unpackerr) uiSettings() UIOverrides {
 	enabled, keepCache, deleteSource := u.CloudDrive2.Enabled, u.CloudDrive2.KeepCache, u.CloudDrive2.DeleteSource
 	settings := UIOverrides{
-		Workers:             u.Parallel,
-		FolderInterval:      u.Folder.Interval.Duration.String(),
-		CD2Enabled:          &enabled,
-		CD2URL:              u.CloudDrive2.URL,
+		Workers:        u.Parallel,
+		FolderInterval: u.Folder.Interval.Duration.String(),
+		CD2Enabled:     &enabled,
+		CD2URL:         u.CloudDrive2.URL,
+		CD2Token: func() string {
+			if strings.TrimSpace(u.CloudDrive2.Token) != "" {
+				return "********"
+			}
+			return ""
+		}(),
 		RefreshInterval:     u.CloudDrive2.RefreshInterval.Duration.String(),
 		RefreshPath:         u.CloudDrive2.RefreshPath,
 		WatchPath:           u.CloudDrive2.WatchPath,
@@ -538,7 +544,7 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	// The API intentionally never returns the CD2 token to the browser. An empty
 	// token submitted while editing another setting therefore means "keep the
 	// existing token", not "erase it".
-	if strings.TrimSpace(s.CD2Token) == "" {
+	if strings.TrimSpace(s.CD2Token) == "" || strings.TrimSpace(s.CD2Token) == "********" {
 		s.CD2Token = u.uiStore.Overrides.CD2Token
 	}
 	if strings.TrimSpace(s.N115Cookie) == "" {
