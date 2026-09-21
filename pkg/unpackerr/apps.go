@@ -106,6 +106,8 @@ type CloudDriveConfig struct {
 	N115EventEnabled     bool          `json:"115_event_enabled" toml:"115_event_enabled" xml:"115_event_enabled" yaml:"115_event_enabled"`
 	N115EventInterval    cnfg.Duration `json:"115_event_interval" toml:"115_event_interval" xml:"115_event_interval" yaml:"115_event_interval"`
 	N115Mappings         []string      `json:"115_mappings" toml:"115_mappings" xml:"115_mapping" yaml:"115_mappings"`
+	N115SuccessAction    string        `json:"115_success_action" toml:"115_success_action" xml:"115_success_action" yaml:"115_success_action"`
+	N115ArchiveCID       string        `json:"115_archive_cid" toml:"115_archive_cid" xml:"115_archive_cid" yaml:"115_archive_cid"`
 }
 
 type FoldersConfig struct {

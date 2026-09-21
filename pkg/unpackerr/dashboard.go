@@ -432,6 +432,21 @@ func (u *Unpackerr) cd2RefreshAPI(w http.ResponseWriter, r *http.Request, _ http
 	u.Printf("CloudDrive2 手动刷新完成：发现 %d 个压缩文件", found)
 	u.writeJSON(w, map[string]any{"success": true, "found": found})
 }
+
+func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+	if !u.CloudDrive2.N115Enabled || strings.TrimSpace(u.CloudDrive2.N115Cookie) == "" {
+		http.Error(w, "请先启用 115 云解压并填写 Cookie", http.StatusBadRequest)
+		return
+	}
+	if len(parse115Mappings(u.CloudDrive2.N115Mappings)) == 0 {
+		http.Error(w, "请至少配置一个 115 文件夹映射", http.StatusBadRequest)
+		return
+	}
+	go u.poll115RecentOperations()
+	u.Printf("已手动提交 115 同步")
+	u.writeJSON(w, map[string]any{"success": true})
+}
+
 func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	var overrides UIOverrides
 	if err := json.NewDecoder(r.Body).Decode(&overrides); err != nil {
@@ -472,6 +487,17 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 			http.Error(w, "115 事件间隔格式无效，例如：5m", http.StatusBadRequest)
 			return
 		}
+	}
+	switch overrides.N115SuccessAction {
+	case "", "keep", "delete":
+	case "archive":
+		if strings.TrimSpace(overrides.N115ArchiveCID) == "" {
+			http.Error(w, "归档 115 原包时必须填写归档 CID", http.StatusBadRequest)
+			return
+		}
+	default:
+		http.Error(w, "115 原包处理方式无效", http.StatusBadRequest)
+		return
 	}
 	if overrides.LocalSourceDelay != "" {
 		duration, err := time.ParseDuration(overrides.LocalSourceDelay)

@@ -77,6 +77,7 @@ type Unpackerr struct {
 	cd2Notice   sync.Map      // cached primary path -> discovery notification already sent
 	n115Running sync.Map      // 115 source identity -> struct{} while cloud extraction is active
 	n115Queue   chan struct{} // one 115 cloud extraction at a time
+	n115SyncMu  sync.Mutex    // prevents timer and manual 115 syncs from overlapping
 	cancelled   sync.Map      // task path/key -> struct{} for user-cancelled work
 	nameMappers sync.Map      // task path/key -> *archiveNameMapper
 	cd2Mu       sync.RWMutex
@@ -158,6 +159,7 @@ func New() *Unpackerr {
 				FallbackScanEnabled:  true,
 				FallbackScanInterval: cnfg.Duration{Duration: 30 * time.Minute},
 				N115EventInterval:    cnfg.Duration{Duration: 5 * time.Minute},
+				N115SuccessAction:    "keep",
 			},
 		},
 		Logger: &Logger{

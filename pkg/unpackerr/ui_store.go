@@ -143,6 +143,8 @@ type UIOverrides struct {
 	N115CookieRemark    string   `json:"115_cookie_remark,omitempty"`
 	N115EventInterval   string   `json:"115_event_interval,omitempty"`
 	N115Mappings        []string `json:"115_mappings,omitempty"`
+	N115SuccessAction   string   `json:"115_success_action,omitempty"`
+	N115ArchiveCID      string   `json:"115_archive_cid,omitempty"`
 }
 
 func (u *Unpackerr) loadUIStore() error {
@@ -202,9 +204,8 @@ func (u *Unpackerr) loadUIStore() error {
 	if store.Overrides.KeepCache != nil {
 		u.CloudDrive2.KeepCache = *store.Overrides.KeepCache
 	}
-	if store.Overrides.DeleteSource != nil {
-		u.CloudDrive2.DeleteSource = *store.Overrides.DeleteSource
-	}
+	// CD2 cache files no longer delete mounted originals through UI settings.
+	u.CloudDrive2.DeleteSource = false
 	if store.Overrides.CacheDeleteDelay != "" {
 		if d, e := time.ParseDuration(store.Overrides.CacheDeleteDelay); e == nil {
 			u.CloudDrive2.CacheDeleteDelay.Duration = d
@@ -242,6 +243,12 @@ func (u *Unpackerr) loadUIStore() error {
 	}
 	if store.Overrides.N115Mappings != nil {
 		u.CloudDrive2.N115Mappings = append([]string(nil), store.Overrides.N115Mappings...)
+	}
+	if store.Overrides.N115SuccessAction != "" {
+		u.CloudDrive2.N115SuccessAction = store.Overrides.N115SuccessAction
+	}
+	if store.Overrides.N115ArchiveCID != "" {
+		u.CloudDrive2.N115ArchiveCID = store.Overrides.N115ArchiveCID
 	}
 	u.uiStore = store
 	return nil
@@ -343,7 +350,7 @@ func (u *Unpackerr) notificationSettings() UINotification {
 	return normalizeNotification(u.uiStore.Notification)
 }
 func (u *Unpackerr) uiSettings() UIOverrides {
-	enabled, keepCache, deleteSource := u.CloudDrive2.Enabled, u.CloudDrive2.KeepCache, u.CloudDrive2.DeleteSource
+	enabled, keepCache := u.CloudDrive2.Enabled, u.CloudDrive2.KeepCache
 	settings := UIOverrides{
 		Workers:        u.Parallel,
 		FolderInterval: u.Folder.Interval.Duration.String(),
@@ -362,7 +369,6 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		CacheDir:            u.CloudDrive2.CacheDir,
 		CacheExtractPath:    u.CloudDrive2.CacheExtractPath,
 		KeepCache:           &keepCache,
-		DeleteSource:        &deleteSource,
 		CacheDeleteDelay:    u.CloudDrive2.CacheDeleteDelay.Duration.String(),
 		CopyTimeout:         u.CloudDrive2.CopyTimeout.Duration.String(),
 		CD2FallbackEnabled:  func() *bool { v := u.CloudDrive2.FallbackScanEnabled; return &v }(),
@@ -372,6 +378,8 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115CookieRemark:    u.CloudDrive2.N115CookieRemark,
 		N115EventInterval:   u.CloudDrive2.N115EventInterval.Duration.String(),
 		N115Mappings:        append([]string(nil), u.CloudDrive2.N115Mappings...),
+		N115SuccessAction:   u.CloudDrive2.N115SuccessAction,
+		N115ArchiveCID:      u.CloudDrive2.N115ArchiveCID,
 	}
 	if folder := u.localFolder(); folder != nil {
 		settings.LocalSourceAction = localSourceAction(folder)
@@ -428,9 +436,6 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	if overrides.KeepCache != nil {
 		settings.KeepCache = overrides.KeepCache
 	}
-	if overrides.DeleteSource != nil {
-		settings.DeleteSource = overrides.DeleteSource
-	}
 	if overrides.CacheDeleteDelay != "" {
 		settings.CacheDeleteDelay = overrides.CacheDeleteDelay
 	}
@@ -457,6 +462,12 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.N115Mappings != nil {
 		settings.N115Mappings = append([]string(nil), overrides.N115Mappings...)
+	}
+	if overrides.N115SuccessAction != "" {
+		settings.N115SuccessAction = overrides.N115SuccessAction
+	}
+	if overrides.N115ArchiveCID != "" {
+		settings.N115ArchiveCID = overrides.N115ArchiveCID
 	}
 	if overrides.N115Cookie != "" {
 		settings.N115Cookie = "********"

@@ -189,6 +189,8 @@ function ensureLocalSettings() {
   if ($('local-source-action')) return;
   const workers = $('workers').closest('.field');
   if (!workers) return;
+  const oldDeleteSource = $('delete-source');
+  if (oldDeleteSource) oldDeleteSource.closest('.check-row').remove();
   const block = document.createElement('div');
   block.id = 'local-settings';
   block.innerHTML = '<div class="panel-heading" style="margin-top:18px"><div><h3>\u672c\u5730\u76ee\u5f55</h3>' +
@@ -210,6 +212,9 @@ function ensureLocalSettings() {
     '<label class="field"><span>Cookie \u6765\u6e90\u5907\u6ce8</span><input id="115-cookie-remark" type="text" placeholder="\u4f8b\u5982\uff1a115 \u7f51\u9875\u5f00\u53d1\u8005\u5de5\u5177"></label>' +
     '<label class="check-row"><input id="115-event-enabled" type="checkbox"> \u542f\u7528\u6700\u8fd1\u64cd\u4f5c\u4e8b\u4ef6</label>' +
     '<label class="field"><span>\u4e8b\u4ef6\u540c\u6b65\u95f4\u9694</span><input id="115-event-interval" type="text" placeholder="5m"></label>' +
+    '<div class="form-actions"><button id="115-sync" type="button">\u624b\u52a8\u540c\u6b65 115</button></div><p id="115-sync-message" class="form-message"></p>' +
+    '<label class="field"><span>\u4e91\u89e3\u538b\u6210\u529f\u540e\u7684\u539f\u5305\u5904\u7406</span><select id="115-success-action"><option value="keep">\u4fdd\u7559\u539f\u5305</option><option value="delete">\u5220\u9664\u539f\u5305</option><option value="archive">\u5f52\u6863\u539f\u5305</option></select></label>' +
+    '<label class="field" id="115-archive-cid-row"><span>\u5f52\u6863\u538b\u7f29\u5305 CID</span><input id="115-archive-cid" type="text" placeholder="\u586b\u5199 115 \u5f52\u6863\u6587\u4ef6\u5939 CID"></label>' +
     '<div class="field"><span>115 云解压与 CD2 兜底映射</span><div id="115-mappings" class="mapping-list"></div><div class="form-actions"><button id="115-mapping-add" type="button">添加文件夹</button></div><small style="color:var(--muted);font-size:12px">每个文件夹独立配置。云解压失败后，文件会移动到兜底 CID，并刷新对应 CD2 路径。</small></div>';
   workers.insertAdjacentElement('afterend', block);
   if (!document.getElementById('115-mapping-style')) {
@@ -222,6 +227,25 @@ function ensureLocalSettings() {
   select.style.cssText = 'width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit';
   select.addEventListener('change', updateLocalArchiveVisibility);
 	$('115-mapping-add').addEventListener('click', () => add115MappingRow());
+	$('115-success-action').addEventListener('change', update115ArchiveCIDVisibility);
+	$('115-sync').addEventListener('click', sync115Now);
+}
+
+function update115ArchiveCIDVisibility() {
+  if (!$('115-success-action')) return;
+  $('115-archive-cid-row').style.display = $('115-success-action').value === 'archive' ? 'flex' : 'none';
+}
+
+async function sync115Now() {
+  const button = $('115-sync');
+  button.disabled = true;
+  $('115-sync-message').textContent = '\u6b63\u5728\u63d0\u4ea4\u540c\u6b65\u2026';
+  try {
+    const response = await fetch('api/115/sync', {method: 'POST'});
+    const text = await response.text();
+    $('115-sync-message').textContent = response.ok ? '\u5df2\u5f00\u59cb\u540c\u6b65 115 \u6587\u4ef6\u5939' : (text || '\u540c\u6b65\u5931\u8d25');
+  } catch (_) { $('115-sync-message').textContent = '\u540c\u6b65\u5931\u8d25'; }
+  button.disabled = false;
 }
 
 function mappingInput(placeholder, value, field) {
@@ -298,6 +322,8 @@ function fillForms(data) {
   $('115-cookie').placeholder = (data.settings && data.settings['115_cookie']) || '已保存，留空表示不修改';
   $('115-cookie-remark').value = (data.settings && data.settings['115_cookie_remark']) || '';
   $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
+  $('115-success-action').value = (data.settings && data.settings['115_success_action']) || 'keep';
+  $('115-archive-cid').value = (data.settings && data.settings['115_archive_cid']) || '';
   fill115MappingRows((data.settings && data.settings['115_mappings']) || []);
   const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
   $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
@@ -313,7 +339,7 @@ function fillForms(data) {
   $('cache-dir').value = (data.settings && data.settings.cache_dir) || '/cache';
   $('cache-extract-path').value = (data.settings && data.settings.cache_extract_path) || '/output';
   $('keep-cache').checked = !!(data.settings && data.settings.keep_cache);
-  $('delete-source').checked = !!(data.settings && data.settings.delete_source);
+  update115ArchiveCIDVisibility();
   $('cache-delete-delay').value = (data.settings && data.settings.cache_delete_delay) || '1m';
   $('copy-timeout').value = (data.settings && data.settings.copy_timeout) || '24h';
 }
@@ -470,13 +496,15 @@ $('settings-save').addEventListener('click', async () => {
     '115_cookie': $('115-cookie').value.trim(),
     '115_cookie_remark': $('115-cookie-remark').value.trim(),
     '115_event_interval': $('115-event-interval').value.trim(),
+    '115_success_action': $('115-success-action').value,
+    '115_archive_cid': $('115-archive-cid').value.trim(),
     '115_mappings': collect115Mappings(),
     cd2_enabled: $('cd2-enabled').checked,
     cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),
     watch_path: $('watch-path').value.trim(), refresh_interval: $('refresh-interval').value.trim(),
     refresh_path: $('refresh-path').value.trim(), path_overrides: $('path-overrides').value.split(',').map(item => item.trim()).filter(Boolean),
     cache_dir: $('cache-dir').value.trim(), cache_extract_path: $('cache-extract-path').value.trim(),
-    keep_cache: $('keep-cache').checked, delete_source: $('delete-source').checked, cache_delete_delay: $('cache-delete-delay').value.trim(), copy_timeout: $('copy-timeout').value.trim(),
+    keep_cache: $('keep-cache').checked, cache_delete_delay: $('cache-delete-delay').value.trim(), copy_timeout: $('copy-timeout').value.trim(),
   };
   const response = await fetch('api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   $('settings-message').textContent = response.ok ? zh.restart : zh.saveFailed;

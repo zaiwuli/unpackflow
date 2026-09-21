@@ -95,6 +95,8 @@ func (u *Unpackerr) start115Events() {
 // read from the configured source folders, so unrelated 115 activity is never
 // submitted as a task.
 func (u *Unpackerr) poll115RecentOperations() {
+	u.n115SyncMu.Lock()
+	defer u.n115SyncMu.Unlock()
 	if err := u.validate115Cookie(); err != nil {
 		return
 	}
@@ -250,6 +252,7 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	if err == nil && status == "success" {
 		u.markProcessed(version)
 		u.cd2Tasks.Delete(version.Key)
+		u.handle115SuccessSource(mapping, file)
 		u.notifyEvent(notifyComplete, "✅", "115 云解压完成", "115 云端", file.Name)
 		u.Printf("115 云解压完成：%s", file.Name)
 		return
@@ -272,6 +275,30 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	u.Printf("115 云解压失败，已移动到兜底目录：%s", file.Name)
 	u.update115Transfer(version.Key, file.Name, "等待 CD2 本地兜底", nil)
 	u.refresh115Fallback(mapping, file.Name)
+}
+
+func (u *Unpackerr) handle115SuccessSource(mapping N115Mapping, file n115File) {
+	switch strings.ToLower(strings.TrimSpace(u.CloudDrive2.N115SuccessAction)) {
+	case "", "keep":
+		return
+	case "delete":
+		if err := u.n115DeleteFile(mapping.SourceCID, file.FID); err != nil {
+			u.Errorf("115 云解压成功后删除原包失败：%s：%v", file.Name, err)
+		} else {
+			u.Printf("115 云解压成功后已删除原包：%s", file.Name)
+		}
+	case "archive":
+		archiveCID := strings.TrimSpace(u.CloudDrive2.N115ArchiveCID)
+		if archiveCID == "" {
+			u.Errorf("115 云解压成功后归档原包失败：未填写归档 CID")
+			return
+		}
+		if err := u.n115MoveToFallback(file.FID, archiveCID); err != nil {
+			u.Errorf("115 云解压成功后归档原包失败：%s：%v", file.Name, err)
+		} else {
+			u.Printf("115 云解压成功后已归档原包：%s", file.Name)
+		}
+	}
 }
 
 func (u *Unpackerr) update115Transfer(key, fileName, state string, update func(*CD2Transfer)) {
@@ -437,6 +464,15 @@ func (u *Unpackerr) n115MoveToFallback(fid, fallbackCID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_, err := u.n115Request(ctx, http.MethodPost, n115APIBase+"/files/move", url.Values{"fid": {fid}, "pid": {fallbackCID}})
+	return err
+}
+
+func (u *Unpackerr) n115DeleteFile(sourceCID, fid string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := u.n115Request(ctx, http.MethodPost, n115APIBase+"/rb/delete", url.Values{
+		"pid": {sourceCID}, "fid": {fid}, "ignore_warn": {"1"},
+	})
 	return err
 }
 
