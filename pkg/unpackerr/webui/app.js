@@ -209,7 +209,8 @@ function ensureLocalSettings() {
     '<label class="field"><span>115 Cookie</span><input id="115-cookie" type="text" autocomplete="off"></label>' +
     '<label class="field"><span>Cookie \u6765\u6e90\u5907\u6ce8</span><input id="115-cookie-remark" type="text" placeholder="\u4f8b\u5982\uff1a115 \u7f51\u9875\u5f00\u53d1\u8005\u5de5\u5177"></label>' +
     '<label class="check-row"><input id="115-event-enabled" type="checkbox"> \u542f\u7528\u6700\u8fd1\u64cd\u4f5c\u4e8b\u4ef6</label>' +
-    '<label class="field"><span>\u4e8b\u4ef6\u540c\u6b65\u95f4\u9694</span><input id="115-event-interval" type="text" placeholder="5m"></label>';
+    '<label class="field"><span>\u4e8b\u4ef6\u540c\u6b65\u95f4\u9694</span><input id="115-event-interval" type="text" placeholder="5m"></label>' +
+    '<label class="field"><span>115 CID 与 CD2 路径映射</span><textarea id="115-mappings" rows="4" placeholder="每行一条：CID => /115open/上传下载/下载本地"></textarea><small style="color:var(--muted);font-size:12px">CID 是 115 网页文件夹编号，右侧填写 CD2 远端路径</small></label>';
   workers.insertAdjacentElement('afterend', block);
   const select = $('local-source-action');
   select.style.cssText = 'width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit';
@@ -247,6 +248,7 @@ function fillForms(data) {
   $('115-cookie').placeholder = (data.settings && data.settings['115_cookie']) || '已保存，留空表示不修改';
   $('115-cookie-remark').value = (data.settings && data.settings['115_cookie_remark']) || '';
   $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
+  $('115-mappings').value = ((data.settings && data.settings['115_mappings']) || []).join('\\n');
   const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
   $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
   updateLocalArchiveVisibility();
@@ -416,6 +418,7 @@ $('settings-save').addEventListener('click', async () => {
     '115_cookie': $('115-cookie').value.trim(),
     '115_cookie_remark': $('115-cookie-remark').value.trim(),
     '115_event_interval': $('115-event-interval').value.trim(),
+    '115_mappings': $('115-mappings').value.split('\\n').map(item => item.trim()).filter(Boolean),
     cd2_enabled: $('cd2-enabled').checked,
     cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),
     watch_path: $('watch-path').value.trim(), refresh_interval: $('refresh-interval').value.trim(),

@@ -105,6 +105,7 @@ type CloudDriveConfig struct {
 	N115CookieRemark     string        `json:"115_cookie_remark" toml:"115_cookie_remark" xml:"115_cookie_remark" yaml:"115_cookie_remark"`
 	N115EventEnabled     bool          `json:"115_event_enabled" toml:"115_event_enabled" xml:"115_event_enabled" yaml:"115_event_enabled"`
 	N115EventInterval    cnfg.Duration `json:"115_event_interval" toml:"115_event_interval" xml:"115_event_interval" yaml:"115_event_interval"`
+	N115Mappings         []string      `json:"115_mappings" toml:"115_mappings" xml:"115_mapping" yaml:"115_mappings"`
 }
 
 type FoldersConfig struct {

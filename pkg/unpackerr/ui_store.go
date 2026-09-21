@@ -142,6 +142,7 @@ type UIOverrides struct {
 	N115Cookie          string   `json:"115_cookie,omitempty"`
 	N115CookieRemark    string   `json:"115_cookie_remark,omitempty"`
 	N115EventInterval   string   `json:"115_event_interval,omitempty"`
+	N115Mappings        []string `json:"115_mappings,omitempty"`
 }
 
 func (u *Unpackerr) loadUIStore() error {
@@ -238,6 +239,9 @@ func (u *Unpackerr) loadUIStore() error {
 	}
 	if store.Overrides.N115CookieRemark != "" {
 		u.CloudDrive2.N115CookieRemark = store.Overrides.N115CookieRemark
+	}
+	if store.Overrides.N115Mappings != nil {
+		u.CloudDrive2.N115Mappings = append([]string(nil), store.Overrides.N115Mappings...)
 	}
 	u.uiStore = store
 	return nil
@@ -361,6 +365,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115EventEnabled:    func() *bool { v := u.CloudDrive2.N115EventEnabled; return &v }(),
 		N115CookieRemark:    u.CloudDrive2.N115CookieRemark,
 		N115EventInterval:   u.CloudDrive2.N115EventInterval.Duration.String(),
+		N115Mappings:        append([]string(nil), u.CloudDrive2.N115Mappings...),
 	}
 	if folder := u.localFolder(); folder != nil {
 		settings.LocalSourceAction = localSourceAction(folder)
@@ -443,6 +448,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.N115EventInterval != "" {
 		settings.N115EventInterval = overrides.N115EventInterval
+	}
+	if overrides.N115Mappings != nil {
+		settings.N115Mappings = append([]string(nil), overrides.N115Mappings...)
 	}
 	if overrides.N115Cookie != "" {
 		settings.N115Cookie = "********"
