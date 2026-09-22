@@ -588,7 +588,9 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 			return
 		}
 	}
-	if overrides.N115EventInterval != "" {
+	// When 115 monitoring is disabled, an old 0s interval must not prevent the
+	// user from saving unrelated CloudDrive2 paths and cache settings.
+	if overrides.N115Enabled != nil && *overrides.N115Enabled && overrides.N115EventEnabled != nil && *overrides.N115EventEnabled && overrides.N115EventInterval != "" {
 		duration, err := time.ParseDuration(overrides.N115EventInterval)
 		if err != nil || duration <= 0 {
 			http.Error(w, "115 事件间隔格式无效，例如：5m", http.StatusBadRequest)
@@ -613,7 +615,9 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 			return
 		}
 	}
-	if overrides.CopyTimeout != "" {
+	// Copy timeout only applies when the CD2 direct monitor is enabled. Keeping
+	// an older zero value while CD2 is off should not block a settings update.
+	if overrides.CD2Enabled != nil && *overrides.CD2Enabled && overrides.CopyTimeout != "" {
 		duration, err := time.ParseDuration(overrides.CopyTimeout)
 		if err != nil || duration <= 0 {
 			http.Error(w, "复制超时格式无效，例如：24h", http.StatusBadRequest)

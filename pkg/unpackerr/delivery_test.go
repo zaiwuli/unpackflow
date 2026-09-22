@@ -297,6 +297,24 @@ func TestSettingsAPIReturnsAndPersists(t *testing.T) {
 	}
 }
 
+func TestCloudPathSettingsSaveWhenOptionalFeaturesAreDisabled(t *testing.T) {
+	dir := t.TempDir()
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	u.Folders = []*FolderConfig{{Path: filepath.Join(dir, "监控目录"), ExtractPath: filepath.Join(dir, "解压目录")}}
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	// This represents the real UI when optional 115/CD2 workers are off but
+	// their previous interval fields still contain 0s.
+	body := bytes.NewBufferString(`{"workers":1,"local_source_action":"keep","folder_interval":"60s","cd2_enabled":false,"watch_path":"/115open/上传下载","refresh_path":"/115open/上传下载","copy_timeout":"0s","115_enabled":false,"115_event_enabled":false,"115_event_interval":"0s","115_success_action":"keep"}`)
+	recorder := httptest.NewRecorder()
+	u.settingsAPI(recorder, httptest.NewRequest(http.MethodPost, "/api/settings", body), httprouter.Params{})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("disabled optional services blocked cloud path saving: %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestNotificationTemplatesPersistAndRender(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "unpackerr.conf")
