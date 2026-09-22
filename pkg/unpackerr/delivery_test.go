@@ -499,6 +499,40 @@ func TestDashboardMergesCD2CopyAndExtractionIntoOneTask(t *testing.T) {
 	}
 }
 
+func TestRealZIPExtractionReturnsIntermediatePercentage(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "progress.zip")
+	output := filepath.Join(dir, "output")
+	payload := bytes.Repeat([]byte("UnpackFlow-progress-fixture-0123456789\n"), 256*1024)
+	createZipFixtureBytes(t, archive, "large.bin", payload)
+
+	percentages := make([]float64, 0, 16)
+	_, _, _, err := xtractr.ExtractFile(&xtractr.XFile{
+		FilePath: archive, OutputDir: output, FileMode: 0o644, DirMode: 0o755,
+		Progress: func(progress xtractr.Progress) {
+			percentages = append(percentages, progress.Percent())
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundIntermediate := false
+	for _, percent := range percentages {
+		if percent > 0 && percent < 100 {
+			foundIntermediate = true
+			break
+		}
+	}
+	if !foundIntermediate {
+		t.Fatalf("real extraction returned no intermediate percentage: %v", percentages)
+	}
+	if len(percentages) == 0 || percentages[len(percentages)-1] < 99.9 {
+		t.Fatalf("real extraction did not reach 100%%: %v", percentages)
+	}
+	middle := percentages[len(percentages)/2]
+	t.Logf("真实解压收到 %d 次进度回调，示例：%.1f%% → %.1f%% → %.1f%%", len(percentages), percentages[0], middle, percentages[len(percentages)-1])
+}
+
 func TestModernCloudSettingsClearLegacyConfigPaths(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "unpackerr.conf")
@@ -1210,6 +1244,28 @@ func createZipFixture(t *testing.T, archive, name, content string) {
 		t.Fatal(err)
 	}
 	if _, err = io.Copy(entry, bytes.NewBufferString(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createZipFixtureBytes(t *testing.T, archive, name string, content []byte) {
+	t.Helper()
+	file, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	entry, err := writer.Create(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = entry.Write(content); err != nil {
 		t.Fatal(err)
 	}
 	if err = writer.Close(); err != nil {
