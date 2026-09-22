@@ -312,6 +312,7 @@ func TestSettingsAPIPersistsStructured115Folders(t *testing.T) {
 		"cache_dir":"/data/缓存目录","cache_extract_path":"/data/解压目录","copy_timeout":"24h",
 		"115_enabled":true,"115_event_enabled":true,"115_event_interval":"5m",
 		"115_source_cids":["100","200"],"115_success_action":"archive","115_archive_cid":"800",
+		"115_cid_remarks":{"100":"影视待解压","200":"软件待解压","800":"成功归档","900":"失败归档","300":"自动下载","400":"等待批准"},
 		"115_failure_cid":"900","115_failure_cd2_path":"/115open/解压失败",
 		"115_auto_fallback":false,"115_retry_count":4,"115_retry_delay":"3m",
 		"115_download_mappings":["300 => /115open/日常下载 => auto","400 => /115open/审批下载 => approval"]
@@ -332,6 +333,9 @@ func TestSettingsAPIPersistsStructured115Folders(t *testing.T) {
 	if restarted.CloudDrive2.N115RetryCount != 4 || restarted.CloudDrive2.N115RetryDelay.Duration != 3*time.Minute {
 		t.Fatalf("115 retry settings were not restored: %#v", restarted.CloudDrive2)
 	}
+	if got := restarted.uiSettings().N115CIDRemarks; got["100"] != "影视待解压" || got["900"] != "失败归档" || got["400"] != "等待批准" {
+		t.Fatalf("115 CID remarks were not restored: %#v", got)
+	}
 	watch := cloudDriveManualWatchPaths(restarted.CloudDrive2)
 	if !cloudDrivePathMatches("/115open/日常下载/a.7z", watch) || cloudDrivePathMatches("/115open/审批下载/a.7z", watch) || cloudDrivePathMatches("/115open/解压失败/a.7z", watch) {
 		t.Fatalf("automatic and approval paths were not separated: %#v", watch)
@@ -339,7 +343,7 @@ func TestSettingsAPIPersistsStructured115Folders(t *testing.T) {
 }
 
 func TestDashboardJSUsesStructuredCloudFolderRows(t *testing.T) {
-	for _, marker := range [][]byte{[]byte("115-source-add"), []byte("115-download-add"), []byte("path-mapping-add"), []byte("collectDownloadMappings"), []byte("collectPathMappings")} {
+	for _, marker := range [][]byte{[]byte("115-source-add"), []byte("115-download-add"), []byte("path-mapping-add"), []byte("collectDownloadMappings"), []byte("collectCIDRemarks"), []byte("115-archive-remark"), []byte("collectPathMappings")} {
 		if !bytes.Contains(dashboardJS, marker) {
 			t.Fatalf("dashboard is missing structured cloud setting %q", marker)
 		}

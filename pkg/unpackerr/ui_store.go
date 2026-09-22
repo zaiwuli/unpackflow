@@ -117,43 +117,44 @@ func normalizeMSNotificationURL(raw string) string {
 }
 
 type UIOverrides struct {
-	Workers             uint     `json:"workers,omitempty"`
-	LocalSourceAction   string   `json:"local_source_action,omitempty"`
-	LocalArchiveDir     string   `json:"local_archive_dir,omitempty"`
-	LocalSourceDelay    string   `json:"local_source_delay,omitempty"`
-	FolderInterval      string   `json:"folder_interval,omitempty"`
-	CD2Enabled          *bool    `json:"cd2_enabled,omitempty"`
-	CD2URL              string   `json:"cd2_url,omitempty"`
-	CD2Token            string   `json:"cd2_token,omitempty"`
-	RefreshInterval     string   `json:"refresh_interval,omitempty"`
-	RefreshPath         string   `json:"refresh_path,omitempty"`
-	WatchPath           string   `json:"watch_path,omitempty"`
-	ManualWatchPaths    []string `json:"manual_watch_paths,omitempty"`
-	PathOverrides       []string `json:"path_overrides,omitempty"`
-	CacheDir            string   `json:"cache_dir,omitempty"`
-	CacheExtractPath    string   `json:"cache_extract_path,omitempty"`
-	KeepCache           *bool    `json:"keep_cache,omitempty"`
-	DeleteSource        *bool    `json:"delete_source,omitempty"`
-	CacheDeleteDelay    string   `json:"cache_delete_delay,omitempty"`
-	CopyTimeout         string   `json:"copy_timeout,omitempty"`
-	DownloadsPaused     *bool    `json:"downloads_paused,omitempty"`
-	CD2FallbackEnabled  *bool    `json:"cd2_fallback_enabled,omitempty"`
-	CD2FallbackInterval string   `json:"cd2_fallback_interval,omitempty"`
-	N115Enabled         *bool    `json:"115_enabled,omitempty"`
-	N115EventEnabled    *bool    `json:"115_event_enabled,omitempty"`
-	N115Cookie          string   `json:"115_cookie,omitempty"`
-	N115CookieRemark    string   `json:"115_cookie_remark,omitempty"`
-	N115EventInterval   string   `json:"115_event_interval,omitempty"`
-	N115Mappings        []string `json:"115_mappings,omitempty"`
-	N115SourceCIDs      []string `json:"115_source_cids,omitempty"`
-	N115FailureCID      string   `json:"115_failure_cid,omitempty"`
-	N115FailureCD2Path  string   `json:"115_failure_cd2_path,omitempty"`
-	N115Downloads       []string `json:"115_download_mappings,omitempty"`
-	N115SuccessAction   string   `json:"115_success_action,omitempty"`
-	N115ArchiveCID      string   `json:"115_archive_cid,omitempty"`
-	N115AutoFallback    *bool    `json:"115_auto_fallback,omitempty"`
-	N115RetryCount      uint     `json:"115_retry_count,omitempty"`
-	N115RetryDelay      string   `json:"115_retry_delay,omitempty"`
+	Workers             uint              `json:"workers,omitempty"`
+	LocalSourceAction   string            `json:"local_source_action,omitempty"`
+	LocalArchiveDir     string            `json:"local_archive_dir,omitempty"`
+	LocalSourceDelay    string            `json:"local_source_delay,omitempty"`
+	FolderInterval      string            `json:"folder_interval,omitempty"`
+	CD2Enabled          *bool             `json:"cd2_enabled,omitempty"`
+	CD2URL              string            `json:"cd2_url,omitempty"`
+	CD2Token            string            `json:"cd2_token,omitempty"`
+	RefreshInterval     string            `json:"refresh_interval,omitempty"`
+	RefreshPath         string            `json:"refresh_path,omitempty"`
+	WatchPath           string            `json:"watch_path,omitempty"`
+	ManualWatchPaths    []string          `json:"manual_watch_paths,omitempty"`
+	PathOverrides       []string          `json:"path_overrides,omitempty"`
+	CacheDir            string            `json:"cache_dir,omitempty"`
+	CacheExtractPath    string            `json:"cache_extract_path,omitempty"`
+	KeepCache           *bool             `json:"keep_cache,omitempty"`
+	DeleteSource        *bool             `json:"delete_source,omitempty"`
+	CacheDeleteDelay    string            `json:"cache_delete_delay,omitempty"`
+	CopyTimeout         string            `json:"copy_timeout,omitempty"`
+	DownloadsPaused     *bool             `json:"downloads_paused,omitempty"`
+	CD2FallbackEnabled  *bool             `json:"cd2_fallback_enabled,omitempty"`
+	CD2FallbackInterval string            `json:"cd2_fallback_interval,omitempty"`
+	N115Enabled         *bool             `json:"115_enabled,omitempty"`
+	N115EventEnabled    *bool             `json:"115_event_enabled,omitempty"`
+	N115Cookie          string            `json:"115_cookie,omitempty"`
+	N115CookieRemark    string            `json:"115_cookie_remark,omitempty"`
+	N115EventInterval   string            `json:"115_event_interval,omitempty"`
+	N115Mappings        []string          `json:"115_mappings,omitempty"`
+	N115SourceCIDs      []string          `json:"115_source_cids,omitempty"`
+	N115CIDRemarks      map[string]string `json:"115_cid_remarks,omitempty"`
+	N115FailureCID      string            `json:"115_failure_cid,omitempty"`
+	N115FailureCD2Path  string            `json:"115_failure_cd2_path,omitempty"`
+	N115Downloads       []string          `json:"115_download_mappings,omitempty"`
+	N115SuccessAction   string            `json:"115_success_action,omitempty"`
+	N115ArchiveCID      string            `json:"115_archive_cid,omitempty"`
+	N115AutoFallback    *bool             `json:"115_auto_fallback,omitempty"`
+	N115RetryCount      uint              `json:"115_retry_count,omitempty"`
+	N115RetryDelay      string            `json:"115_retry_delay,omitempty"`
 }
 
 func (u *Unpackerr) loadUIStore() error {
@@ -445,6 +446,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115EventInterval:   u.CloudDrive2.N115EventInterval.Duration.String(),
 		N115Mappings:        append([]string(nil), u.CloudDrive2.N115Mappings...),
 		N115SourceCIDs:      append([]string(nil), u.CloudDrive2.N115SourceCIDs...),
+		N115CIDRemarks:      u.n115CIDRemarks(),
 		N115FailureCID:      u.CloudDrive2.N115FailureCID,
 		N115FailureCD2Path:  u.CloudDrive2.N115FailureCD2Path,
 		N115Downloads:       append([]string(nil), u.CloudDrive2.N115DownloadMappings...),
@@ -544,6 +546,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.N115SourceCIDs != nil {
 		settings.N115SourceCIDs = append([]string(nil), overrides.N115SourceCIDs...)
+	}
+	if overrides.N115CIDRemarks != nil {
+		settings.N115CIDRemarks = cloneN115CIDRemarks(overrides.N115CIDRemarks)
 	}
 	if overrides.N115FailureCID != "" {
 		settings.N115FailureCID = overrides.N115FailureCID
@@ -662,11 +667,46 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 		s.N115Cookie = u.uiStore.Overrides.N115Cookie
 	}
 	s.N115SourceCIDs = clean115CIDs(s.N115SourceCIDs)
+	s.N115CIDRemarks = cleanN115CIDRemarks(s.N115CIDRemarks)
 	s.N115FailureCID = strings.TrimSpace(s.N115FailureCID)
 	s.N115FailureCD2Path = strings.TrimSpace(s.N115FailureCD2Path)
 	u.uiStore.Overrides = s
 	u.uiStore.mu.Unlock()
 	return u.saveUIStore()
+}
+
+func cleanN115CIDRemarks(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(values))
+	for cid, remark := range values {
+		cid, remark = strings.TrimSpace(cid), strings.TrimSpace(remark)
+		if cid != "" && remark != "" {
+			result[cid] = remark
+		}
+	}
+	return result
+}
+
+func cloneN115CIDRemarks(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(values))
+	for cid, remark := range values {
+		result[cid] = remark
+	}
+	return result
+}
+
+func (u *Unpackerr) n115CIDRemarks() map[string]string {
+	if u.uiStore == nil {
+		return nil
+	}
+	u.uiStore.mu.RLock()
+	defer u.uiStore.mu.RUnlock()
+	return cloneN115CIDRemarks(u.uiStore.Overrides.N115CIDRemarks)
 }
 
 func (u *Unpackerr) setDownloadsPaused(paused bool) error {

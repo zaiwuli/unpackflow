@@ -220,8 +220,8 @@ function ensureLocalSettings() {
     '<div class="form-actions"><button id="115-sync" type="button">\u624b\u52a8\u540c\u6b65 115</button></div><p id="115-sync-message" class="form-message"></p>' +
 		'<h3>云解压来源</h3><div class="field"><div id="115-sources" class="mapping-list"></div><div class="form-actions"><button id="115-source-add" type="button">添加来源文件夹</button></div></div>' +
     '<label class="field"><span>云解压成功后的原包处理</span><select id="115-success-action"><option value="keep">保留原包</option><option value="delete">删除原包</option><option value="archive">移入成功归档目录</option></select></label>' +
-    '<label class="field" id="115-archive-cid-row"><span>成功归档 CID</span><input id="115-archive-cid" type="text" placeholder="115 成功归档文件夹 CID"></label>' +
-		'<h3>云解压失败</h3><label class="field"><span>失败归档 CID</span><input id="115-failure-cid" type="text" placeholder="115 解压失败文件夹 CID"></label>' +
+    '<div class="field" id="115-archive-cid-row"><span>成功归档目录</span><div class="settings-pair"><input id="115-archive-cid" type="text" placeholder="115 成功归档文件夹 CID"><input id="115-archive-remark" type="text" placeholder="备注，例如：云解压成功归档"></div></div>' +
+		'<h3>云解压失败</h3><div class="field"><span>失败归档目录</span><div class="settings-pair"><input id="115-failure-cid" type="text" placeholder="115 解压失败文件夹 CID"><input id="115-failure-remark" type="text" placeholder="备注，例如：云解压失败"></div></div>' +
 		'<label class="field"><span>失败目录的 CD2 路径</span><input id="115-failure-path" type="text" placeholder="/115open/解压失败"></label>' +
     '<label class="check-row"><input id="115-auto-fallback" type="checkbox"> 最终失败后自动下载到本地解压</label><small style="color:var(--muted);font-size:12px">关闭后只移动到失败目录，并在任务页等待批准。</small>' +
 		'<div class="field"><span>失败重试</span><div class="settings-pair"><input id="115-retry-count" type="number" min="1" max="10" placeholder="3"><input id="115-retry-delay" type="text" placeholder="2m"></div><small style="color:var(--muted);font-size:12px">尝试次数与两次尝试之间的等待时间。</small></div>' +
@@ -313,16 +313,18 @@ function removableRow(className, html) {
   return row;
 }
 
-function addSourceRow(value) {
+function addSourceRow(value, remarks) {
   const list = $('115-sources');
-  if (list) list.appendChild(removableRow('single', mappingInput('来源文件夹 CID', value, 'cid')));
+  const cid = typeof value === 'string' ? value : ((value && value.cid) || '');
+  const remark = typeof value === 'object' && value ? (value.remark || '') : ((remarks || {})[cid] || '');
+  if (list) list.appendChild(removableRow('pair', mappingInput('来源文件夹 CID', cid, 'cid') + mappingInput('备注，例如：待云解压', remark, 'remark')));
 }
 
-function fillSourceRows(values) {
+function fillSourceRows(values, remarks) {
   const list = $('115-sources');
   if (!list) return;
   list.innerHTML = '';
-  (values || []).forEach(addSourceRow);
+  (values || []).forEach(value => addSourceRow(value, remarks));
   if (!list.children.length) addSourceRow('');
 }
 
@@ -330,25 +332,39 @@ function collectSourceCIDs() {
   return Array.from($('115-sources').querySelectorAll('[data-field="cid"]')).map(input => input.value.trim()).filter(Boolean);
 }
 
+function collectCIDRemarks() {
+  const result = {};
+  $('115-sources').querySelectorAll('.mapping-row').forEach(row => {
+    const cid = row.querySelector('[data-field="cid"]').value.trim();
+    const remark = row.querySelector('[data-field="remark"]').value.trim();
+    if (cid && remark) result[cid] = remark;
+  });
+  const add = (cid, remark) => { if (cid && remark) result[cid.trim()] = remark.trim(); };
+  add($('115-archive-cid').value, $('115-archive-remark').value);
+  add($('115-failure-cid').value, $('115-failure-remark').value);
+  $('115-downloads').querySelectorAll('.mapping-row').forEach(row => add(row.querySelector('[data-field="cid"]').value, row.querySelector('[data-field="remark"]').value));
+  return result;
+}
+
 function parseDownloadMapping(value) {
   const parts = String(value || '').split('=>').map(item => item.trim());
   return {cid: parts[0] || '', path: parts[1] || '', mode: ['approval', 'manual'].includes((parts[2] || '').toLowerCase()) ? 'approval' : 'auto'};
 }
 
-function addDownloadRow(value) {
+function addDownloadRow(value, remarks) {
   const list = $('115-downloads');
   if (!list) return;
   const item = typeof value === 'string' ? parseDownloadMapping(value) : (value || {});
   const mode = item.mode === 'approval' ? 'approval' : 'auto';
   const select = '<select class="mapping-select" data-field="mode"><option value="auto"' + (mode === 'auto' ? ' selected' : '') + '>自动下载</option><option value="approval"' + (mode === 'approval' ? ' selected' : '') + '>等待批准</option></select>';
-  list.appendChild(removableRow('', mappingInput('115 文件夹 CID', item.cid, 'cid') + mappingInput('对应 CD2 路径', item.path, 'path') + select));
+  list.appendChild(removableRow('', mappingInput('115 文件夹 CID', item.cid, 'cid') + mappingInput('备注，例如：手动下载', (remarks || {})[item.cid] || '', 'remark') + mappingInput('对应 CD2 路径', item.path, 'path') + select));
 }
 
-function fillDownloadRows(values) {
+function fillDownloadRows(values, remarks) {
   const list = $('115-downloads');
   if (!list) return;
   list.innerHTML = '';
-  (values || []).forEach(addDownloadRow);
+  (values || []).forEach(value => addDownloadRow(value, remarks));
   if (!list.children.length) addDownloadRow({});
 }
 
@@ -422,13 +438,16 @@ function fillForms(data) {
   $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
   $('115-success-action').value = (data.settings && data.settings['115_success_action']) || 'keep';
   $('115-archive-cid').value = (data.settings && data.settings['115_archive_cid']) || '';
+  const cidRemarks = (data.settings && data.settings['115_cid_remarks']) || {};
+  $('115-archive-remark').value = cidRemarks[$('115-archive-cid').value] || '';
 	$('115-failure-cid').value = (data.settings && data.settings['115_failure_cid']) || '';
+  $('115-failure-remark').value = cidRemarks[$('115-failure-cid').value] || '';
 	$('115-failure-path').value = (data.settings && data.settings['115_failure_cd2_path']) || '';
   $('115-auto-fallback').checked = !!(data.settings && data.settings['115_auto_fallback']);
 	$('115-retry-count').value = (data.settings && data.settings['115_retry_count']) || 3;
 	$('115-retry-delay').value = (data.settings && data.settings['115_retry_delay']) || '2m';
-	fillSourceRows((data.settings && data.settings['115_source_cids']) || []);
-	fillDownloadRows((data.settings && data.settings['115_download_mappings']) || []);
+	fillSourceRows((data.settings && data.settings['115_source_cids']) || [], cidRemarks);
+	fillDownloadRows((data.settings && data.settings['115_download_mappings']) || [], cidRemarks);
 	fillPathMappingRows((data.settings && data.settings.path_overrides) || []);
   const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
   $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
@@ -684,6 +703,7 @@ $('settings-save').addEventListener('click', async () => {
 		'115_retry_count': Number($('115-retry-count').value) || 3,
 		'115_retry_delay': $('115-retry-delay').value.trim(),
 		'115_source_cids': collectSourceCIDs(),
+		'115_cid_remarks': collectCIDRemarks(),
 		'115_download_mappings': collectDownloadMappings(),
 		'115_mappings': [],
       cd2_enabled: $('cd2-enabled').checked,
