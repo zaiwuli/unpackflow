@@ -58,15 +58,43 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 	u.cd2Mu.Unlock()
 	go monitor.Run(context.Background())
 	u.Printf("CloudDrive2 监控已连接：%s", cfg.URL)
+	go u.resume115LocalDownloads()
 	if cfg.FallbackScanEnabled {
 		go u.cloudDriveFallbackScanPaths(monitor.Client, watchPaths, cfg.PathOverrides)
 	}
 	go u.cloudDriveRetryLoop()
 	if cfg.RefreshInterval.Duration > 0 {
-		go u.cloudDriveRefreshLoop(monitor.Client, cfg.RefreshInterval.Duration, cfg.RefreshPath, cfg.WatchPath, cfg.PathOverrides)
+		go u.cloudDriveRefreshLoop(monitor.Client, cfg.RefreshInterval.Duration, cloudDriveConfiguredRefreshPaths(cfg))
 	}
 	if cfg.FallbackScanEnabled && cfg.FallbackScanInterval.Duration > 0 {
 		go u.cloudDriveFallbackLoop(monitor.Client, cfg.FallbackScanInterval.Duration, cfg.WatchPath, cfg.PathOverrides)
+	}
+}
+
+func (u *Unpackerr) resume115LocalDownloads() {
+	if u.state == nil {
+		return
+	}
+	u.state.mu.RLock()
+	items := make([]Pending115, 0, len(u.state.Fallback115))
+	seen := make(map[string]struct{})
+	for _, item := range u.state.Fallback115 {
+		identity := item.TaskKey
+		if identity == "" {
+			identity = item.SourceCID + "|" + item.FID
+		}
+		if item.Approval {
+			continue
+		}
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		items = append(items, item)
+	}
+	u.state.mu.RUnlock()
+	for _, item := range items {
+		u.refresh115Fallback(N115Mapping{FallbackCID: item.FallbackCID, CD2Path: item.CD2Path}, n115File{FID: item.FID, Name: item.FileName, Size: item.Size, MTime: item.MTime})
 	}
 }
 
@@ -154,9 +182,23 @@ func cloudDrivePathMatches(value string, roots []string) bool {
 // archive for local cache-and-extract. They are independent from 115's failed
 // cloud-extract fallback folders.
 func cloudDriveManualWatchPaths(cfg CloudDriveConfig) []string {
-	paths := make([]string, 0, len(cfg.ManualWatchPaths)+1)
+	paths := make([]string, 0, len(cfg.ManualWatchPaths)+len(cfg.N115DownloadMappings)+2)
 	seen := make(map[string]struct{})
-	for _, value := range append(append([]string(nil), cfg.ManualWatchPaths...), cfg.WatchPath) {
+	values := append([]string(nil), cfg.ManualWatchPaths...)
+	// WatchPath is retained only as an upgrade bridge. A root value used by
+	// older defaults must not turn approval-only folders into automatic jobs.
+	if cfg.ManualWatchPaths == nil && strings.TrimSpace(cfg.WatchPath) != "" && strings.TrimSpace(cfg.WatchPath) != "/" {
+		values = append(values, cfg.WatchPath)
+	}
+	for _, mapping := range parse115DownloadMappings(cfg.N115DownloadMappings) {
+		if !mapping.Approval {
+			values = append(values, mapping.CD2Path)
+		}
+	}
+	if cfg.N115AutoFallback && strings.TrimSpace(cfg.N115FailureCD2Path) != "" {
+		values = append(values, cfg.N115FailureCD2Path)
+	}
+	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
@@ -170,17 +212,39 @@ func cloudDriveManualWatchPaths(cfg CloudDriveConfig) []string {
 	return paths
 }
 
-func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval time.Duration, refreshPath, watchPath string, overrides []string) {
-	if refreshPath == "" {
-		refreshPath = "/"
+func cloudDriveConfiguredRefreshPaths(cfg CloudDriveConfig) []string {
+	values := append([]string(nil), cloudDriveManualWatchPaths(cfg)...)
+	for _, mapping := range parse115DownloadMappings(cfg.N115DownloadMappings) {
+		values = append(values, mapping.CD2Path)
 	}
+	if strings.TrimSpace(cfg.N115FailureCD2Path) != "" {
+		values = append(values, cfg.N115FailureCD2Path)
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{})
+	for _, value := range values {
+		value = path.Clean("/" + strings.TrimLeft(strings.TrimSpace(value), "/"))
+		if value == "/" || value == "." {
+			continue
+		}
+		if _, exists := seen[value]; !exists {
+			seen[value] = struct{}{}
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval time.Duration, refreshPaths []string) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
-		if err := client.ForceRefresh(context.Background(), refreshPath); err != nil {
-			u.Errorf("CloudDrive2 定时刷新失败：%s", err)
-		} else {
-			u.Debugf("CloudDrive2 定时刷新完成")
+		for _, refreshPath := range refreshPaths {
+			if err := client.ForceRefresh(context.Background(), refreshPath); err != nil {
+				u.Errorf("CloudDrive2 定时刷新失败：%s：%v", refreshPath, err)
+			} else {
+				u.Debugf("CloudDrive2 定时刷新完成：%s", refreshPath)
+			}
 		}
 	}
 }

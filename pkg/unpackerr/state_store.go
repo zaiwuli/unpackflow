@@ -45,6 +45,9 @@ type PendingCD2 struct {
 	N115SourceCID string          `json:"115_source_cid,omitempty"`
 	N115FID       string          `json:"115_fid,omitempty"`
 	N115FileName  string          `json:"115_file_name,omitempty"`
+	N115TaskKey   string          `json:"115_task_key,omitempty"`
+	N115Size      int64           `json:"115_size,omitempty"`
+	N115MTime     int64           `json:"115_mtime,omitempty"`
 }
 
 // Pending115 tracks a cloud file moved to a CD2 fallback folder before its
@@ -58,6 +61,10 @@ type Pending115 struct {
 	CD2Path     string    `json:"cd2_path,omitempty"`
 	FID         string    `json:"fid"`
 	FileName    string    `json:"file_name"`
+	Kind        string    `json:"kind,omitempty"`
+	Approval    bool      `json:"approval,omitempty"`
+	Size        int64     `json:"size,omitempty"`
+	MTime       int64     `json:"mtime,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -330,7 +337,7 @@ func (u *Unpackerr) savePending115Fallback(items ...Pending115) {
 	}
 	u.state.mu.Unlock()
 	if err := u.saveProcessingState(); err != nil {
-		u.Errorf("保存 115 兜底任务失败: %v", err)
+		u.Errorf("保存 115 本地下载任务失败: %v", err)
 	}
 }
 
@@ -352,7 +359,7 @@ func (u *Unpackerr) removePending115Fallback(key string) {
 	delete(u.state.Fallback115, key)
 	u.state.mu.Unlock()
 	if err := u.saveProcessingState(); err != nil {
-		u.Errorf("清理 115 兜底任务失败: %v", err)
+		u.Errorf("清理 115 本地下载任务失败: %v", err)
 	}
 }
 
@@ -368,7 +375,24 @@ func (u *Unpackerr) removePending115FallbackForFile(sourceCID, fid string) {
 	}
 	u.state.mu.Unlock()
 	if err := u.saveProcessingState(); err != nil {
-		u.Errorf("清理 115 兜底任务失败: %v", err)
+		u.Errorf("清理 115 本地下载任务失败: %v", err)
+	}
+}
+
+func (u *Unpackerr) approvePending115Task(taskKey string) {
+	if u.state == nil || taskKey == "" {
+		return
+	}
+	u.state.mu.Lock()
+	for key, item := range u.state.Fallback115 {
+		if item.TaskKey == taskKey {
+			item.Approval = false
+			u.state.Fallback115[key] = item
+		}
+	}
+	u.state.mu.Unlock()
+	if err := u.saveProcessingState(); err != nil {
+		u.Errorf("保存 115 下载批准状态失败: %v", err)
 	}
 }
 

@@ -144,6 +144,10 @@ type UIOverrides struct {
 	N115CookieRemark    string   `json:"115_cookie_remark,omitempty"`
 	N115EventInterval   string   `json:"115_event_interval,omitempty"`
 	N115Mappings        []string `json:"115_mappings,omitempty"`
+	N115SourceCIDs      []string `json:"115_source_cids,omitempty"`
+	N115FailureCID      string   `json:"115_failure_cid,omitempty"`
+	N115FailureCD2Path  string   `json:"115_failure_cd2_path,omitempty"`
+	N115Downloads       []string `json:"115_download_mappings,omitempty"`
 	N115SuccessAction   string   `json:"115_success_action,omitempty"`
 	N115ArchiveCID      string   `json:"115_archive_cid,omitempty"`
 	N115AutoFallback    *bool    `json:"115_auto_fallback,omitempty"`
@@ -255,6 +259,17 @@ func (u *Unpackerr) loadUIStore() error {
 	if store.Overrides.N115Mappings != nil {
 		u.CloudDrive2.N115Mappings = append([]string(nil), store.Overrides.N115Mappings...)
 	}
+	if store.Overrides.N115SourceCIDs != nil {
+		u.CloudDrive2.N115SourceCIDs = clean115CIDs(store.Overrides.N115SourceCIDs)
+	}
+	if store.Overrides.N115SourceCIDs != nil || store.Overrides.N115Downloads != nil {
+		u.CloudDrive2.N115FailureCID = strings.TrimSpace(store.Overrides.N115FailureCID)
+		u.CloudDrive2.N115FailureCD2Path = strings.TrimSpace(store.Overrides.N115FailureCD2Path)
+	}
+	if store.Overrides.N115Downloads != nil {
+		u.CloudDrive2.N115DownloadMappings = append([]string(nil), store.Overrides.N115Downloads...)
+	}
+	migrate115CloudSettings(&u.CloudDrive2)
 	if store.Overrides.N115SuccessAction != "" {
 		u.CloudDrive2.N115SuccessAction = store.Overrides.N115SuccessAction
 	}
@@ -424,6 +439,10 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115CookieRemark:    u.CloudDrive2.N115CookieRemark,
 		N115EventInterval:   u.CloudDrive2.N115EventInterval.Duration.String(),
 		N115Mappings:        append([]string(nil), u.CloudDrive2.N115Mappings...),
+		N115SourceCIDs:      append([]string(nil), u.CloudDrive2.N115SourceCIDs...),
+		N115FailureCID:      u.CloudDrive2.N115FailureCID,
+		N115FailureCD2Path:  u.CloudDrive2.N115FailureCD2Path,
+		N115Downloads:       append([]string(nil), u.CloudDrive2.N115DownloadMappings...),
 		N115SuccessAction:   u.CloudDrive2.N115SuccessAction,
 		N115ArchiveCID:      u.CloudDrive2.N115ArchiveCID,
 		N115AutoFallback:    func() *bool { v := u.CloudDrive2.N115AutoFallback; return &v }(),
@@ -514,6 +533,18 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.N115Mappings != nil {
 		settings.N115Mappings = append([]string(nil), overrides.N115Mappings...)
+	}
+	if overrides.N115SourceCIDs != nil {
+		settings.N115SourceCIDs = append([]string(nil), overrides.N115SourceCIDs...)
+	}
+	if overrides.N115FailureCID != "" {
+		settings.N115FailureCID = overrides.N115FailureCID
+	}
+	if overrides.N115FailureCD2Path != "" {
+		settings.N115FailureCD2Path = overrides.N115FailureCD2Path
+	}
+	if overrides.N115Downloads != nil {
+		settings.N115Downloads = append([]string(nil), overrides.N115Downloads...)
 	}
 	if overrides.N115SuccessAction != "" {
 		settings.N115SuccessAction = overrides.N115SuccessAction
@@ -622,6 +653,9 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	if strings.TrimSpace(s.N115Cookie) == "" {
 		s.N115Cookie = u.uiStore.Overrides.N115Cookie
 	}
+	s.N115SourceCIDs = clean115CIDs(s.N115SourceCIDs)
+	s.N115FailureCID = strings.TrimSpace(s.N115FailureCID)
+	s.N115FailureCD2Path = strings.TrimSpace(s.N115FailureCD2Path)
 	u.uiStore.Overrides = s
 	u.uiStore.mu.Unlock()
 	return u.saveUIStore()

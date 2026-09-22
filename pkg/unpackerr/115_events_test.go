@@ -86,6 +86,21 @@ func TestN115ResponseSummaryIncludesUsefulFields(t *testing.T) {
 	}
 }
 
+func TestN115ServiceFailureDoesNotArchiveFiles(t *testing.T) {
+	for _, err := range []error{
+		&n115APIError{Status: 401, Detail: "未登录"},
+		&n115APIError{Status: 429, Detail: "请求频繁"},
+		&n115APIError{Detail: "Cookie 已失效"},
+	} {
+		if !n115ServiceFailure(err) {
+			t.Fatalf("service error was treated as an archive failure: %v", err)
+		}
+	}
+	if n115ServiceFailure(&n115APIError{Detail: "压缩包格式不支持"}) {
+		t.Fatal("archive format errors must follow the file failure workflow")
+	}
+}
+
 func TestCloudDriveManualWatchPathsKeepsLegacyPath(t *testing.T) {
 	paths := cloudDriveManualWatchPaths(CloudDriveConfig{
 		WatchPath:        "/115open/日常下载",
@@ -93,6 +108,58 @@ func TestCloudDriveManualWatchPathsKeepsLegacyPath(t *testing.T) {
 	})
 	if len(paths) != 2 || !cloudDrivePathMatches("/115open/手动/test.7z", paths) || cloudDrivePathMatches("/115open/失败/test.7z", paths) {
 		t.Fatalf("unexpected manual paths: %#v", paths)
+	}
+}
+
+func TestMigrate115CloudSettingsUsesSharedFailureFolder(t *testing.T) {
+	cfg := CloudDriveConfig{N115Mappings: []string{
+		"100 => 900 => /115open/失败",
+		"200 => 900 => /115open/失败",
+	}}
+	migrate115CloudSettings(&cfg)
+	if len(cfg.N115SourceCIDs) != 2 || cfg.N115FailureCID != "900" || cfg.N115FailureCD2Path != "/115open/失败" {
+		t.Fatalf("unexpected migrated settings: %#v", cfg)
+	}
+}
+
+func TestCloudDriveWatchPathsExcludeApprovalFolders(t *testing.T) {
+	cfg := CloudDriveConfig{
+		N115DownloadMappings: []string{
+			"100 => /115open/自动 => auto",
+			"200 => /115open/审批 => approval",
+		},
+		N115FailureCD2Path: "/115open/失败",
+		N115AutoFallback:   false,
+	}
+	watch := cloudDriveManualWatchPaths(cfg)
+	if !cloudDrivePathMatches("/115open/自动/a.7z", watch) {
+		t.Fatal("automatic download folder must be monitored")
+	}
+	if cloudDrivePathMatches("/115open/审批/a.7z", watch) || cloudDrivePathMatches("/115open/失败/a.7z", watch) {
+		t.Fatalf("approval folders must not be automatically monitored: %#v", watch)
+	}
+	refresh := cloudDriveConfiguredRefreshPaths(cfg)
+	if !cloudDrivePathMatches("/115open/审批/a.7z", refresh) || !cloudDrivePathMatches("/115open/失败/a.7z", refresh) {
+		t.Fatalf("approval folders still need local refresh support: %#v", refresh)
+	}
+}
+
+func TestValidate115CloudSettingsRejectsOverlappingRoles(t *testing.T) {
+	enabled := true
+	settings := UIOverrides{
+		N115Enabled:        &enabled,
+		N115SourceCIDs:     []string{"100"},
+		N115FailureCID:     "900",
+		N115FailureCD2Path: "/115open/下载",
+		N115Downloads:      []string{"200 => /115open/下载/手动 => auto"},
+	}
+	if err := validate115CloudSettings(settings); err == nil {
+		t.Fatal("overlapping failure and daily-download paths must be rejected")
+	}
+	settings.N115Downloads = []string{"100 => /115open/手动 => auto"}
+	settings.N115FailureCD2Path = "/115open/失败"
+	if err := validate115CloudSettings(settings); err == nil {
+		t.Fatal("one CID must not have two roles")
 	}
 }
 

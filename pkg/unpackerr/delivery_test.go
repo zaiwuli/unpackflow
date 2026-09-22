@@ -297,12 +297,52 @@ func TestSettingsAPIReturnsAndPersists(t *testing.T) {
 	}
 }
 
-func TestDashboardJSUsesSafe115MappingSelector(t *testing.T) {
-	if bytes.Contains(dashboardJS, []byte("#115-mappings")) {
-		t.Fatal("115 mapping ID starts with a digit and must not be used as a CSS selector")
+func TestSettingsAPIPersistsStructured115Folders(t *testing.T) {
+	dir := t.TempDir()
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	u.Folders = []*FolderConfig{{Path: filepath.Join(dir, "监控目录"), ExtractPath: filepath.Join(dir, "解压目录")}}
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
 	}
-	if !bytes.Contains(dashboardJS, []byte("list.querySelectorAll('.mapping-row')")) {
-		t.Fatal("115 mapping rows are not collected from the resolved container")
+	body := bytes.NewBufferString(`{
+		"workers":1,"local_source_action":"keep","folder_interval":"60s",
+		"cd2_enabled":true,"cd2_url":"http://127.0.0.1:19798","cd2_token":"token",
+		"refresh_interval":"10m","path_overrides":["/115open=>/mnt/cd2/115open"],
+		"cache_dir":"/data/缓存目录","cache_extract_path":"/data/解压目录","copy_timeout":"24h",
+		"115_enabled":true,"115_event_enabled":true,"115_event_interval":"5m",
+		"115_source_cids":["100","200"],"115_success_action":"archive","115_archive_cid":"800",
+		"115_failure_cid":"900","115_failure_cd2_path":"/115open/解压失败",
+		"115_auto_fallback":false,"115_retry_count":4,"115_retry_delay":"3m",
+		"115_download_mappings":["300 => /115open/日常下载 => auto","400 => /115open/审批下载 => approval"]
+	}`)
+	recorder := httptest.NewRecorder()
+	u.settingsAPI(recorder, httptest.NewRequest(http.MethodPost, "/api/settings", body), httprouter.Params{})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("settings API returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	restarted := New()
+	restarted.ConfigFile = u.ConfigFile
+	if err := restarted.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	if len(restarted.CloudDrive2.N115SourceCIDs) != 2 || restarted.CloudDrive2.N115FailureCID != "900" || restarted.CloudDrive2.N115FailureCD2Path != "/115open/解压失败" {
+		t.Fatalf("structured 115 folders were not restored: %#v", restarted.CloudDrive2)
+	}
+	if restarted.CloudDrive2.N115RetryCount != 4 || restarted.CloudDrive2.N115RetryDelay.Duration != 3*time.Minute {
+		t.Fatalf("115 retry settings were not restored: %#v", restarted.CloudDrive2)
+	}
+	watch := cloudDriveManualWatchPaths(restarted.CloudDrive2)
+	if !cloudDrivePathMatches("/115open/日常下载/a.7z", watch) || cloudDrivePathMatches("/115open/审批下载/a.7z", watch) || cloudDrivePathMatches("/115open/解压失败/a.7z", watch) {
+		t.Fatalf("automatic and approval paths were not separated: %#v", watch)
+	}
+}
+
+func TestDashboardJSUsesStructuredCloudFolderRows(t *testing.T) {
+	for _, marker := range [][]byte{[]byte("115-source-add"), []byte("115-download-add"), []byte("path-mapping-add"), []byte("collectDownloadMappings"), []byte("collectPathMappings")} {
+		if !bytes.Contains(dashboardJS, marker) {
+			t.Fatalf("dashboard is missing structured cloud setting %q", marker)
+		}
 	}
 }
 

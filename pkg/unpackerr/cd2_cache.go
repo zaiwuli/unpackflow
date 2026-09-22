@@ -485,6 +485,9 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 		pending.N115SourceCID = fallback.SourceCID
 		pending.N115FID = fallback.FID
 		pending.N115FileName = fallback.FileName
+		pending.N115TaskKey = fallback.TaskKey
+		pending.N115Size = fallback.Size
+		pending.N115MTime = fallback.MTime
 	}
 	u.savePendingCD2(pending)
 	u.updateCD2Transfer(key, archivePrimary(files), "排队中", func(transfer *CD2Transfer) {

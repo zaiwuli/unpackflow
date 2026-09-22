@@ -3,8 +3,10 @@ package unpackerr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -27,6 +29,24 @@ type N115Mapping struct {
 	SourceCID   string
 	FallbackCID string
 	CD2Path     string
+}
+
+type N115DownloadMapping struct {
+	CID      string
+	CD2Path  string
+	Approval bool
+}
+
+type n115APIError struct {
+	Status int
+	Detail string
+}
+
+func (e *n115APIError) Error() string {
+	if e.Status > 0 {
+		return fmt.Sprintf("115 接口 HTTP %d：%s", e.Status, e.Detail)
+	}
+	return "115 接口返回失败：" + e.Detail
 }
 
 type n115File struct {
@@ -68,13 +88,149 @@ func parse115Mappings(values []string) []N115Mapping {
 
 func (m N115Mapping) fallbackEnabled() bool { return m.FallbackCID != "" && m.CD2Path != "" }
 
+func clean115CIDs(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{})
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func parse115DownloadMappings(values []string) []N115DownloadMapping {
+	result := make([]N115DownloadMapping, 0, len(values))
+	for _, value := range values {
+		parts := strings.Split(value, "=>")
+		for index := range parts {
+			parts[index] = strings.TrimSpace(parts[index])
+		}
+		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+			continue
+		}
+		mapping := N115DownloadMapping{CID: parts[0], CD2Path: parts[1]}
+		if len(parts) >= 3 {
+			mapping.Approval = strings.EqualFold(parts[2], "approval") || strings.EqualFold(parts[2], "manual")
+		}
+		result = append(result, mapping)
+	}
+	return result
+}
+
+func migrate115CloudSettings(cfg *CloudDriveConfig) {
+	if cfg == nil {
+		return
+	}
+	legacy := parse115Mappings(cfg.N115Mappings)
+	if len(cfg.N115SourceCIDs) == 0 {
+		for _, mapping := range legacy {
+			cfg.N115SourceCIDs = append(cfg.N115SourceCIDs, mapping.SourceCID)
+		}
+		cfg.N115SourceCIDs = clean115CIDs(cfg.N115SourceCIDs)
+	}
+	if cfg.N115FailureCID == "" || cfg.N115FailureCD2Path == "" {
+		for _, mapping := range legacy {
+			if !mapping.fallbackEnabled() {
+				continue
+			}
+			if cfg.N115FailureCID == "" {
+				cfg.N115FailureCID = mapping.FallbackCID
+			}
+			if cfg.N115FailureCD2Path == "" {
+				cfg.N115FailureCD2Path = mapping.CD2Path
+			}
+			break
+		}
+	}
+}
+
+func n115SourceCIDs(cfg CloudDriveConfig) []string {
+	migrate115CloudSettings(&cfg)
+	return clean115CIDs(cfg.N115SourceCIDs)
+}
+
+func n115FailureMapping(cfg CloudDriveConfig, sourceCID string) N115Mapping {
+	migrate115CloudSettings(&cfg)
+	return N115Mapping{SourceCID: sourceCID, FallbackCID: strings.TrimSpace(cfg.N115FailureCID), CD2Path: strings.TrimSpace(cfg.N115FailureCD2Path)}
+}
+
+func validate115CloudSettings(settings UIOverrides) error {
+	if settings.N115Enabled == nil || !*settings.N115Enabled {
+		return nil
+	}
+	sources := clean115CIDs(settings.N115SourceCIDs)
+	downloads := parse115DownloadMappings(settings.N115Downloads)
+	failureCID := strings.TrimSpace(settings.N115FailureCID)
+	failurePath := strings.TrimSpace(settings.N115FailureCD2Path)
+	if len(sources) > 0 && (failureCID == "" || failurePath == "") {
+		return fmt.Errorf("配置云解压来源后，必须填写失败归档 CID 和对应 CD2 路径")
+	}
+	roles := make(map[string]string)
+	addCID := func(cid, role string) error {
+		cid = strings.TrimSpace(cid)
+		if cid == "" {
+			return nil
+		}
+		if previous, exists := roles[cid]; exists {
+			return fmt.Errorf("CID %s 同时用于%s和%s", cid, previous, role)
+		}
+		roles[cid] = role
+		return nil
+	}
+	for _, cid := range sources {
+		if err := addCID(cid, "云解压来源"); err != nil {
+			return err
+		}
+	}
+	if err := addCID(failureCID, "失败归档"); err != nil {
+		return err
+	}
+	if settings.N115SuccessAction == "archive" {
+		if err := addCID(settings.N115ArchiveCID, "成功归档"); err != nil {
+			return err
+		}
+	}
+	paths := make([]string, 0, len(downloads)+1)
+	pathRoles := make([]string, 0, len(downloads)+1)
+	if failurePath != "" {
+		paths = append(paths, failurePath)
+		pathRoles = append(pathRoles, "失败归档")
+	}
+	for _, mapping := range downloads {
+		if err := addCID(mapping.CID, "日常本地下载"); err != nil {
+			return err
+		}
+		for index, existing := range paths {
+			if cloudPathOverlap(existing, mapping.CD2Path) {
+				return fmt.Errorf("%s目录与日常本地下载目录存在路径重叠：%s", pathRoles[index], mapping.CD2Path)
+			}
+		}
+		paths = append(paths, mapping.CD2Path)
+		pathRoles = append(pathRoles, "日常本地下载")
+	}
+	return nil
+}
+
+func cloudPathOverlap(first, second string) bool {
+	first = path.Clean("/" + strings.TrimLeft(strings.TrimSpace(first), "/"))
+	second = path.Clean("/" + strings.TrimLeft(strings.TrimSpace(second), "/"))
+	return first == second || strings.HasPrefix(first, second+"/") || strings.HasPrefix(second, first+"/")
+}
+
 func (u *Unpackerr) start115Events() {
 	cfg := u.CloudDrive2
 	if !cfg.N115Enabled || !cfg.N115EventEnabled || strings.TrimSpace(cfg.N115Cookie) == "" {
 		return
 	}
-	if len(parse115Mappings(cfg.N115Mappings)) == 0 {
-		u.Errorf("115 生活事件已启用，但尚未配置 CID 映射")
+	if len(n115SourceCIDs(cfg)) == 0 && len(parse115DownloadMappings(cfg.N115DownloadMappings)) == 0 {
+		u.Errorf("115 生活事件已启用，但尚未配置云解压来源或本地下载文件夹")
 		return
 	}
 	interval := cfg.N115EventInterval.Duration
@@ -106,10 +262,11 @@ func (u *Unpackerr) poll115RecentOperations() {
 	if _, err := u.n115Request(ctx, http.MethodGet, "https://life.115.com/api/1.0/web/1.0/life/recent_operations", nil); err != nil {
 		u.Debugf("115 最近操作同步失败，将继续检查指定目录：%v", err)
 	}
-	for _, mapping := range parse115Mappings(u.CloudDrive2.N115Mappings) {
-		files, err := u.n115ListFiles(ctx, mapping.SourceCID)
+	for _, sourceCID := range n115SourceCIDs(u.CloudDrive2) {
+		mapping := n115FailureMapping(u.CloudDrive2, sourceCID)
+		files, err := u.n115ListFiles(ctx, sourceCID)
 		if err != nil {
-			u.Errorf("115 读取目录 %s 失败：%v", mapping.SourceCID, err)
+			u.Errorf("115 读取目录 %s 失败：%v", sourceCID, err)
 			continue
 		}
 		for _, file := range files {
@@ -132,10 +289,64 @@ func (u *Unpackerr) poll115RecentOperations() {
 			}(mapping, file, version)
 		}
 	}
+	for _, mapping := range parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings) {
+		files, err := u.n115ListFiles(ctx, mapping.CID)
+		if err != nil {
+			u.Errorf("115 读取本地下载目录 %s 失败：%v", mapping.CID, err)
+			continue
+		}
+		for _, file := range files {
+			if file.FID == "" || !isCloudDriveArchiveEvent(file.Name) {
+				continue
+			}
+			version := ProcessedSource{Key: n115DownloadFileKey(mapping.CID, file), Source: "115 本地下载", Path: file.Name, Size: file.Size, ModifiedNS: file.MTime}
+			if u.wasProcessed(version) || u.hasPending115Task(version.Key) {
+				continue
+			}
+			if _, loaded := u.n115Running.LoadOrStore(version.Key, struct{}{}); loaded {
+				continue
+			}
+			u.queue115LocalDownload(mapping, file, version)
+			u.n115Running.Delete(version.Key)
+		}
+	}
 }
 
 func n115FileKey(sourceCID string, file n115File) string {
 	return fmt.Sprintf("115|%s|%s|%d", sourceCID, file.FID, file.Size)
+}
+
+func n115DownloadFileKey(sourceCID string, file n115File) string {
+	return fmt.Sprintf("115-download|%s|%s|%d", sourceCID, file.FID, file.Size)
+}
+
+func (u *Unpackerr) hasPending115Task(taskKey string) bool {
+	if u.state == nil || taskKey == "" {
+		return false
+	}
+	u.state.mu.RLock()
+	defer u.state.mu.RUnlock()
+	for _, pending := range u.state.Fallback115 {
+		if pending.TaskKey == taskKey {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *Unpackerr) queue115LocalDownload(mapping N115DownloadMapping, file n115File, version ProcessedSource) {
+	fallback := N115Mapping{SourceCID: mapping.CID, FallbackCID: mapping.CID, CD2Path: mapping.CD2Path}
+	u.save115DownloadTask(version.Key, "manual_download", mapping.Approval, fallback, file)
+	if mapping.Approval {
+		u.update115Transfer(version.Key, file.Name, "等待批准本地下载", func(task *CD2Transfer) {
+			task.CanFallback = true
+		})
+		return
+	}
+	u.update115Transfer(version.Key, file.Name, "正在刷新本地下载目录", func(task *CD2Transfer) {
+		task.CanFallback = false
+	})
+	u.refresh115Fallback(fallback, file)
 }
 
 func (u *Unpackerr) n115Request(ctx context.Context, method, endpoint string, form url.Values) (map[string]any, error) {
@@ -169,16 +380,36 @@ func (u *Unpackerr) n115Request(ctx context.Context, method, endpoint string, fo
 		return nil, err
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("115 接口 HTTP %d：%s", res.StatusCode, n115ResponseSummary(raw))
+		return nil, &n115APIError{Status: res.StatusCode, Detail: n115ResponseSummary(raw)}
 	}
 	var response map[string]any
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return nil, fmt.Errorf("响应不是 JSON：%w", err)
 	}
 	if state, exists := response["state"].(bool); exists && !state {
-		return nil, fmt.Errorf("115 接口返回失败：%s", n115ResponseSummary(raw))
+		return nil, &n115APIError{Detail: n115ResponseSummary(raw)}
 	}
 	return response, nil
+}
+
+func n115ServiceFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *n115APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.Status == http.StatusUnauthorized || apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusTooManyRequests || apiErr.Status >= 500 {
+			return true
+		}
+		detail := strings.ToLower(apiErr.Detail)
+		for _, marker := range []string{"未登录", "登录失效", "cookie", "token", "频繁", "限流", "服务异常", "系统繁忙", "维护", "unauthorized", "forbidden", "too many"} {
+			if strings.Contains(detail, marker) {
+				return true
+			}
+		}
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
 // n115ResponseSummary preserves the server's useful error message without
@@ -303,23 +534,28 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 		}
 	}
 	u.Errorf("115 云解压最终失败（已重试 %d 次）：%s：%v", retries, file.Name, err)
+	if n115ServiceFailure(err) {
+		u.update115Transfer(version.Key, file.Name, "115 服务异常，等待下次同步", func(task *CD2Transfer) { task.Error = err.Error() })
+		u.notifyEvent(notifyComplete, "❌", "115 服务异常", "115 云端", file.Name)
+		return
+	}
 	u.notifyEvent(notifyComplete, "❌", "115 云解压失败", "115 云端", file.Name)
 	if !mapping.fallbackEnabled() {
 		u.update115Transfer(version.Key, file.Name, "115 云解压失败", func(task *CD2Transfer) { task.Error = err.Error() })
 		return
 	}
-	u.update115Transfer(version.Key, file.Name, "正在移动到备用目录", nil)
+	u.update115Transfer(version.Key, file.Name, "正在移动到失败归档目录", nil)
 	if err := u.n115MoveToFallback(file.FID, mapping.FallbackCID); err != nil {
-		u.Errorf("115 失败文件移动到备用目录失败：%s：%v", file.Name, err)
-		u.update115Transfer(version.Key, file.Name, "移动到备用目录失败", func(task *CD2Transfer) { task.Error = err.Error() })
+		u.Errorf("115 失败文件移动到失败归档目录失败：%s：%v", file.Name, err)
+		u.update115Transfer(version.Key, file.Name, "移动到失败归档目录失败", func(task *CD2Transfer) { task.Error = err.Error() })
 		return
 	}
-	u.Printf("115 云解压失败，已移动到备用目录：%s", file.Name)
+	u.Printf("115 云解压失败，已移动到失败归档目录：%s", file.Name)
 	// The file now lives in FallbackCID. Persist that identity before deciding
 	// whether to start a local copy, so a restart never loses the manual path.
-	u.save115FallbackTask(version.Key, mapping, file)
+	u.save115DownloadTask(version.Key, "cloud_failure", !u.CloudDrive2.N115AutoFallback, mapping, file)
 	if u.CloudDrive2.N115AutoFallback {
-		u.update115Transfer(version.Key, file.Name, "等待本地备用解压", func(task *CD2Transfer) { task.CanFallback = false })
+		u.update115Transfer(version.Key, file.Name, "等待下载到本地解压", func(task *CD2Transfer) { task.CanFallback = false })
 		u.refresh115Fallback(mapping, file)
 		return
 	}
@@ -358,7 +594,12 @@ func (u *Unpackerr) handle115SuccessFile(sourceCID, fid, fileName string) {
 }
 
 func (u *Unpackerr) handle115FallbackLocalSuccess(pending PendingCD2) {
-	u.handle115SuccessFile(pending.N115SourceCID, pending.N115FID, pending.N115FileName)
+	if pending.N115TaskKey != "" {
+		u.markProcessed(ProcessedSource{Key: pending.N115TaskKey, Source: "115 本地下载", Path: pending.N115FileName, Size: pending.N115Size, ModifiedNS: pending.N115MTime})
+	}
+	// Files routed through the failure archive or a daily download folder stay
+	// where the user placed them. Successful cloud extraction has its own
+	// delete/archive policy and is handled separately.
 	u.removePending115FallbackForFile(pending.N115SourceCID, pending.N115FID)
 }
 
@@ -544,23 +785,23 @@ func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, file n115File) {
 	client := u.cd2Client
 	u.cd2Mu.RUnlock()
 	if client == nil {
-		u.Errorf("115 备用文件已移动，但 CloudDrive2 未连接：%s", remoteFile)
+		u.Errorf("115 本地下载任务已创建，但 CloudDrive2 未连接：%s", remoteFile)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	if err := client.ForceRefresh(ctx, mapping.CD2Path); err != nil {
-		u.Errorf("115 备用路径刷新失败：%s：%v", mapping.CD2Path, err)
+		u.Errorf("115 本地下载路径刷新失败：%s：%v", mapping.CD2Path, err)
 	} else {
-		u.Systemf("115 备用路径已刷新：%s", mapping.CD2Path)
+		u.Systemf("115 本地下载路径已刷新：%s", mapping.CD2Path)
 	}
 	go u.handleCloudDriveChange(client, clouddrive.Change{Path: remoteFile}, paths)
 }
 
-func (u *Unpackerr) save115FallbackTask(taskKey string, mapping N115Mapping, file n115File) {
+func (u *Unpackerr) save115DownloadTask(taskKey, kind string, approval bool, mapping N115Mapping, file n115File) {
 	remoteFile := path.Join(mapping.CD2Path, file.Name)
 	paths := clouddrive.MapCloudPathWithOverrides(remoteFile, nil, u.CloudDrive2.PathOverrides)
-	fallback := Pending115{TaskKey: taskKey, SourceCID: mapping.FallbackCID, FallbackCID: mapping.FallbackCID, CD2Path: mapping.CD2Path, FID: file.FID, FileName: file.Name}
+	fallback := Pending115{TaskKey: taskKey, SourceCID: mapping.FallbackCID, FallbackCID: mapping.FallbackCID, CD2Path: mapping.CD2Path, FID: file.FID, FileName: file.Name, Kind: kind, Approval: approval, Size: file.Size, MTime: file.MTime}
 	for _, key := range n115FallbackKeys(paths, remoteFile) {
 		fallback.Key = key
 		u.savePending115Fallback(fallback)

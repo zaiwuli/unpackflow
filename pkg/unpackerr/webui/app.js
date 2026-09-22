@@ -192,18 +192,9 @@ function ensureLocalSettings() {
   if (!workers) return;
 	const oldDeleteSource = $('delete-source');
 	if (oldDeleteSource) oldDeleteSource.closest('.check-row').remove();
-	const manualWatch = $('watch-path');
-	if (manualWatch) {
-		const field = manualWatch.closest('.field');
-		field.querySelector('span').textContent = '日常本地下载目录';
-		manualWatch.placeholder = '/115open/日常下载，/115open/另一个目录';
-		if (!field.querySelector('small')) {
-			const hint = document.createElement('small');
-			hint.style.cssText = 'color:var(--muted);font-size:12px';
-			hint.textContent = '仅用于手动放入压缩包后下载到本地解压；多个目录用英文逗号分隔。它不会触发 115 云解压。';
-			field.appendChild(hint);
-		}
-	}
+	[$('watch-path'), $('refresh-path')].forEach(input => { if (input) input.closest('.field').style.display = 'none'; });
+	const pathOverrides = $('path-overrides');
+	if (pathOverrides) pathOverrides.closest('.field').style.display = 'none';
   const block = document.createElement('div');
   block.id = 'local-settings';
   block.innerHTML = '<div class="panel-heading" style="margin-top:18px"><div><h3>\u672c\u5730\u76ee\u5f55</h3>' +
@@ -226,22 +217,28 @@ function ensureLocalSettings() {
     '<label class="check-row"><input id="115-event-enabled" type="checkbox"> \u542f\u7528\u6700\u8fd1\u64cd\u4f5c\u4e8b\u4ef6</label>' +
     '<label class="field"><span>\u4e8b\u4ef6\u540c\u6b65\u95f4\u9694</span><input id="115-event-interval" type="text" placeholder="5m"></label>' +
     '<div class="form-actions"><button id="115-sync" type="button">\u624b\u52a8\u540c\u6b65 115</button></div><p id="115-sync-message" class="form-message"></p>' +
-    '<label class="field"><span>\u4e91\u89e3\u538b\u6210\u529f\u540e\u7684\u539f\u5305\u5904\u7406</span><select id="115-success-action"><option value="keep">\u4fdd\u7559\u539f\u5305</option><option value="delete">\u5220\u9664\u539f\u5305</option><option value="archive">\u5f52\u6863\u539f\u5305</option></select></label>' +
-    '<label class="field" id="115-archive-cid-row"><span>\u5f52\u6863\u538b\u7f29\u5305 CID</span><input id="115-archive-cid" type="text" placeholder="\u586b\u5199 115 \u5f52\u6863\u6587\u4ef6\u5939 CID"></label>' +
-    '<label class="check-row"><input id="115-auto-fallback" type="checkbox"> 云解压失败后自动转本地解压</label><small style="color:var(--muted);font-size:12px">关闭时，失败任务会保留在任务列表，可手动转本地解压</small>' +
-		'<div class="field"><span>云解压失败重试</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="115-retry-count" type="number" min="1" max="10" placeholder="3"><input id="115-retry-delay" type="text" placeholder="2m"></div><small style="color:var(--muted);font-size:12px">默认最多 3 次，每次间隔 2 分钟；最后一次失败才会移入失败目录。</small></div>' +
-    '<div class="field"><span>115 云解压与 CD2 备用目录映射</span><div id="115-mappings" class="mapping-list"></div><div class="form-actions"><button id="115-mapping-add" type="button">添加文件夹</button></div><small style="color:var(--muted);font-size:12px">每个文件夹独立配置。云解压失败后，文件会移动到备用 CID，并刷新对应 CD2 路径。</small></div>';
+		'<h3>云解压来源</h3><div class="field"><div id="115-sources" class="mapping-list"></div><div class="form-actions"><button id="115-source-add" type="button">添加来源文件夹</button></div></div>' +
+    '<label class="field"><span>云解压成功后的原包处理</span><select id="115-success-action"><option value="keep">保留原包</option><option value="delete">删除原包</option><option value="archive">移入成功归档目录</option></select></label>' +
+    '<label class="field" id="115-archive-cid-row"><span>成功归档 CID</span><input id="115-archive-cid" type="text" placeholder="115 成功归档文件夹 CID"></label>' +
+		'<h3>云解压失败</h3><label class="field"><span>失败归档 CID</span><input id="115-failure-cid" type="text" placeholder="115 解压失败文件夹 CID"></label>' +
+		'<label class="field"><span>失败目录的 CD2 路径</span><input id="115-failure-path" type="text" placeholder="/115open/解压失败"></label>' +
+    '<label class="check-row"><input id="115-auto-fallback" type="checkbox"> 最终失败后自动下载到本地解压</label><small style="color:var(--muted);font-size:12px">关闭后只移动到失败目录，并在任务页等待批准。</small>' +
+		'<div class="field"><span>失败重试</span><div class="settings-pair"><input id="115-retry-count" type="number" min="1" max="10" placeholder="3"><input id="115-retry-delay" type="text" placeholder="2m"></div><small style="color:var(--muted);font-size:12px">尝试次数与两次尝试之间的等待时间。</small></div>' +
+		'<h3>日常本地下载</h3><div class="field"><div id="115-downloads" class="mapping-list"></div><div class="form-actions"><button id="115-download-add" type="button">添加下载文件夹</button></div><small style="color:var(--muted);font-size:12px">手动将压缩包移入这些 115 文件夹后，工具刷新对应 CD2 路径；每行可选择自动下载或等待批准。</small></div>' +
+		'<h3>CD2 挂载路径映射</h3><div class="field"><div id="path-mappings" class="mapping-list"></div><div class="form-actions"><button id="path-mapping-add" type="button">添加路径映射</button></div></div>';
   workers.insertAdjacentElement('afterend', block);
   if (!document.getElementById('115-mapping-style')) {
     const style = document.createElement('style');
     style.id = '115-mapping-style';
-    style.textContent = '.mapping-list{display:grid;gap:8px;margin-top:8px}.mapping-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(110px,1fr) minmax(180px,2fr) 34px;gap:8px;align-items:center}.115-mapping-input{min-width:0;width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit}.mapping-remove{width:34px;height:34px;padding:0;border:1px solid #d8dce5;border-radius:8px;background:#fff;color:#b42318;font-size:22px;line-height:1}@media(max-width:680px){.mapping-row{grid-template-columns:1fr}.mapping-remove{width:100%;font-size:16px}}';
+		style.textContent = '.mapping-list{display:grid;gap:8px;margin-top:8px}.mapping-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(180px,2fr) minmax(120px,1fr) 34px;gap:8px;align-items:center}.mapping-row.single{grid-template-columns:1fr 34px}.mapping-row.pair{grid-template-columns:1fr 1.4fr 34px}.mapping-input,.mapping-select{min-width:0;width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit}.mapping-remove{width:34px;height:34px;padding:0;border:1px solid #d8dce5;border-radius:8px;background:#fff;color:#b42318;font-size:22px;line-height:1}.settings-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}@media(max-width:680px){.mapping-row,.mapping-row.single,.mapping-row.pair,.settings-pair{grid-template-columns:1fr}.mapping-remove{width:100%;font-size:16px}}';
     document.head.appendChild(style);
   }
   const select = $('local-source-action');
   select.style.cssText = 'width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit';
   select.addEventListener('change', updateLocalArchiveVisibility);
-	$('115-mapping-add').addEventListener('click', () => add115MappingRow());
+	$('115-source-add').addEventListener('click', () => addSourceRow());
+	$('115-download-add').addEventListener('click', () => addDownloadRow());
+	$('path-mapping-add').addEventListener('click', () => addPathMappingRow());
 	$('115-success-action').addEventListener('change', update115ArchiveCIDVisibility);
 	$('115-sync').addEventListener('click', sync115Now);
 	buildSettingsSections(block, workers);
@@ -304,47 +301,90 @@ async function sync115Now() {
 }
 
 function mappingInput(placeholder, value, field) {
-  return '<input class="115-mapping-input" data-mapping-field="' + field + '" type="text" placeholder="' + placeholder + '" value="' + esc(value || '') + '">';
+  return '<input class="mapping-input" data-field="' + field + '" type="text" placeholder="' + placeholder + '" value="' + esc(value || '') + '">';
 }
 
-function parse115Mapping(value) {
-  const parts = String(value || '').split('=>').map(item => item.trim());
-  if (parts.length >= 3) return {source: parts[0], fallback: parts[1], path: parts.slice(2).join('=>').trim()};
-  if (parts.length === 2) return {source: parts[0], fallback: '', path: parts[1]};
-  return {source: '', fallback: '', path: ''};
-}
-
-function add115MappingRow(value) {
-  const list = $('115-mappings');
-  if (!list) return;
-  const item = typeof value === 'string' ? parse115Mapping(value) : (value || {});
+function removableRow(className, html) {
   const row = document.createElement('div');
-  row.className = 'mapping-row';
-  row.innerHTML = mappingInput('来源 CID', item.source, 'source') +
-    mappingInput('备用 CID', item.fallback, 'fallback') +
-    mappingInput('CD2 路径，例如 /115open/备用目录', item.path, 'path') +
-    '<button class="mapping-remove" type="button" title="删除此文件夹">×</button>';
+  row.className = 'mapping-row ' + className;
+  row.innerHTML = html + '<button class="mapping-remove" type="button" title="删除">×</button>';
   row.querySelector('.mapping-remove').addEventListener('click', () => row.remove());
-  list.appendChild(row);
+  return row;
 }
 
-function fill115MappingRows(values) {
-  const list = $('115-mappings');
+function addSourceRow(value) {
+  const list = $('115-sources');
+  if (list) list.appendChild(removableRow('single', mappingInput('来源文件夹 CID', value, 'cid')));
+}
+
+function fillSourceRows(values) {
+  const list = $('115-sources');
   if (!list) return;
   list.innerHTML = '';
-  (values || []).forEach(value => add115MappingRow(value));
-  if (!list.children.length) add115MappingRow();
+  (values || []).forEach(addSourceRow);
+  if (!list.children.length) addSourceRow('');
 }
 
-function collect115Mappings() {
-  const list = $('115-mappings');
-  if (!list) return [];
-  return Array.from(list.querySelectorAll('.mapping-row')).map(row => {
-    const source = row.querySelector('[data-mapping-field="source"]').value.trim();
-    const fallback = row.querySelector('[data-mapping-field="fallback"]').value.trim();
-    const path = row.querySelector('[data-mapping-field="path"]').value.trim();
-    if (!source || !path) return '';
-    return fallback ? source + ' => ' + fallback + ' => ' + path : source + ' => ' + path;
+function collectSourceCIDs() {
+  return Array.from($('115-sources').querySelectorAll('[data-field="cid"]')).map(input => input.value.trim()).filter(Boolean);
+}
+
+function parseDownloadMapping(value) {
+  const parts = String(value || '').split('=>').map(item => item.trim());
+  return {cid: parts[0] || '', path: parts[1] || '', mode: ['approval', 'manual'].includes((parts[2] || '').toLowerCase()) ? 'approval' : 'auto'};
+}
+
+function addDownloadRow(value) {
+  const list = $('115-downloads');
+  if (!list) return;
+  const item = typeof value === 'string' ? parseDownloadMapping(value) : (value || {});
+  const mode = item.mode === 'approval' ? 'approval' : 'auto';
+  const select = '<select class="mapping-select" data-field="mode"><option value="auto"' + (mode === 'auto' ? ' selected' : '') + '>自动下载</option><option value="approval"' + (mode === 'approval' ? ' selected' : '') + '>等待批准</option></select>';
+  list.appendChild(removableRow('', mappingInput('115 文件夹 CID', item.cid, 'cid') + mappingInput('对应 CD2 路径', item.path, 'path') + select));
+}
+
+function fillDownloadRows(values) {
+  const list = $('115-downloads');
+  if (!list) return;
+  list.innerHTML = '';
+  (values || []).forEach(addDownloadRow);
+  if (!list.children.length) addDownloadRow({});
+}
+
+function collectDownloadMappings() {
+  return Array.from($('115-downloads').querySelectorAll('.mapping-row')).map(row => {
+    const cid = row.querySelector('[data-field="cid"]').value.trim();
+    const path = row.querySelector('[data-field="path"]').value.trim();
+    const mode = row.querySelector('[data-field="mode"]').value;
+    return cid && path ? cid + ' => ' + path + ' => ' + mode : '';
+  }).filter(Boolean);
+}
+
+function parsePathMapping(value) {
+  const parts = String(value || '').split('=>').map(item => item.trim());
+  return {cloud: parts[0] || '', local: parts.slice(1).join('=>').trim()};
+}
+
+function addPathMappingRow(value) {
+  const list = $('path-mappings');
+  if (!list) return;
+  const item = typeof value === 'string' ? parsePathMapping(value) : (value || {});
+  list.appendChild(removableRow('pair', mappingInput('CD2 云端根路径', item.cloud, 'cloud') + mappingInput('容器挂载路径', item.local, 'local')));
+}
+
+function fillPathMappingRows(values) {
+  const list = $('path-mappings');
+  if (!list) return;
+  list.innerHTML = '';
+  (values || []).forEach(addPathMappingRow);
+  if (!list.children.length) addPathMappingRow({});
+}
+
+function collectPathMappings() {
+  return Array.from($('path-mappings').querySelectorAll('.mapping-row')).map(row => {
+    const cloud = row.querySelector('[data-field="cloud"]').value.trim();
+    const local = row.querySelector('[data-field="local"]').value.trim();
+    return cloud && local ? cloud + '=>' + local : '';
   }).filter(Boolean);
 }
 
@@ -381,10 +421,14 @@ function fillForms(data) {
   $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
   $('115-success-action').value = (data.settings && data.settings['115_success_action']) || 'keep';
   $('115-archive-cid').value = (data.settings && data.settings['115_archive_cid']) || '';
+	$('115-failure-cid').value = (data.settings && data.settings['115_failure_cid']) || '';
+	$('115-failure-path').value = (data.settings && data.settings['115_failure_cd2_path']) || '';
   $('115-auto-fallback').checked = !!(data.settings && data.settings['115_auto_fallback']);
 	$('115-retry-count').value = (data.settings && data.settings['115_retry_count']) || 3;
 	$('115-retry-delay').value = (data.settings && data.settings['115_retry_delay']) || '2m';
-  fill115MappingRows((data.settings && data.settings['115_mappings']) || []);
+	fillSourceRows((data.settings && data.settings['115_source_cids']) || []);
+	fillDownloadRows((data.settings && data.settings['115_download_mappings']) || []);
+	fillPathMappingRows((data.settings && data.settings.path_overrides) || []);
   const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
   $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
   updateLocalArchiveVisibility();
@@ -392,10 +436,10 @@ function fillForms(data) {
   $('cd2-url').value = data.clouddrive2.url || '';
   $('cd2-token').value = (data.settings && data.settings.cd2_token) || '';
   $('cd2-token').placeholder = data.settings && data.settings.cd2_token ? '已保存，输入新 Token 可替换' : '请输入 CD2 Token';
-	$('watch-path').value = ((data.settings && data.settings.manual_watch_paths) || [(data.settings && data.settings.watch_path) || '/']).join(', ');
+	$('watch-path').value = '';
   $('refresh-interval').value = (data.settings && data.settings.refresh_interval) || '10m';
   $('refresh-path').value = (data.settings && data.settings.refresh_path) || '/';
-  $('path-overrides').value = ((data.settings && data.settings.path_overrides) || []).join(',');
+	$('path-overrides').value = '';
   $('cache-dir').value = (data.settings && data.settings.cache_dir) || '/cache';
   $('cache-extract-path').value = (data.settings && data.settings.cache_extract_path) || '/output';
   $('keep-cache').checked = !!(data.settings && data.settings.keep_cache);
@@ -419,7 +463,7 @@ function renderTask(task) {
     (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
-    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.key) + '" type="button" style="margin-left:8px">转本地解压</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.key) + '" type="button" style="margin-left:8px">批准下载</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
 }
 
 function renderStatus(data) {
@@ -530,7 +574,7 @@ $('tasks').addEventListener('click', async event => {
 	if (fallbackKey) {
 		event.target.disabled = true;
 		const response = await fetch('api/115/fallback', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: fallbackKey})});
-		if (response.ok) load(false); else { $('refresh-message').textContent = await response.text() || '转本地解压失败'; event.target.disabled = false; }
+		if (response.ok) load(false); else { $('refresh-message').textContent = await response.text() || '批准本地下载失败'; event.target.disabled = false; }
 		return;
 	}
 	const key = event.target.dataset.cancelTask;
@@ -569,15 +613,18 @@ $('settings-save').addEventListener('click', async () => {
       '115_event_interval': $('115-event-interval').value.trim(),
       '115_success_action': $('115-success-action').value,
       '115_archive_cid': $('115-archive-cid').value.trim(),
+		'115_failure_cid': $('115-failure-cid').value.trim(),
+		'115_failure_cd2_path': $('115-failure-path').value.trim(),
       '115_auto_fallback': $('115-auto-fallback').checked,
 		'115_retry_count': Number($('115-retry-count').value) || 3,
 		'115_retry_delay': $('115-retry-delay').value.trim(),
-      '115_mappings': collect115Mappings(),
+		'115_source_cids': collectSourceCIDs(),
+		'115_download_mappings': collectDownloadMappings(),
+		'115_mappings': [],
       cd2_enabled: $('cd2-enabled').checked,
       cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),
-		manual_watch_paths: $('watch-path').value.split(',').map(item => item.trim()).filter(Boolean),
-		watch_path: $('watch-path').value.split(',').map(item => item.trim()).filter(Boolean)[0] || '/', refresh_interval: $('refresh-interval').value.trim(),
-      refresh_path: $('refresh-path').value.trim(), path_overrides: $('path-overrides').value.split(',').map(item => item.trim()).filter(Boolean),
+		manual_watch_paths: [], watch_path: '', refresh_interval: $('refresh-interval').value.trim(),
+		refresh_path: '', path_overrides: collectPathMappings(),
       cache_dir: $('cache-dir').value.trim(), cache_extract_path: $('cache-extract-path').value.trim(),
       keep_cache: $('keep-cache').checked, cache_delete_delay: $('cache-delete-delay').value.trim(), copy_timeout: $('copy-timeout').value.trim(),
     };

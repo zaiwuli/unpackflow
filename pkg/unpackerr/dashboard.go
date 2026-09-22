@@ -217,18 +217,24 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 		}
 		return true
 	})
-	// Manual 115 fallback tasks survive a restart in the state file. Rebuild a
-	// Rebuild a lightweight task row so the user does not lose the manual local-extraction action.
-	if u.state != nil && !u.CloudDrive2.N115AutoFallback {
+	// Approval tasks survive a restart. Rebuild a lightweight task row so the
+	// user never loses the explicit local-download action.
+	if u.state != nil {
 		u.state.mu.RLock()
 		for _, item := range u.state.Fallback115 {
-			if item.TaskKey == "" {
+			if item.TaskKey == "" || !item.Approval {
 				continue
 			}
 			if _, exists := seen[item.TaskKey]; exists {
 				continue
 			}
-			items = append(items, CD2Transfer{Key: item.TaskKey, Path: item.FileName, Source: "115 云端", State: "云解压失败，等待手动本地解压", StartedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, CanFallback: true})
+			state := "等待批准本地下载"
+			source := "115 日常下载"
+			if item.Kind == "cloud_failure" {
+				state = "云解压失败，等待批准本地下载"
+				source = "115 云解压"
+			}
+			items = append(items, CD2Transfer{Key: item.TaskKey, Path: item.FileName, Source: source, State: state, StartedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, CanFallback: true})
 			seen[item.TaskKey] = struct{}{}
 		}
 		u.state.mu.RUnlock()
@@ -483,7 +489,7 @@ func (u *Unpackerr) cd2RefreshAPI(w http.ResponseWriter, r *http.Request, _ http
 	// folders, then ask CloudDrive2 to refresh the mounted fallback path. This
 	// makes the button useful even when CD2 has not yet surfaced a new file.
 	messages := make([]string, 0, 2)
-	if u.CloudDrive2.N115Enabled && strings.TrimSpace(u.CloudDrive2.N115Cookie) != "" && len(parse115Mappings(u.CloudDrive2.N115Mappings)) > 0 {
+	if u.CloudDrive2.N115Enabled && strings.TrimSpace(u.CloudDrive2.N115Cookie) != "" && (len(n115SourceCIDs(u.CloudDrive2)) > 0 || len(parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings)) > 0) {
 		u.poll115RecentOperations()
 		messages = append(messages, "已同步 115 生活记录")
 	} else {
@@ -494,17 +500,15 @@ func (u *Unpackerr) cd2RefreshAPI(w http.ResponseWriter, r *http.Request, _ http
 	u.cd2Mu.RUnlock()
 	found := 0
 	if u.CloudDrive2.Enabled && client != nil {
-		refreshPath := u.CloudDrive2.RefreshPath
-		if strings.TrimSpace(refreshPath) == "" {
-			refreshPath = "/"
+		refreshErrors := 0
+		for _, refreshPath := range cloudDriveConfiguredRefreshPaths(u.CloudDrive2) {
+			if err := client.ForceRefresh(r.Context(), refreshPath); err != nil {
+				refreshErrors++
+				u.Errorf("CloudDrive2 手动刷新失败：%s：%v", refreshPath, err)
+			}
 		}
-		if err := client.ForceRefresh(r.Context(), refreshPath); err != nil {
-			u.Errorf("CloudDrive2 手动刷新失败：%v", err)
-			messages = append(messages, "CD2 刷新失败："+err.Error())
-		} else {
-			found = u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), u.CloudDrive2.PathOverrides)
-			messages = append(messages, fmt.Sprintf("已刷新 CD2 指定路径，发现 %d 个压缩文件", found))
-		}
+		found = u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), u.CloudDrive2.PathOverrides)
+		messages = append(messages, fmt.Sprintf("已刷新 CD2 配置目录，发现 %d 个压缩文件，失败 %d 个目录", found, refreshErrors))
 	} else {
 		messages = append(messages, "CD2 未连接，已跳过")
 	}
@@ -517,8 +521,8 @@ func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, _ *http.Request, _ httpro
 		http.Error(w, "请先启用 115 云解压并填写 Cookie", http.StatusBadRequest)
 		return
 	}
-	if len(parse115Mappings(u.CloudDrive2.N115Mappings)) == 0 {
-		http.Error(w, "请至少配置一个 115 文件夹映射", http.StatusBadRequest)
+	if len(n115SourceCIDs(u.CloudDrive2)) == 0 && len(parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings)) == 0 {
+		http.Error(w, "请至少配置一个云解压来源或本地下载文件夹", http.StatusBadRequest)
 		return
 	}
 	u.poll115RecentOperations()
@@ -550,7 +554,8 @@ func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ ht
 		http.Error(w, "未找到可本地解压的云端任务", http.StatusNotFound)
 		return
 	}
-	u.update115Transfer(input.Key, pending.FileName, "正在转本地解压", func(task *CD2Transfer) { task.CanFallback = false })
+	u.update115Transfer(input.Key, pending.FileName, "正在批准本地下载", func(task *CD2Transfer) { task.CanFallback = false })
+	u.approvePending115Task(input.Key)
 	u.refresh115Fallback(N115Mapping{FallbackCID: pending.FallbackCID, CD2Path: pending.CD2Path}, n115File{FID: pending.FID, Name: pending.FileName})
 	u.writeJSON(w, map[string]any{"success": true, "message": "已刷新 CD2 指定路径，等待缓存"})
 }
@@ -599,6 +604,10 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 			http.Error(w, "115 云解压重试间隔格式无效，例如：2m", http.StatusBadRequest)
 			return
 		}
+	}
+	if err := validate115CloudSettings(overrides); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 	// When 115 monitoring is disabled, an old 0s interval must not prevent the
 	// user from saving unrelated CloudDrive2 paths and cache settings.

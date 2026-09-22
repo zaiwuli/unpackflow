@@ -107,6 +107,10 @@ type CloudDriveConfig struct {
 	N115EventEnabled     bool          `json:"115_event_enabled" toml:"115_event_enabled" xml:"115_event_enabled" yaml:"115_event_enabled"`
 	N115EventInterval    cnfg.Duration `json:"115_event_interval" toml:"115_event_interval" xml:"115_event_interval" yaml:"115_event_interval"`
 	N115Mappings         []string      `json:"115_mappings" toml:"115_mappings" xml:"115_mapping" yaml:"115_mappings"`
+	N115SourceCIDs       []string      `json:"115_source_cids" toml:"115_source_cids" xml:"115_source_cid" yaml:"115_source_cids"`
+	N115FailureCID       string        `json:"115_failure_cid" toml:"115_failure_cid" xml:"115_failure_cid" yaml:"115_failure_cid"`
+	N115FailureCD2Path   string        `json:"115_failure_cd2_path" toml:"115_failure_cd2_path" xml:"115_failure_cd2_path" yaml:"115_failure_cd2_path"`
+	N115DownloadMappings []string      `json:"115_download_mappings" toml:"115_download_mappings" xml:"115_download_mapping" yaml:"115_download_mappings"`
 	N115SuccessAction    string        `json:"115_success_action" toml:"115_success_action" xml:"115_success_action" yaml:"115_success_action"`
 	N115ArchiveCID       string        `json:"115_archive_cid" toml:"115_archive_cid" xml:"115_archive_cid" yaml:"115_archive_cid"`
 	N115AutoFallback     bool          `json:"115_auto_fallback" toml:"115_auto_fallback" xml:"115_auto_fallback" yaml:"115_auto_fallback"`

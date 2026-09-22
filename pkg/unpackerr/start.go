@@ -150,7 +150,7 @@ func New() *Unpackerr {
 				RefreshInterval:      cnfg.Duration{Duration: 10 * time.Minute},
 				RefreshPath:          "/",
 				WatchPath:            "/",
-				ManualWatchPaths:     []string{"/"},
+				ManualWatchPaths:     nil,
 				ReconnectMin:         cnfg.Duration{Duration: 5 * time.Second},
 				ReconnectMax:         cnfg.Duration{Duration: 2 * time.Minute},
 				CacheDir:             "",
