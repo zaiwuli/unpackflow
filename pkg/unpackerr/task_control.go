@@ -29,6 +29,9 @@ func (u *Unpackerr) handleTaskControlAction(action taskControlAction) taskContro
 		if err := u.setTaskSystemPaused(false); err != nil {
 			return taskControlResult{Error: err}
 		}
+		// Stop-and-clear cancellation is scoped to the paused generation. A
+		// subsequent scan must be allowed to submit the same source again.
+		u.cancelled.Range(func(key, _ any) bool { u.cancelled.Delete(key); return true })
 		go u.resumeTaskDiscovery()
 		return taskControlResult{}
 	case "clear_cache":
@@ -104,8 +107,10 @@ func (u *Unpackerr) clearWaitingTasks() int {
 }
 
 func (u *Unpackerr) resumeTaskDiscovery() {
+	u.Printf("任务系统恢复：开始重新扫描本地、115 和 CD2 配置目录")
 	u.scanExistingFolderArchives()
 	u.poll115RecentOperations()
+	u.scan115FailureFolder()
 	u.cd2Mu.RLock()
 	client := u.cd2Client
 	u.cd2Mu.RUnlock()
@@ -118,7 +123,7 @@ func (u *Unpackerr) resumeTaskDiscovery() {
 		u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), u.CloudDrive2.PathOverrides)
 	}
 	u.resumeCD2Pending()
-	u.Printf("任务系统已恢复，并完成一次补偿同步")
+	u.Printf("任务系统恢复扫描已完成")
 }
 
 func (u *Unpackerr) clearAllCache() (int, error) {

@@ -593,10 +593,18 @@ func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ ht
 		}
 		u.state.mu.RUnlock()
 	}
-	if !found || pending.CD2Path == "" {
+	if !found {
 		http.Error(w, "未找到可本地解压的云端任务", http.StatusNotFound)
 		return
 	}
+	// Persisted tasks may predate a folder mapping change. Never refresh the
+	// historical path; resolve the configured route by CID at approval time.
+	currentPath, configured := u.current115PendingPath(pending)
+	if !configured || currentPath == "" {
+		http.Error(w, "任务目录已从当前配置移除，请重新同步", http.StatusConflict)
+		return
+	}
+	pending.CD2Path = currentPath
 	u.update115Transfer(input.Key, pending.FileName, "正在批准本地下载", func(task *CD2Transfer) { task.CanFallback = false })
 	u.approvePending115Task(input.Key)
 	u.refresh115Fallback(N115Mapping{FallbackCID: pending.FallbackCID, CD2Path: pending.CD2Path}, n115File{FID: pending.FID, Name: pending.FileName})

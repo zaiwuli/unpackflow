@@ -106,13 +106,25 @@ func (l *Logger) addDashboardLog(level, message string) {
 }
 
 func (l *Logger) addDashboardLogWithKind(level, message, kind string) {
+	// Repeated CD2/115 observations may reach the UI through overlapping event,
+	// refresh and retry paths. Collapse identical adjacent entries in the UI;
+	// distinct states and errors remain visible.
+	l.mu.Lock()
+	if count := len(l.items); count > 0 {
+		last := l.items[count-1]
+		if last.Level == level && last.Message == message && last.Kind == kind {
+			if at, err := time.ParseInLocation("2006-01-02 15:04:05", last.Time, time.Local); err == nil && time.Since(at) < 30*time.Second {
+				l.mu.Unlock()
+				return
+			}
+		}
+	}
 	entry := DashboardLog{
 		Time:    time.Now().Format("2006-01-02 15:04:05"),
 		Level:   level,
 		Message: message,
 		Kind:    kind,
 	}
-	l.mu.Lock()
 	l.items = append(l.items, entry)
 	if len(l.items) > dashboardLogLimit {
 		l.items = append([]DashboardLog(nil), l.items[len(l.items)-dashboardLogLimit:]...)

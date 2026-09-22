@@ -334,6 +334,66 @@ func (u *Unpackerr) poll115RecentOperations() {
 	}
 }
 
+// scan115FailureFolder rebuilds tasks after stop-and-clear or a restart. The
+// failed archive has already left its cloud extraction source folder, so a
+// source-only scan cannot discover it again.
+func (u *Unpackerr) scan115FailureFolder() {
+	if u.taskSystemPaused.Load() || !u.CloudDrive2.N115Enabled || strings.TrimSpace(u.CloudDrive2.N115Cookie) == "" {
+		return
+	}
+	cid := strings.TrimSpace(u.CloudDrive2.N115FailureCID)
+	cd2Path := normalizeCloudDrivePath(u.CloudDrive2.N115FailureCD2Path)
+	if cid == "" || cd2Path == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	files, err := u.n115ListFiles(ctx, cid)
+	if err != nil {
+		u.Errorf("重新扫描 115 失败目录失败（CID %s）：%v", cid, err)
+		return
+	}
+	count := 0
+	for _, file := range files {
+		if file.FID == "" || !isCloudDriveArchiveEvent(file.Name) {
+			continue
+		}
+		key := n115DownloadFileKey(cid, file)
+		version := ProcessedSource{Key: key, Source: "115 本地下载", Path: file.Name, Size: file.Size, ModifiedNS: file.MTime}
+		if u.wasProcessed(version) || u.hasPending115File(cid, file.FID) {
+			continue
+		}
+		mapping := N115Mapping{FallbackCID: cid, CD2Path: cd2Path, RouteID: "cloud-failure", RouteLabel: u.n115CIDRemark(cid, "云解压失败"), Kind: "cloud_failure"}
+		approval := !u.CloudDrive2.N115AutoFallback
+		u.save115DownloadTask(key, "cloud_failure", approval, mapping, file)
+		if approval {
+			u.update115Transfer(key, file.Name, "云解压失败，等待批准本地下载", func(task *CD2Transfer) {
+				task.Source = "云解压失败转本地｜" + mapping.RouteLabel
+				task.CanFallback = true
+			})
+		} else {
+			u.update115Transfer(key, file.Name, "等待下载到本地解压", func(task *CD2Transfer) { task.Source = "云解压失败转本地｜" + mapping.RouteLabel })
+			u.refresh115Fallback(mapping, file)
+		}
+		count++
+	}
+	u.Systemf("115 失败目录重新扫描：发现 %d 个待处理压缩包", count)
+}
+
+func (u *Unpackerr) hasPending115File(cid, fid string) bool {
+	if u.state == nil {
+		return false
+	}
+	u.state.mu.RLock()
+	defer u.state.mu.RUnlock()
+	for _, item := range u.state.Fallback115 {
+		if item.FallbackCID == cid && item.FID == fid {
+			return true
+		}
+	}
+	return false
+}
+
 func n115FileKey(sourceCID string, file n115File) string {
 	return fmt.Sprintf("115|%s|%s|%d", sourceCID, file.FID, file.Size)
 }

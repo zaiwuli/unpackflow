@@ -24,3 +24,13 @@ func TestDashboardLogsNewestFirstAndLimited(t *testing.T) {
 		t.Fatalf("expected oldest retained log last, got %q", logs[len(logs)-1].Message)
 	}
 }
+
+func TestDashboardCollapsesAdjacentDuplicateButKeepsChangedStatus(t *testing.T) {
+	logger := &Logger{}
+	logger.addDashboardLog("信息", "CD2 文件变化触发任务：a.7z")
+	logger.addDashboardLog("信息", "CD2 文件变化触发任务：a.7z")
+	logger.addDashboardLog("错误", "CD2 复制失败：a.7z")
+	if got := logger.dashboardLogs(); len(got) != 2 {
+		t.Fatalf("expected duplicate observation to be collapsed, got %#v", got)
+	}
+}

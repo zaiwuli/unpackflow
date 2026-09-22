@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/Unpackerr/unpackerr/pkg/clouddrive"
 	"golift.io/cnfg"
 )
 
@@ -954,8 +956,14 @@ func (u *Unpackerr) refreshPending115ConfiguredPaths() {
 			continue
 		}
 		if pending.CD2Path != pathValue {
+			delete(u.state.Fallback115, key)
 			pending.CD2Path = pathValue
-			u.state.Fallback115[key] = pending
+			remoteFile := path.Join(pathValue, pending.FileName)
+			mapped := clouddrive.MapCloudPathWithOverrides(remoteFile, nil, u.CloudDrive2.PathOverrides)
+			for _, newKey := range n115FallbackKeys(mapped, remoteFile) {
+				pending.Key = newKey
+				u.state.Fallback115[newKey] = pending
+			}
 			changed = true
 		}
 	}
@@ -1078,6 +1086,26 @@ func (u *Unpackerr) notifyEvent(stage notificationStage, icon, title, source, ta
 		u.Debugf("通知未发送：已关闭“%s”阶段通知（%s）", notificationStageName(stage), title)
 		return
 	}
+	// Multiple discovery channels can reach the same stage concurrently. Keep
+	// retry semantics inside one delivery, but avoid starting another delivery
+	// for the same file and outcome in a short event burst.
+	key := string(stage) + "|" + icon + "|" + title + "|" + source + "|" + task
+	now := time.Now()
+	u.noticeMu.Lock()
+	if last, exists := u.noticeRecent[key]; exists && now.Sub(last) < 30*time.Second {
+		u.noticeMu.Unlock()
+		return
+	}
+	if u.noticeRecent == nil {
+		u.noticeRecent = make(map[string]time.Time)
+	}
+	for previous, at := range u.noticeRecent {
+		if now.Sub(at) >= 30*time.Second {
+			delete(u.noticeRecent, previous)
+		}
+	}
+	u.noticeRecent[key] = now
+	u.noticeMu.Unlock()
 	u.sendNotification(s, icon, title, source, task)
 }
 

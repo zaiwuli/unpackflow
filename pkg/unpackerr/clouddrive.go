@@ -119,6 +119,9 @@ func (u *Unpackerr) resume115LocalDownloads() {
 
 func (u *Unpackerr) current115PendingPath(item Pending115) (string, bool) {
 	if item.Kind == "cloud_failure" {
+		if strings.TrimSpace(item.FallbackCID) != strings.TrimSpace(u.CloudDrive2.N115FailureCID) {
+			return "", false
+		}
 		value := normalizeCloudDrivePath(u.CloudDrive2.N115FailureCD2Path)
 		return value, value != ""
 	}

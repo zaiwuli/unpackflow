@@ -71,19 +71,21 @@ type Unpackerr struct {
 	menu             map[string]ui.MenuItem
 	uiStore          *UIStore
 	state            *ProcessingState
-	cd2Cache         sync.Map      // cache archive path -> []mounted CloudDrive source files
-	cd2Copy          sync.Map      // source group key -> struct{} while a cache copy is in progress
-	cd2Resume        sync.Map      // cached primary path -> struct{} after resume submission
-	cd2Tasks         sync.Map      // group key -> *CD2Transfer while copying or verifying
-	cd2Cancel        sync.Map      // group key -> context.CancelFunc for active copies
-	cd2Notice        sync.Map      // cached primary path -> discovery notification already sent
-	downloadsPaused  atomic.Bool   // blocks CD2 cache submissions until explicitly resumed
-	taskSystemPaused atomic.Bool   // blocks every discovery source until explicitly resumed
-	n115Running      sync.Map      // 115 source identity -> struct{} while cloud extraction is active
-	n115Queue        chan struct{} // one 115 cloud extraction at a time
-	n115SyncMu       sync.Mutex    // prevents timer and manual 115 syncs from overlapping
-	cancelled        sync.Map      // task path/key -> struct{} for user-cancelled work
-	nameMappers      sync.Map      // task path/key -> *archiveNameMapper
+	cd2Cache         sync.Map // cache archive path -> []mounted CloudDrive source files
+	cd2Copy          sync.Map // source group key -> struct{} while a cache copy is in progress
+	cd2Resume        sync.Map // cached primary path -> struct{} after resume submission
+	cd2Tasks         sync.Map // group key -> *CD2Transfer while copying or verifying
+	cd2Cancel        sync.Map // group key -> context.CancelFunc for active copies
+	cd2Notice        sync.Map // cached primary path -> discovery notification already sent
+	noticeMu         sync.Mutex
+	noticeRecent     map[string]time.Time // event identity -> last notification time
+	downloadsPaused  atomic.Bool          // blocks CD2 cache submissions until explicitly resumed
+	taskSystemPaused atomic.Bool          // blocks every discovery source until explicitly resumed
+	n115Running      sync.Map             // 115 source identity -> struct{} while cloud extraction is active
+	n115Queue        chan struct{}        // one 115 cloud extraction at a time
+	n115SyncMu       sync.Mutex           // prevents timer and manual 115 syncs from overlapping
+	cancelled        sync.Map             // task path/key -> struct{} for user-cancelled work
+	nameMappers      sync.Map             // task path/key -> *archiveNameMapper
 	cd2Mu            sync.RWMutex
 	cd2Client        *clouddrive.Client
 }

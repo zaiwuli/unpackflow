@@ -330,8 +330,22 @@ func TestSettingsAPIReplacesOld115DownloadPathImmediately(t *testing.T) {
 	if len(mappings) != 1 || mappings[0].CD2Path != "/115open/绿联备份/下载" {
 		t.Fatalf("running configuration still uses old path: %#v", mappings)
 	}
-	if got := u.state.Fallback115["old"].CD2Path; got != "/115open/绿联备份/下载" {
-		t.Fatalf("pending task still uses old path: %q", got)
+	for _, pending := range u.state.Fallback115 {
+		if pending.CD2Path != "/115open/绿联备份/下载" || strings.Contains(pending.Key, "/上传下载/下载") {
+			t.Fatalf("pending task still uses old path: %#v", pending)
+		}
+	}
+}
+
+func TestHistoricalFailureApprovalUsesCurrentFailureFolder(t *testing.T) {
+	u := New()
+	u.CloudDrive2.N115FailureCID = "900"
+	u.CloudDrive2.N115FailureCD2Path = "/115open/NSFW/压缩包/失败"
+	u.CloudDrive2.N115DownloadMappings = []string{"300 => /115open/绿联备份/下载 => auto"}
+	old := Pending115{Kind: "cloud_failure", FallbackCID: "900", SourceCID: "900", CD2Path: "/115open/上传下载/下载"}
+	got, ok := u.current115PendingPath(old)
+	if !ok || got != "/115open/NSFW/压缩包/失败" {
+		t.Fatalf("historical failure resolved to %q, configured=%v", got, ok)
 	}
 }
 
