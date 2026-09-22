@@ -20,3 +20,27 @@
 .task-side button[data-cancel-task]{border-color:#f2b8b5;background:#fff7f6;color:#b42318}
 button:disabled{cursor:not-allowed;opacity:.52}
 @media(max-width:700px){.task-heading>.form-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.task-heading>.form-actions #task-system-control{grid-column:1/-1}.task-heading>.form-actions button{width:100%}#task-filters{width:100%;overflow-x:auto}.task-filter{flex:1;white-space:nowrap}.task-side{display:flex;align-items:center;flex-wrap:wrap;gap:7px}.task-side button{margin-left:0!important}}
+
+/* Long archive names and mounted paths must not widen a phone viewport. */
+.task-content{min-width:0;flex:1}
+.task-name{max-width:100%;overflow-wrap:anywhere}
+.task-meta{min-width:0;flex-wrap:wrap;overflow-wrap:anywhere}
+.task-side{display:flex;align-items:center;justify-content:flex-end;gap:7px}
+.task-side button{margin-left:0!important;white-space:nowrap}
+.history-content strong,.history-content small{max-width:100%;overflow-wrap:anywhere}
+@media(max-width:700px){
+  .shell{width:100%;min-width:0;overflow-x:hidden}
+  .panel,.task-subview,.task-list,.task-content,.history-content{min-width:0;max-width:100%}
+  .task{width:100%;gap:10px}
+  .task-content{width:100%;flex:none}
+  .task-name{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;line-height:1.45;max-height:2.9em;overflow:hidden}
+  .task-meta{display:block;white-space:normal;line-height:1.45;word-break:break-word}
+  .task-side{width:100%;justify-content:flex-start;text-align:left}
+  .badge{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+  .progress{max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+  .history-item{grid-template-columns:minmax(0,1fr) auto;gap:8px}
+  .history-content strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;line-height:1.45;max-height:2.9em;overflow:hidden}
+  .history-content small{white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+  .history-actions{align-self:start;flex-wrap:wrap;justify-content:flex-end;max-width:108px;padding-left:0}
+  .task-heading>.form-actions{min-width:0}
+}

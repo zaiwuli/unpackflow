@@ -517,7 +517,7 @@ function renderTask(task) {
     if (task.eta_seconds) detail += ' · 预计 ' + formatDuration(task.eta_seconds);
   }
   const canCancel = ['已取消', '已完成', '已解压', '已导入', '解压失败', '清理失败'].indexOf(task.status) < 0;
-  return '<article class="task"><div style="min-width:0;flex:1"><div class="task-name">' + esc(task.name) + '</div>' +
+  return '<article class="task"><div class="task-content"><div class="task-name" title="' + esc(task.name) + '">' + esc(task.name) + '</div>' +
     '<div class="task-meta">' + esc(task.source) + ' · ' + esc(task.updated) + '</div>' +
     (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
