@@ -99,8 +99,32 @@ func (u *Unpackerr) resume115LocalDownloads() {
 	}
 	u.state.mu.RUnlock()
 	for _, item := range items {
-		u.refresh115Fallback(N115Mapping{FallbackCID: item.FallbackCID, CD2Path: item.CD2Path}, n115File{FID: item.FID, Name: item.FileName, Size: item.Size, MTime: item.MTime})
+		if item.FID == "" || item.FileName == "" || !isCloudDriveArchiveEvent(item.FileName) {
+			u.Systemf("清理无效的 115 待处理下载记录：%s", item.TaskKey)
+			u.removePending115Task(item.TaskKey)
+			continue
+		}
+		currentPath, ok := u.current115PendingPath(item)
+		if !ok {
+			u.Systemf("115 待处理任务已不属于当前配置，停止恢复：%s", item.FileName)
+			u.removePending115Task(item.TaskKey)
+			continue
+		}
+		u.refresh115Fallback(N115Mapping{FallbackCID: item.FallbackCID, CD2Path: currentPath}, n115File{FID: item.FID, Name: item.FileName, Size: item.Size, MTime: item.MTime})
 	}
+}
+
+func (u *Unpackerr) current115PendingPath(item Pending115) (string, bool) {
+	if item.Kind == "cloud_failure" {
+		value := normalizeCloudDrivePath(u.CloudDrive2.N115FailureCD2Path)
+		return value, value != ""
+	}
+	for _, mapping := range parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings) {
+		if mapping.CID == item.SourceCID || mapping.CID == item.FallbackCID {
+			return mapping.CD2Path, true
+		}
+	}
+	return "", false
 }
 
 func (u *Unpackerr) handleCloudDriveChange(client *clouddrive.Client, change clouddrive.Change, paths []string) {

@@ -363,6 +363,22 @@ func (u *Unpackerr) removePending115Fallback(key string) {
 	}
 }
 
+func (u *Unpackerr) removePending115Task(taskKey string) {
+	if u.state == nil || taskKey == "" {
+		return
+	}
+	u.state.mu.Lock()
+	for key, item := range u.state.Fallback115 {
+		if item.TaskKey == taskKey || item.Key == taskKey {
+			delete(u.state.Fallback115, key)
+		}
+	}
+	u.state.mu.Unlock()
+	if err := u.saveProcessingState(); err != nil {
+		u.Errorf("清理无效的 115 本地下载任务失败: %v", err)
+	}
+}
+
 func (u *Unpackerr) removePending115FallbackForFile(sourceCID, fid string) {
 	if u.state == nil || sourceCID == "" || fid == "" {
 		return

@@ -853,6 +853,15 @@ func (u *Unpackerr) n115DeleteFile(sourceCID, fid string) error {
 }
 
 func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, file n115File) {
+	if file.FID == "" || file.Name == "" || !isCloudDriveArchiveEvent(file.Name) {
+		u.Errorf("115 本地下载任务无效，已跳过：文件名=%q，文件ID=%q", file.Name, file.FID)
+		return
+	}
+	mapping.CD2Path = normalizeCloudDrivePath(mapping.CD2Path)
+	if mapping.CD2Path == "" {
+		u.Errorf("115 本地下载任务缺少当前 CD2 路径，已跳过：%s", file.Name)
+		return
+	}
 	remoteFile := path.Join(mapping.CD2Path, file.Name)
 	paths := clouddrive.MapCloudPathWithOverrides(remoteFile, nil, u.CloudDrive2.PathOverrides)
 	u.cd2Mu.RLock()

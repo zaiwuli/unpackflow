@@ -213,3 +213,16 @@ func TestPending115FallbackSurvivesStateRoundTrip(t *testing.T) {
 		t.Fatalf("fallback state was not restored: %#v, %v", item, ok)
 	}
 }
+
+func TestCurrent115PendingPathUsesLatestMapping(t *testing.T) {
+	u := New()
+	u.CloudDrive2.N115DownloadMappings = []string{"300 => /115open/绿联备份/下载 => auto"}
+	item := Pending115{Kind: "manual_download", SourceCID: "300", FallbackCID: "300", CD2Path: "/115open/上传下载/下载"}
+	if got, ok := u.current115PendingPath(item); !ok || got != "/115open/绿联备份/下载" {
+		t.Fatalf("pending path = %q, %v", got, ok)
+	}
+	item.SourceCID, item.FallbackCID = "old", "old"
+	if _, ok := u.current115PendingPath(item); ok {
+		t.Fatal("stale pending task unexpectedly matched current settings")
+	}
+}
