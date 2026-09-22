@@ -621,7 +621,8 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 		}
 	}
 	if err := u.saveUIOverrides(overrides); err != nil {
-		http.Error(w, "\u4fdd\u5b58\u8bbe\u7f6e\u5931\u8d25", http.StatusInternalServerError)
+		u.Errorf("保存设置失败：%v", err)
+		http.Error(w, "保存设置失败："+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	u.writeJSON(w, map[string]any{"success": true, "restart_required": true})

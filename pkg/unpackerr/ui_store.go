@@ -290,11 +290,34 @@ func (u *Unpackerr) saveUIStore() error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err = os.WriteFile(tmp, append(data, '\n'), 0600); err != nil {
-		return err
+	// Passwords, notifications and settings may persist concurrently. A fixed
+	// temporary filename can be renamed or removed by the other writer before
+	// this writer finishes, causing intermittent save failures on a NAS volume.
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".unpackflow-ui-*.tmp")
+	if err != nil {
+		return fmt.Errorf("创建临时设置文件: %w", err)
 	}
-	return os.Rename(tmp, path)
+	tmp := tmpFile.Name()
+	defer os.Remove(tmp)
+	if err := tmpFile.Chmod(0o600); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("设置临时文件权限: %w", err)
+	}
+	if _, err := tmpFile.Write(append(data, '\n')); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("写入设置文件: %w", err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("同步设置文件: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("关闭设置文件: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("替换设置文件: %w", err)
+	}
+	return nil
 }
 func (u *Unpackerr) uiPasswords() []string {
 	if u.uiStore == nil {

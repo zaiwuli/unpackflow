@@ -280,7 +280,7 @@ func TestSettingsAPIReturnsAndPersists(t *testing.T) {
 	if err := u.loadUIStore(); err != nil {
 		t.Fatal(err)
 	}
-	body := bytes.NewBufferString(`{"workers":2,"local_source_action":"keep","folder_interval":"60s","cd2_fallback_interval":"30m","115_event_interval":"5m","115_success_action":"keep","copy_timeout":"24h"}`)
+	body := bytes.NewBufferString(`{"workers":2,"local_source_action":"keep","folder_interval":"60s","cd2_enabled":true,"cd2_url":"http://192.168.31.2:19798","cd2_token":"test-token","watch_path":"/115open/上传下载","refresh_interval":"10m","refresh_path":"/115open/上传下载","path_overrides":["/115open=>/volume1/CloudNAS/CloudDrive/115open"],"cache_dir":"/data/缓存目录","cache_extract_path":"/data/解压目录","keep_cache":false,"cache_delete_delay":"1m","copy_timeout":"24h","cd2_fallback_interval":"30m","115_event_interval":"5m","115_success_action":"keep"}`)
 	recorder := httptest.NewRecorder()
 	u.settingsAPI(recorder, httptest.NewRequest(http.MethodPost, "/api/settings", body), httprouter.Params{})
 	if recorder.Code != http.StatusOK {
@@ -291,6 +291,9 @@ func TestSettingsAPIReturnsAndPersists(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "unpackflow-ui.json")); err != nil {
 		t.Fatalf("settings were not persisted: %v", err)
+	}
+	if u.uiStore.Overrides.WatchPath != "/115open/上传下载" || u.uiStore.Overrides.RefreshPath != "/115open/上传下载" {
+		t.Fatalf("cloud paths were not persisted: %#v", u.uiStore.Overrides)
 	}
 }
 
