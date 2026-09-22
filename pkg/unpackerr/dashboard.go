@@ -78,6 +78,8 @@ type DashboardTotals struct {
 
 type DashboardTask struct {
 	Key         string `json:"key"`
+	CancelKey   string `json:"cancel_key,omitempty"`
+	FallbackKey string `json:"fallback_key,omitempty"`
 	Name        string `json:"name"`
 	Source      string `json:"source"`
 	Status      string `json:"status"`
@@ -122,18 +124,28 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		Transfers:    u.dashboardTransfers(),
 		Paused:       u.taskSystemPaused.Load(),
 	}
+	aliases := u.dashboardTaskAliases()
+	tasks := make(map[string]DashboardTask)
+	mergeTask := func(task DashboardTask) {
+		task.Key = dashboardCanonicalTaskKey(task.Key, aliases)
+		if current, exists := tasks[task.Key]; exists {
+			task = mergeDashboardTask(current, task)
+		}
+		tasks[task.Key] = task
+	}
 	for name, item := range u.Map {
 		source := sourceName(item.App)
 		if _, ok := u.cd2Cache.Load(filepath.Clean(name)); ok || dashboardPathPrefix(name, u.CloudDrive2.CacheDir) {
 			source = "CloudDrive2"
 		}
 		task := DashboardTask{
-			Key:     name,
-			Name:    name,
-			Source:  source,
-			Status:  statusName(item.Status),
-			Updated: item.Updated.Format("2006-01-02 15:04:05"),
-			Retries: item.Retries,
+			Key:       name,
+			CancelKey: name,
+			Name:      name,
+			Source:    source,
+			Status:    statusName(item.Status),
+			Updated:   item.Updated.Format("2006-01-02 15:04:05"),
+			Retries:   item.Retries,
 		}
 		if item.XProg != nil {
 			if progress := item.XProg.String(); progress != "no progress yet" {
@@ -153,9 +165,6 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		if _, cancelled := u.cancelled.Load(name); cancelled {
 			task.Status = "已取消"
 		}
-		if item.Status == QUEUED || item.Status == EXTRACTING || item.Status == WAITING {
-			snapshot.Totals.Active++
-		}
 		if transferKey, transfer, linked := u.cd2TransferForCachedPath(name); linked {
 			task.Key = transferKey
 			task.Name = filepath.Base(transfer.Path)
@@ -164,16 +173,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			}
 			task.Error = transfer.Error
 		}
-		snapshot.Tasks = append(snapshot.Tasks, task)
-	}
-	visibleTaskKeys := make(map[string]struct{}, len(snapshot.Tasks))
-	for _, task := range snapshot.Tasks {
-		visibleTaskKeys[task.Key] = struct{}{}
+		mergeTask(task)
 	}
 	for _, transfer := range snapshot.Transfers {
-		if _, merged := visibleTaskKeys[transfer.Key]; merged {
-			continue
-		}
 		status := transfer.State
 		if _, cancelled := u.cancelled.Load(transfer.Key); cancelled {
 			status = "已取消"
@@ -182,8 +184,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		if source == "" {
 			source = "CloudDrive2"
 		}
-		snapshot.Tasks = append(snapshot.Tasks, DashboardTask{
+		task := DashboardTask{
 			Key:         transfer.Key,
+			CancelKey:   transfer.Key,
 			Name:        filepath.Base(transfer.Path),
 			Source:      source,
 			Status:      status,
@@ -194,8 +197,15 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			ETASeconds:  transfer.ETA,
 			Error:       transfer.Error,
 			CanFallback: transfer.CanFallback,
-		})
-		if dashboardTaskIsActive(status) {
+		}
+		if transfer.CanFallback {
+			task.FallbackKey = dashboardCanonicalTaskKey(transfer.Key, aliases)
+		}
+		mergeTask(task)
+	}
+	for _, task := range tasks {
+		snapshot.Tasks = append(snapshot.Tasks, task)
+		if dashboardTaskIsActive(task.Status) {
 			snapshot.Totals.Active++
 		}
 	}
@@ -230,7 +240,117 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 }
 
 func dashboardTaskIsActive(status string) bool {
-	return strings.Contains(status, "解压中") || strings.Contains(status, "复制") || strings.Contains(status, "缓存") || strings.Contains(status, "刷新")
+	return !strings.Contains(status, "完成") && !strings.Contains(status, "失败") && !strings.Contains(status, "取消") && !strings.Contains(status, "无需")
+}
+
+func dashboardTaskAlias(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return strings.ToLower(filepath.ToSlash(filepath.Clean(value)))
+}
+
+func dashboardCanonicalTaskKey(key string, aliases map[string]string) string {
+	if canonical := aliases[dashboardTaskAlias(key)]; canonical != "" {
+		return canonical
+	}
+	return key
+}
+
+// dashboardTaskAliases connects every representation of one archive to one
+// stable display identity. Runtime processing can keep its path-based keys,
+// while the UI sees one task across 115, CD2, cache and extraction stages.
+func (u *Unpackerr) dashboardTaskAliases() map[string]string {
+	aliases := make(map[string]string)
+	if u.state == nil {
+		return aliases
+	}
+	u.state.mu.RLock()
+	defer u.state.mu.RUnlock()
+	for _, item := range u.state.Fallback115 {
+		canonical := item.TaskKey
+		if canonical == "" {
+			canonical = item.Key
+		}
+		canonical = dashboardTaskAlias(canonical)
+		for _, alias := range []string{item.Key, item.TaskKey} {
+			if alias != "" {
+				aliases[dashboardTaskAlias(alias)] = canonical
+			}
+		}
+	}
+	for _, item := range u.state.Pending {
+		canonical := dashboardTaskAlias(item.N115TaskKey)
+		if canonical == "" && len(item.Files) > 0 {
+			canonical = dashboardTaskAlias(cloudDriveTaskKey(archivePrimary(item.Files)))
+		}
+		if canonical == "" {
+			canonical = dashboardTaskAlias(item.Key)
+		}
+		for _, alias := range []string{item.Key, item.CachedPrimary, item.N115TaskKey} {
+			if alias != "" {
+				aliases[dashboardTaskAlias(alias)] = canonical
+			}
+		}
+		for _, file := range item.Files {
+			aliases[dashboardTaskAlias(file)] = canonical
+			aliases[dashboardTaskAlias(cloudDriveTaskKey(file))] = canonical
+		}
+	}
+	return aliases
+}
+
+func dashboardTaskStage(status string) int {
+	switch {
+	case strings.Contains(status, "失败"), strings.Contains(status, "取消"):
+		return 100
+	case strings.Contains(status, "完成"), strings.Contains(status, "已解压"):
+		return 90
+	case strings.Contains(status, "正在解压"):
+		return 80
+	case strings.Contains(status, "排队"), strings.Contains(status, "等待解压"):
+		return 70
+	case strings.Contains(status, "校验缓存"):
+		return 60
+	case strings.Contains(status, "复制"), strings.Contains(status, "缓存"):
+		return 50
+	case strings.Contains(status, "批准"):
+		return 40
+	default:
+		return 20
+	}
+}
+
+func mergeDashboardTask(current, incoming DashboardTask) DashboardTask {
+	useIncoming := dashboardTaskStage(incoming.Status) > dashboardTaskStage(current.Status) ||
+		dashboardTaskStage(incoming.Status) == dashboardTaskStage(current.Status) && incoming.Updated > current.Updated
+	result := current
+	if useIncoming {
+		result = incoming
+	}
+	result.Key = current.Key
+	if incoming.CancelKey != "" && (result.CancelKey == "" || dashboardTaskStage(incoming.Status) > dashboardTaskStage(current.Status)) {
+		result.CancelKey = incoming.CancelKey
+	}
+	if current.FallbackKey != "" {
+		result.FallbackKey = current.FallbackKey
+	}
+	if incoming.FallbackKey != "" {
+		result.FallbackKey = incoming.FallbackKey
+	}
+	result.CanFallback = current.CanFallback || incoming.CanFallback
+	if strings.Contains(current.Source, "115") || strings.Contains(incoming.Source, "115") {
+		if strings.Contains(incoming.Source, "115") {
+			result.Source = incoming.Source
+		} else {
+			result.Source = current.Source
+		}
+	}
+	if filepath.Base(incoming.Name) != "." && incoming.Name != "" {
+		result.Name = filepath.Base(incoming.Name)
+	}
+	return result
 }
 
 func formatDashboardTime(value time.Time) string {

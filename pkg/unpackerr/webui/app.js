@@ -522,7 +522,7 @@ function renderTask(task) {
     (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
-    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.key) + '" type="button" style="margin-left:8px">批准下载</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button" style="margin-left:8px">批准下载</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
 }
 
 function renderStatus(data) {

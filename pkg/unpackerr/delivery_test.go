@@ -499,6 +499,69 @@ func TestDashboardMergesCD2CopyAndExtractionIntoOneTask(t *testing.T) {
 	}
 }
 
+func TestDashboardMerges115CD2CacheAndExtractionLifecycle(t *testing.T) {
+	u := New()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "mounted", "cloud.7z")
+	cached := filepath.Join(dir, "cache", "cloud.7z")
+	cloudKey := "115|source-cid|file-fid"
+	cd2Key := cloudDriveTaskKey(source)
+	u.state = &ProcessingState{
+		Processed: map[string]ProcessedSource{},
+		Pending: map[string]PendingCD2{cached: {
+			Key: cached, Files: []string{source}, CachedPrimary: cached, N115TaskKey: cloudKey,
+		}},
+		Fallback115: map[string]Pending115{cd2Key: {
+			Key: cd2Key, TaskKey: cloudKey, SourceCID: "source-cid", FID: "file-fid", FileName: "cloud.7z",
+		}},
+	}
+	u.updateCD2Transfer(cd2Key, source, "正在解压", func(transfer *CD2Transfer) {
+		transfer.CachedPath = cached
+		transfer.Source = "115 云解压失败转本地"
+	})
+	u.Map[cached] = &Extract{
+		Path: cached, App: FolderString, Status: EXTRACTING, Updated: time.Now(),
+		XProg: &ExtractProgress{Progress: &xtractr.Progress{Total: 100, Wrote: 55}, Archives: 1},
+	}
+
+	snapshot := u.dashboardSnapshot()
+	if len(snapshot.Tasks) != 1 {
+		t.Fatalf("115/CD2/cache/extraction rendered as separate tasks: %#v", snapshot.Tasks)
+	}
+	task := snapshot.Tasks[0]
+	if dashboardTaskAlias(task.Key) != dashboardTaskAlias(cloudKey) || task.Status != "正在解压" {
+		t.Fatalf("unexpected unified cloud task: %#v", task)
+	}
+	if task.CancelKey != cached {
+		t.Fatalf("active extraction cancel key was replaced: %#v", task)
+	}
+	if task.Bytes != 55 || task.Total != 100 {
+		t.Fatalf("unified cloud task lost extraction progress: %#v", task)
+	}
+}
+
+func TestDashboardMergesRestartedCachedPendingTask(t *testing.T) {
+	u := New()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "mounted", "ready.rar")
+	cached := filepath.Join(dir, "cache", "ready.rar")
+	cd2Key := cloudDriveTaskKey(source)
+	u.state = &ProcessingState{
+		Processed:   map[string]ProcessedSource{},
+		Pending:     map[string]PendingCD2{cached: {Key: cached, Files: []string{source}, CachedPrimary: cached}},
+		Fallback115: map[string]Pending115{},
+	}
+	u.updateCD2Transfer(cd2Key, source, "排队中", func(transfer *CD2Transfer) { transfer.CachedPath = cached })
+
+	snapshot := u.dashboardSnapshot()
+	if len(snapshot.Tasks) != 1 {
+		t.Fatalf("restored cached task rendered twice: %#v", snapshot.Tasks)
+	}
+	if snapshot.Tasks[0].Status != "排队中" {
+		t.Fatalf("unexpected restored cached task: %#v", snapshot.Tasks[0])
+	}
+}
+
 func TestRealZIPExtractionReturnsIntermediatePercentage(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "progress.zip")
