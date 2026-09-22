@@ -297,6 +297,43 @@ func TestSettingsAPIReturnsAndPersists(t *testing.T) {
 	}
 }
 
+func TestSettingsAPIReplacesOld115DownloadPathImmediately(t *testing.T) {
+	dir := t.TempDir()
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	u.Folders = []*FolderConfig{{Path: filepath.Join(dir, "监控目录"), ExtractPath: filepath.Join(dir, "解压目录")}}
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	u.CloudDrive2.N115DownloadMappings = []string{"300 => /115open/上传下载/下载 => auto"}
+	u.state = &ProcessingState{
+		Path:        filepath.Join(dir, "unpackflow-state.json"),
+		Processed:   map[string]ProcessedSource{},
+		Pending:     map[string]PendingCD2{},
+		Fallback115: map[string]Pending115{"old": {Key: "old", SourceCID: "300", FallbackCID: "300", CD2Path: "/115open/上传下载/下载", Kind: "manual_download"}},
+	}
+	body := bytes.NewBufferString(`{
+		"workers":1,"local_source_action":"keep","folder_interval":"60s",
+		"cd2_enabled":true,"cd2_url":"http://127.0.0.1:19798","cd2_token":"token",
+		"refresh_interval":"10m","cache_dir":"/data/缓存目录","cache_extract_path":"/data/解压目录","copy_timeout":"24h",
+		"115_enabled":true,"115_event_enabled":true,"115_event_interval":"5m","115_success_action":"keep",
+		"115_failure_cid":"900","115_failure_cd2_path":"115open/绿联备份/失败",
+		"115_download_mappings":["300 => 115open/绿联备份/下载 => auto"]
+	}`)
+	recorder := httptest.NewRecorder()
+	u.settingsAPI(recorder, httptest.NewRequest(http.MethodPost, "/api/settings", body), httprouter.Params{})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("settings API returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	mappings := parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings)
+	if len(mappings) != 1 || mappings[0].CD2Path != "/115open/绿联备份/下载" {
+		t.Fatalf("running configuration still uses old path: %#v", mappings)
+	}
+	if got := u.state.Fallback115["old"].CD2Path; got != "/115open/绿联备份/下载" {
+		t.Fatalf("pending task still uses old path: %q", got)
+	}
+}
+
 func TestSettingsAPIPersistsStructured115Folders(t *testing.T) {
 	dir := t.TempDir()
 	u := New()
@@ -321,6 +358,9 @@ func TestSettingsAPIPersistsStructured115Folders(t *testing.T) {
 	u.settingsAPI(recorder, httptest.NewRequest(http.MethodPost, "/api/settings", body), httprouter.Params{})
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("settings API returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if got := parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings); len(got) != 2 || got[0].CD2Path != "/115open/日常下载" {
+		t.Fatalf("structured 115 folders were not applied to the running service: %#v", u.CloudDrive2.N115DownloadMappings)
 	}
 	restarted := New()
 	restarted.ConfigFile = u.ConfigFile

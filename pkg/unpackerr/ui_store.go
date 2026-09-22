@@ -672,7 +672,102 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	s.N115FailureCD2Path = strings.TrimSpace(s.N115FailureCD2Path)
 	u.uiStore.Overrides = s
 	u.uiStore.mu.Unlock()
-	return u.saveUIStore()
+	if err := u.saveUIStore(); err != nil {
+		return err
+	}
+	u.applyCloudDriveUIOverrides(s)
+	return nil
+}
+
+// applyCloudDriveUIOverrides keeps path-based cloud processing in sync with
+// the settings page. Connection endpoint or token changes still take effect
+// after restart, but folder mappings and 115 behavior apply immediately.
+func (u *Unpackerr) applyCloudDriveUIOverrides(s UIOverrides) {
+	if s.RefreshInterval != "" {
+		if d, err := time.ParseDuration(s.RefreshInterval); err == nil {
+			u.CloudDrive2.RefreshInterval.Duration = d
+		}
+	}
+	u.CloudDrive2.RefreshPath = strings.TrimSpace(s.RefreshPath)
+	u.CloudDrive2.WatchPath = strings.TrimSpace(s.WatchPath)
+	u.CloudDrive2.ManualWatchPaths = append([]string(nil), s.ManualWatchPaths...)
+	u.CloudDrive2.PathOverrides = append([]string(nil), s.PathOverrides...)
+	if s.CD2FallbackEnabled != nil {
+		u.CloudDrive2.FallbackScanEnabled = *s.CD2FallbackEnabled
+	}
+	if s.CD2FallbackInterval != "" {
+		if d, err := time.ParseDuration(s.CD2FallbackInterval); err == nil {
+			u.CloudDrive2.FallbackScanInterval.Duration = d
+		}
+	}
+	if s.N115Enabled != nil {
+		u.CloudDrive2.N115Enabled = *s.N115Enabled
+	}
+	if s.N115EventEnabled != nil {
+		u.CloudDrive2.N115EventEnabled = *s.N115EventEnabled
+	}
+	if s.N115Cookie != "" {
+		u.CloudDrive2.N115Cookie = s.N115Cookie
+	}
+	u.CloudDrive2.N115CookieRemark = s.N115CookieRemark
+	if s.N115EventInterval != "" {
+		if d, err := time.ParseDuration(s.N115EventInterval); err == nil {
+			u.CloudDrive2.N115EventInterval.Duration = d
+		}
+	}
+	u.CloudDrive2.N115Mappings = append([]string(nil), s.N115Mappings...)
+	u.CloudDrive2.N115SourceCIDs = clean115CIDs(s.N115SourceCIDs)
+	u.CloudDrive2.N115FailureCID = strings.TrimSpace(s.N115FailureCID)
+	u.CloudDrive2.N115FailureCD2Path = normalizeCloudDrivePath(s.N115FailureCD2Path)
+	u.CloudDrive2.N115DownloadMappings = append([]string(nil), s.N115Downloads...)
+	u.CloudDrive2.N115SuccessAction = s.N115SuccessAction
+	u.CloudDrive2.N115ArchiveCID = strings.TrimSpace(s.N115ArchiveCID)
+	if s.N115AutoFallback != nil {
+		u.CloudDrive2.N115AutoFallback = *s.N115AutoFallback
+	}
+	if s.N115RetryCount > 0 {
+		u.CloudDrive2.N115RetryCount = s.N115RetryCount
+	}
+	if s.N115RetryDelay != "" {
+		if d, err := time.ParseDuration(s.N115RetryDelay); err == nil {
+			u.CloudDrive2.N115RetryDelay.Duration = d
+		}
+	}
+	migrate115CloudSettings(&u.CloudDrive2)
+	u.refreshPending115ConfiguredPaths()
+}
+
+func (u *Unpackerr) refreshPending115ConfiguredPaths() {
+	if u.state == nil {
+		return
+	}
+	downloads := parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings)
+	u.state.mu.Lock()
+	changed := false
+	for key, pending := range u.state.Fallback115 {
+		pathValue := ""
+		if pending.Kind == "cloud_failure" {
+			pathValue = normalizeCloudDrivePath(u.CloudDrive2.N115FailureCD2Path)
+		} else {
+			for _, mapping := range downloads {
+				if mapping.CID == pending.SourceCID || mapping.CID == pending.FallbackCID {
+					pathValue = mapping.CD2Path
+					break
+				}
+			}
+		}
+		if pathValue != "" && pending.CD2Path != pathValue {
+			pending.CD2Path = pathValue
+			u.state.Fallback115[key] = pending
+			changed = true
+		}
+	}
+	u.state.mu.Unlock()
+	if changed {
+		if err := u.saveProcessingState(); err != nil {
+			u.Errorf("更新 115 待处理任务路径失败：%v", err)
+		}
+	}
 }
 
 func cleanN115CIDRemarks(values map[string]string) map[string]string {

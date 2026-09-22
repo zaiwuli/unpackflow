@@ -115,13 +115,21 @@ func parse115DownloadMappings(values []string) []N115DownloadMapping {
 		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
 			continue
 		}
-		mapping := N115DownloadMapping{CID: parts[0], CD2Path: parts[1]}
+		mapping := N115DownloadMapping{CID: parts[0], CD2Path: normalizeCloudDrivePath(parts[1])}
 		if len(parts) >= 3 {
 			mapping.Approval = strings.EqualFold(parts[2], "approval") || strings.EqualFold(parts[2], "manual")
 		}
 		result = append(result, mapping)
 	}
 	return result
+}
+
+func normalizeCloudDrivePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return path.Clean("/" + strings.TrimLeft(value, "/"))
 }
 
 func migrate115CloudSettings(cfg *CloudDriveConfig) {

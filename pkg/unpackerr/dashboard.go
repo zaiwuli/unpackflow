@@ -650,7 +650,7 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 		http.Error(w, "保存设置失败："+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	u.writeJSON(w, map[string]any{"success": true, "restart_required": true})
+	u.writeJSON(w, map[string]any{"success": true, "restart_required": true, "paths_applied": true})
 }
 
 func (u *Unpackerr) historyAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {

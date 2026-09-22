@@ -31,7 +31,8 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 		},
 		PathOverrides: cfg.PathOverrides,
 		OnChange: func(change clouddrive.Change, paths []string) error {
-			if !cloudDrivePathMatches(change.Path, watchPaths) && !cloudDrivePathMatches(change.NewPath, watchPaths) {
+			currentWatchPaths := cloudDriveManualWatchPaths(u.CloudDrive2)
+			if !cloudDrivePathMatches(change.Path, currentWatchPaths) && !cloudDrivePathMatches(change.NewPath, currentWatchPaths) {
 				return nil
 			}
 			eventPath := change.Path
@@ -44,7 +45,11 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 			// CloudDrive2 can publish the remote event before its mounted
 			// filesystem exposes the file. Refresh the affected remote directory
 			// and wait briefly for the mapped path before starting the copy.
-			go u.handleCloudDriveChange(client, change, paths)
+			currentPaths := clouddrive.MapCloudPathWithOverrides(eventPath, nil, u.CloudDrive2.PathOverrides)
+			if len(currentPaths) == 0 {
+				currentPaths = paths
+			}
+			go u.handleCloudDriveChange(client, change, currentPaths)
 			return nil
 		},
 		OnStatus: func(status clouddrive.Status) {
@@ -64,10 +69,10 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 	}
 	go u.cloudDriveRetryLoop()
 	if cfg.RefreshInterval.Duration > 0 {
-		go u.cloudDriveRefreshLoop(monitor.Client, cfg.RefreshInterval.Duration, cloudDriveConfiguredRefreshPaths(cfg))
+		go u.cloudDriveRefreshLoop(monitor.Client, cfg.RefreshInterval.Duration)
 	}
 	if cfg.FallbackScanEnabled && cfg.FallbackScanInterval.Duration > 0 {
-		go u.cloudDriveFallbackLoop(monitor.Client, cfg.FallbackScanInterval.Duration, cfg.WatchPath, cfg.PathOverrides)
+		go u.cloudDriveFallbackLoop(monitor.Client, cfg.FallbackScanInterval.Duration)
 	}
 }
 
@@ -235,11 +240,11 @@ func cloudDriveConfiguredRefreshPaths(cfg CloudDriveConfig) []string {
 	return result
 }
 
-func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval time.Duration, refreshPaths []string) {
+func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
-		for _, refreshPath := range refreshPaths {
+		for _, refreshPath := range cloudDriveConfiguredRefreshPaths(u.CloudDrive2) {
 			if err := client.ForceRefresh(context.Background(), refreshPath); err != nil {
 				u.Errorf("CloudDrive2 定时刷新失败：%s：%v", refreshPath, err)
 			} else {
@@ -249,12 +254,12 @@ func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval ti
 	}
 }
 
-func (u *Unpackerr) cloudDriveFallbackLoop(client *clouddrive.Client, interval time.Duration, watchPath string, overrides []string) {
+func (u *Unpackerr) cloudDriveFallbackLoop(client *clouddrive.Client, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
 		if u.CloudDrive2.FallbackScanEnabled {
-			u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), overrides)
+			u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), u.CloudDrive2.PathOverrides)
 		}
 	}
 }
