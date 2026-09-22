@@ -272,6 +272,28 @@ func TestUISettingsPersistAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestSettingsAPIReturnsAndPersists(t *testing.T) {
+	dir := t.TempDir()
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	u.Folders = []*FolderConfig{{Path: filepath.Join(dir, "监控目录"), ExtractPath: filepath.Join(dir, "解压目录")}}
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	body := bytes.NewBufferString(`{"workers":2,"local_source_action":"keep","folder_interval":"60s","cd2_fallback_interval":"30m","115_event_interval":"5m","115_success_action":"keep","copy_timeout":"24h"}`)
+	recorder := httptest.NewRecorder()
+	u.settingsAPI(recorder, httptest.NewRequest(http.MethodPost, "/api/settings", body), httprouter.Params{})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("settings API returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"success":true`) {
+		t.Fatalf("unexpected settings response: %s", recorder.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "unpackflow-ui.json")); err != nil {
+		t.Fatalf("settings were not persisted: %v", err)
+	}
+}
+
 func TestNotificationTemplatesPersistAndRender(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "unpackerr.conf")
