@@ -1,6 +1,9 @@
 package unpackerr
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParse115MappingsAcceptsFallbackAndLegacyFormats(t *testing.T) {
 	mappings := parse115Mappings([]string{
@@ -74,6 +77,23 @@ func TestN115QueueHasSingleSlot(t *testing.T) {
 	default:
 	}
 	<-u.n115Queue
+}
+
+func TestN115ResponseSummaryIncludesUsefulFields(t *testing.T) {
+	got := n115ResponseSummary([]byte(`{"state":false,"error":"未登录","errno":401}`))
+	if !strings.Contains(got, "未登录") || !strings.Contains(got, "401") {
+		t.Fatalf("unexpected error summary: %q", got)
+	}
+}
+
+func TestCloudDriveManualWatchPathsKeepsLegacyPath(t *testing.T) {
+	paths := cloudDriveManualWatchPaths(CloudDriveConfig{
+		WatchPath:        "/115open/日常下载",
+		ManualWatchPaths: []string{"/115open/日常下载", "/115open/手动"},
+	})
+	if len(paths) != 2 || !cloudDrivePathMatches("/115open/手动/test.7z", paths) || cloudDrivePathMatches("/115open/失败/test.7z", paths) {
+		t.Fatalf("unexpected manual paths: %#v", paths)
+	}
 }
 
 func TestPending115FallbackSurvivesStateRoundTrip(t *testing.T) {

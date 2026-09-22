@@ -190,8 +190,20 @@ function ensureLocalSettings() {
 	$('cd2-refresh').textContent = '立即刷新';
   const workers = $('workers').closest('.field');
   if (!workers) return;
-  const oldDeleteSource = $('delete-source');
-  if (oldDeleteSource) oldDeleteSource.closest('.check-row').remove();
+	const oldDeleteSource = $('delete-source');
+	if (oldDeleteSource) oldDeleteSource.closest('.check-row').remove();
+	const manualWatch = $('watch-path');
+	if (manualWatch) {
+		const field = manualWatch.closest('.field');
+		field.querySelector('span').textContent = '日常本地下载目录';
+		manualWatch.placeholder = '/115open/日常下载，/115open/另一个目录';
+		if (!field.querySelector('small')) {
+			const hint = document.createElement('small');
+			hint.style.cssText = 'color:var(--muted);font-size:12px';
+			hint.textContent = '仅用于手动放入压缩包后下载到本地解压；多个目录用英文逗号分隔。它不会触发 115 云解压。';
+			field.appendChild(hint);
+		}
+	}
   const block = document.createElement('div');
   block.id = 'local-settings';
   block.innerHTML = '<div class="panel-heading" style="margin-top:18px"><div><h3>\u672c\u5730\u76ee\u5f55</h3>' +
@@ -217,6 +229,7 @@ function ensureLocalSettings() {
     '<label class="field"><span>\u4e91\u89e3\u538b\u6210\u529f\u540e\u7684\u539f\u5305\u5904\u7406</span><select id="115-success-action"><option value="keep">\u4fdd\u7559\u539f\u5305</option><option value="delete">\u5220\u9664\u539f\u5305</option><option value="archive">\u5f52\u6863\u539f\u5305</option></select></label>' +
     '<label class="field" id="115-archive-cid-row"><span>\u5f52\u6863\u538b\u7f29\u5305 CID</span><input id="115-archive-cid" type="text" placeholder="\u586b\u5199 115 \u5f52\u6863\u6587\u4ef6\u5939 CID"></label>' +
     '<label class="check-row"><input id="115-auto-fallback" type="checkbox"> 云解压失败后自动转本地解压</label><small style="color:var(--muted);font-size:12px">关闭时，失败任务会保留在任务列表，可手动转本地解压</small>' +
+		'<div class="field"><span>云解压失败重试</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="115-retry-count" type="number" min="1" max="10" placeholder="3"><input id="115-retry-delay" type="text" placeholder="2m"></div><small style="color:var(--muted);font-size:12px">默认最多 3 次，每次间隔 2 分钟；最后一次失败才会移入失败目录。</small></div>' +
     '<div class="field"><span>115 云解压与 CD2 备用目录映射</span><div id="115-mappings" class="mapping-list"></div><div class="form-actions"><button id="115-mapping-add" type="button">添加文件夹</button></div><small style="color:var(--muted);font-size:12px">每个文件夹独立配置。云解压失败后，文件会移动到备用 CID，并刷新对应 CD2 路径。</small></div>';
   workers.insertAdjacentElement('afterend', block);
   if (!document.getElementById('115-mapping-style')) {
@@ -368,7 +381,9 @@ function fillForms(data) {
   $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
   $('115-success-action').value = (data.settings && data.settings['115_success_action']) || 'keep';
   $('115-archive-cid').value = (data.settings && data.settings['115_archive_cid']) || '';
-	$('115-auto-fallback').checked = !!(data.settings && data.settings['115_auto_fallback']);
+  $('115-auto-fallback').checked = !!(data.settings && data.settings['115_auto_fallback']);
+	$('115-retry-count').value = (data.settings && data.settings['115_retry_count']) || 3;
+	$('115-retry-delay').value = (data.settings && data.settings['115_retry_delay']) || '2m';
   fill115MappingRows((data.settings && data.settings['115_mappings']) || []);
   const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
   $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
@@ -377,7 +392,7 @@ function fillForms(data) {
   $('cd2-url').value = data.clouddrive2.url || '';
   $('cd2-token').value = (data.settings && data.settings.cd2_token) || '';
   $('cd2-token').placeholder = data.settings && data.settings.cd2_token ? '已保存，输入新 Token 可替换' : '请输入 CD2 Token';
-  $('watch-path').value = (data.settings && data.settings.watch_path) || '/';
+	$('watch-path').value = ((data.settings && data.settings.manual_watch_paths) || [(data.settings && data.settings.watch_path) || '/']).join(', ');
   $('refresh-interval').value = (data.settings && data.settings.refresh_interval) || '10m';
   $('refresh-path').value = (data.settings && data.settings.refresh_path) || '/';
   $('path-overrides').value = ((data.settings && data.settings.path_overrides) || []).join(',');
@@ -555,10 +570,13 @@ $('settings-save').addEventListener('click', async () => {
       '115_success_action': $('115-success-action').value,
       '115_archive_cid': $('115-archive-cid').value.trim(),
       '115_auto_fallback': $('115-auto-fallback').checked,
+		'115_retry_count': Number($('115-retry-count').value) || 3,
+		'115_retry_delay': $('115-retry-delay').value.trim(),
       '115_mappings': collect115Mappings(),
       cd2_enabled: $('cd2-enabled').checked,
       cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),
-      watch_path: $('watch-path').value.trim(), refresh_interval: $('refresh-interval').value.trim(),
+		manual_watch_paths: $('watch-path').value.split(',').map(item => item.trim()).filter(Boolean),
+		watch_path: $('watch-path').value.split(',').map(item => item.trim()).filter(Boolean)[0] || '/', refresh_interval: $('refresh-interval').value.trim(),
       refresh_path: $('refresh-path').value.trim(), path_overrides: $('path-overrides').value.split(',').map(item => item.trim()).filter(Boolean),
       cache_dir: $('cache-dir').value.trim(), cache_extract_path: $('cache-extract-path').value.trim(),
       keep_cache: $('keep-cache').checked, cache_delete_delay: $('cache-delete-delay').value.trim(), copy_timeout: $('copy-timeout').value.trim(),

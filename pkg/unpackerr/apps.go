@@ -89,6 +89,7 @@ type CloudDriveConfig struct {
 	RefreshInterval      cnfg.Duration `json:"refresh_interval"  toml:"refresh_interval"  xml:"refresh_interval"  yaml:"refresh_interval"`
 	RefreshPath          string        `json:"refresh_path"      toml:"refresh_path"      xml:"refresh_path"      yaml:"refresh_path"`
 	WatchPath            string        `json:"watch_path"        toml:"watch_path"        xml:"watch_path"        yaml:"watch_path"`
+	ManualWatchPaths     []string      `json:"manual_watch_paths" toml:"manual_watch_paths" xml:"manual_watch_path" yaml:"manual_watch_paths"`
 	ReconnectMin         cnfg.Duration `json:"reconnect_min"     toml:"reconnect_min"     xml:"reconnect_min"     yaml:"reconnect_min"`
 	ReconnectMax         cnfg.Duration `json:"reconnect_max"     toml:"reconnect_max"     xml:"reconnect_max"     yaml:"reconnect_max"`
 	PathOverrides        []string      `json:"path_overrides"    toml:"path_overrides"    xml:"path_override"    yaml:"path_overrides"`
@@ -109,6 +110,8 @@ type CloudDriveConfig struct {
 	N115SuccessAction    string        `json:"115_success_action" toml:"115_success_action" xml:"115_success_action" yaml:"115_success_action"`
 	N115ArchiveCID       string        `json:"115_archive_cid" toml:"115_archive_cid" xml:"115_archive_cid" yaml:"115_archive_cid"`
 	N115AutoFallback     bool          `json:"115_auto_fallback" toml:"115_auto_fallback" xml:"115_auto_fallback" yaml:"115_auto_fallback"`
+	N115RetryCount       uint          `json:"115_retry_count" toml:"115_retry_count" xml:"115_retry_count" yaml:"115_retry_count"`
+	N115RetryDelay       cnfg.Duration `json:"115_retry_delay" toml:"115_retry_delay" xml:"115_retry_delay" yaml:"115_retry_delay"`
 }
 
 type FoldersConfig struct {

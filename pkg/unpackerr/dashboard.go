@@ -502,7 +502,7 @@ func (u *Unpackerr) cd2RefreshAPI(w http.ResponseWriter, r *http.Request, _ http
 			u.Errorf("CloudDrive2 手动刷新失败：%v", err)
 			messages = append(messages, "CD2 刷新失败："+err.Error())
 		} else {
-			found = u.cloudDriveFallbackScan(client, u.CloudDrive2.WatchPath, u.CloudDrive2.PathOverrides)
+			found = u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), u.CloudDrive2.PathOverrides)
 			messages = append(messages, fmt.Sprintf("已刷新 CD2 指定路径，发现 %d 个压缩文件", found))
 		}
 	} else {
@@ -586,6 +586,17 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 		duration, err := time.ParseDuration(overrides.CD2FallbackInterval)
 		if err != nil || duration < 0 {
 			http.Error(w, "CD2 定时扫描间隔格式无效，例如：30m；填写 0s 可关闭", http.StatusBadRequest)
+			return
+		}
+	}
+	if overrides.N115RetryCount > 0 && overrides.N115RetryCount > 10 {
+		http.Error(w, "115 云解压重试次数不能超过 10 次", http.StatusBadRequest)
+		return
+	}
+	if overrides.N115RetryDelay != "" {
+		duration, err := time.ParseDuration(overrides.N115RetryDelay)
+		if err != nil || duration <= 0 {
+			http.Error(w, "115 云解压重试间隔格式无效，例如：2m", http.StatusBadRequest)
 			return
 		}
 	}

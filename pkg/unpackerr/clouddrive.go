@@ -22,6 +22,7 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 		return
 	}
 	client := &clouddrive.Client{BaseURL: cfg.URL, Token: cfg.Token}
+	watchPaths := cloudDriveManualWatchPaths(cfg)
 	monitor := &clouddrive.Monitor{
 		Client: client,
 		Config: clouddrive.MonitorConfig{
@@ -30,7 +31,7 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 		},
 		PathOverrides: cfg.PathOverrides,
 		OnChange: func(change clouddrive.Change, paths []string) error {
-			if !cloudDrivePathMatch(change.Path, cfg.WatchPath) && !cloudDrivePathMatch(change.NewPath, cfg.WatchPath) {
+			if !cloudDrivePathMatches(change.Path, watchPaths) && !cloudDrivePathMatches(change.NewPath, watchPaths) {
 				return nil
 			}
 			eventPath := change.Path
@@ -58,7 +59,7 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 	go monitor.Run(context.Background())
 	u.Printf("CloudDrive2 监控已连接：%s", cfg.URL)
 	if cfg.FallbackScanEnabled {
-		go u.cloudDriveFallbackScan(monitor.Client, cfg.WatchPath, cfg.PathOverrides)
+		go u.cloudDriveFallbackScanPaths(monitor.Client, watchPaths, cfg.PathOverrides)
 	}
 	go u.cloudDriveRetryLoop()
 	if cfg.RefreshInterval.Duration > 0 {
@@ -140,6 +141,35 @@ func cloudDrivePathMatch(value, root string) bool {
 	return root == "/" || value == root || strings.HasPrefix(value, root+"/")
 }
 
+func cloudDrivePathMatches(value string, roots []string) bool {
+	for _, root := range roots {
+		if strings.TrimSpace(root) != "" && cloudDrivePathMatch(value, root) {
+			return true
+		}
+	}
+	return false
+}
+
+// cloudDriveManualWatchPaths are folders where a user deliberately puts an
+// archive for local cache-and-extract. They are independent from 115's failed
+// cloud-extract fallback folders.
+func cloudDriveManualWatchPaths(cfg CloudDriveConfig) []string {
+	paths := make([]string, 0, len(cfg.ManualWatchPaths)+1)
+	seen := make(map[string]struct{})
+	for _, value := range append(append([]string(nil), cfg.ManualWatchPaths...), cfg.WatchPath) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		value = path.Clean("/" + strings.TrimLeft(value, "/"))
+		if _, ok := seen[value]; !ok {
+			seen[value] = struct{}{}
+			paths = append(paths, value)
+		}
+	}
+	return paths
+}
+
 func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval time.Duration, refreshPath, watchPath string, overrides []string) {
 	if refreshPath == "" {
 		refreshPath = "/"
@@ -160,7 +190,7 @@ func (u *Unpackerr) cloudDriveFallbackLoop(client *clouddrive.Client, interval t
 	defer ticker.Stop()
 	for range ticker.C {
 		if u.CloudDrive2.FallbackScanEnabled {
-			u.cloudDriveFallbackScan(client, watchPath, overrides)
+			u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), overrides)
 		}
 	}
 }
@@ -168,6 +198,18 @@ func (u *Unpackerr) cloudDriveFallbackLoop(client *clouddrive.Client, interval t
 // cloudDriveFallbackScan compensates for delayed or missed change events. It
 // scans only the configured watch path after mapping it to the mounted path.
 func (u *Unpackerr) cloudDriveFallbackScan(client *clouddrive.Client, watchPath string, overrides []string) int {
+	return u.cloudDriveFallbackScanPaths(client, []string{watchPath}, overrides)
+}
+
+func (u *Unpackerr) cloudDriveFallbackScanPaths(client *clouddrive.Client, watchPaths []string, overrides []string) int {
+	total := 0
+	for _, watchPath := range watchPaths {
+		total += u.cloudDriveFallbackScanOne(client, watchPath, overrides)
+	}
+	return total
+}
+
+func (u *Unpackerr) cloudDriveFallbackScanOne(client *clouddrive.Client, watchPath string, overrides []string) int {
 	// A user-provided direct mapping is the most reliable source inside a
 	// container. Use it without requiring CD2's mount-point API to succeed.
 	roots := clouddrive.MapCloudPathWithOverrides(watchPath, nil, overrides)

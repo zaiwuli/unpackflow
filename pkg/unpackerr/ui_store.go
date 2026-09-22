@@ -128,6 +128,7 @@ type UIOverrides struct {
 	RefreshInterval     string   `json:"refresh_interval,omitempty"`
 	RefreshPath         string   `json:"refresh_path,omitempty"`
 	WatchPath           string   `json:"watch_path,omitempty"`
+	ManualWatchPaths    []string `json:"manual_watch_paths,omitempty"`
 	PathOverrides       []string `json:"path_overrides,omitempty"`
 	CacheDir            string   `json:"cache_dir,omitempty"`
 	CacheExtractPath    string   `json:"cache_extract_path,omitempty"`
@@ -146,6 +147,8 @@ type UIOverrides struct {
 	N115SuccessAction   string   `json:"115_success_action,omitempty"`
 	N115ArchiveCID      string   `json:"115_archive_cid,omitempty"`
 	N115AutoFallback    *bool    `json:"115_auto_fallback,omitempty"`
+	N115RetryCount      uint     `json:"115_retry_count,omitempty"`
+	N115RetryDelay      string   `json:"115_retry_delay,omitempty"`
 }
 
 func (u *Unpackerr) loadUIStore() error {
@@ -187,6 +190,13 @@ func (u *Unpackerr) loadUIStore() error {
 	}
 	if store.Overrides.WatchPath != "" {
 		u.CloudDrive2.WatchPath = store.Overrides.WatchPath
+	}
+	if store.Overrides.ManualWatchPaths != nil {
+		u.CloudDrive2.ManualWatchPaths = append([]string(nil), store.Overrides.ManualWatchPaths...)
+	} else if store.Overrides.WatchPath != "" {
+		// Existing configurations used one CD2 watch path. Keep it as a daily
+		// local-download folder after upgrading.
+		u.CloudDrive2.ManualWatchPaths = []string{store.Overrides.WatchPath}
 	}
 	if store.Overrides.RefreshInterval != "" {
 		if d, e := time.ParseDuration(store.Overrides.RefreshInterval); e == nil {
@@ -253,6 +263,14 @@ func (u *Unpackerr) loadUIStore() error {
 	}
 	if store.Overrides.N115AutoFallback != nil {
 		u.CloudDrive2.N115AutoFallback = *store.Overrides.N115AutoFallback
+	}
+	if store.Overrides.N115RetryCount > 0 {
+		u.CloudDrive2.N115RetryCount = store.Overrides.N115RetryCount
+	}
+	if store.Overrides.N115RetryDelay != "" {
+		if d, e := time.ParseDuration(store.Overrides.N115RetryDelay); e == nil && d > 0 {
+			u.CloudDrive2.N115RetryDelay.Duration = d
+		}
 	}
 	u.uiStore = store
 	return nil
@@ -392,6 +410,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		RefreshInterval:     u.CloudDrive2.RefreshInterval.Duration.String(),
 		RefreshPath:         u.CloudDrive2.RefreshPath,
 		WatchPath:           u.CloudDrive2.WatchPath,
+		ManualWatchPaths:    append([]string(nil), u.CloudDrive2.ManualWatchPaths...),
 		PathOverrides:       append([]string{}, u.CloudDrive2.PathOverrides...),
 		CacheDir:            u.CloudDrive2.CacheDir,
 		CacheExtractPath:    u.CloudDrive2.CacheExtractPath,
@@ -408,6 +427,8 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115SuccessAction:   u.CloudDrive2.N115SuccessAction,
 		N115ArchiveCID:      u.CloudDrive2.N115ArchiveCID,
 		N115AutoFallback:    func() *bool { v := u.CloudDrive2.N115AutoFallback; return &v }(),
+		N115RetryCount:      u.CloudDrive2.N115RetryCount,
+		N115RetryDelay:      u.CloudDrive2.N115RetryDelay.Duration.String(),
 	}
 	if folder := u.localFolder(); folder != nil {
 		settings.LocalSourceAction = localSourceAction(folder)
@@ -451,6 +472,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.WatchPath != "" {
 		settings.WatchPath = overrides.WatchPath
+	}
+	if overrides.ManualWatchPaths != nil {
+		settings.ManualWatchPaths = append([]string(nil), overrides.ManualWatchPaths...)
 	}
 	if overrides.PathOverrides != nil {
 		settings.PathOverrides = append([]string{}, overrides.PathOverrides...)
@@ -499,6 +523,12 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.N115AutoFallback != nil {
 		settings.N115AutoFallback = overrides.N115AutoFallback
+	}
+	if overrides.N115RetryCount > 0 {
+		settings.N115RetryCount = overrides.N115RetryCount
+	}
+	if overrides.N115RetryDelay != "" {
+		settings.N115RetryDelay = overrides.N115RetryDelay
 	}
 	if overrides.N115Cookie != "" {
 		settings.N115Cookie = "********"

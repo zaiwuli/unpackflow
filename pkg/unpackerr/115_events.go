@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -168,19 +169,41 @@ func (u *Unpackerr) n115Request(ctx context.Context, method, endpoint string, fo
 		return nil, err
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d", res.StatusCode)
+		return nil, fmt.Errorf("115 接口 HTTP %d：%s", res.StatusCode, n115ResponseSummary(raw))
 	}
 	var response map[string]any
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return nil, fmt.Errorf("响应不是 JSON：%w", err)
 	}
 	if state, exists := response["state"].(bool); exists && !state {
-		if message, ok := response["error"].(string); ok && message != "" {
-			return nil, fmt.Errorf("%s", message)
-		}
-		return nil, fmt.Errorf("115 接口返回失败")
+		return nil, fmt.Errorf("115 接口返回失败：%s", n115ResponseSummary(raw))
 	}
 	return response, nil
+}
+
+// n115ResponseSummary preserves the server's useful error message without
+// dumping a potentially huge response or any request credentials into logs.
+func n115ResponseSummary(raw []byte) string {
+	var response map[string]any
+	if json.Unmarshal(raw, &response) == nil {
+		parts := make([]string, 0, 3)
+		for _, key := range []string{"error", "message", "msg", "errno", "code"} {
+			if value, ok := response[key]; ok && strings.TrimSpace(fmt.Sprint(value)) != "" {
+				parts = append(parts, key+"="+fmt.Sprint(value))
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "，")
+		}
+	}
+	value := strings.TrimSpace(string(raw))
+	if value == "" {
+		return "无返回内容"
+	}
+	if len(value) > 240 {
+		value = value[:240] + "…"
+	}
+	return strconv.Quote(value)
 }
 
 func (u *Unpackerr) n115ListFiles(ctx context.Context, cid string) ([]n115File, error) {
@@ -246,21 +269,40 @@ func int115Value(value any) int64 {
 }
 
 func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, version ProcessedSource) {
-	u.update115Transfer(version.Key, file.Name, "115 云端解压中", nil)
-	u.Systemf("115 云解压开始：%s", file.Name)
-	status, err := u.n115SeparateExtract(file, mapping.SourceCID)
-	if err == nil && status == "success" {
-		u.markProcessed(version)
-		u.cd2Tasks.Delete(version.Key)
-		u.handle115SuccessSource(mapping, file)
-		u.notifyEvent(notifyComplete, "✅", "115 云解压完成", "115 云端", file.Name)
-		u.Printf("115 云解压完成：%s", file.Name)
-		return
+	retries := u.CloudDrive2.N115RetryCount
+	if retries == 0 {
+		retries = 3
 	}
-	if err == nil {
-		err = fmt.Errorf("云解压状态：%s", status)
+	delay := u.CloudDrive2.N115RetryDelay.Duration
+	if delay <= 0 {
+		delay = 2 * time.Minute
 	}
-	u.Errorf("115 云解压失败：%s：%v", file.Name, err)
+	var err error
+	for attempt := uint(1); attempt <= retries; attempt++ {
+		u.update115Transfer(version.Key, file.Name, "115 云端解压中", func(task *CD2Transfer) {
+			task.Error = ""
+		})
+		u.Systemf("115 云解压开始（第 %d/%d 次）：%s", attempt, retries, file.Name)
+		status, extractErr := u.n115SeparateExtract(file, mapping.SourceCID)
+		if extractErr == nil && status == "success" {
+			u.markProcessed(version)
+			u.cd2Tasks.Delete(version.Key)
+			u.handle115SuccessSource(mapping, file)
+			u.notifyEvent(notifyComplete, "✅", "115 云解压完成", "115 云端", file.Name)
+			u.Printf("115 云解压完成：%s", file.Name)
+			return
+		}
+		if extractErr == nil {
+			extractErr = fmt.Errorf("云解压状态：%s", status)
+		}
+		err = extractErr
+		if attempt < retries {
+			u.Systemf("115 云解压第 %d/%d 次失败，%s 后重试：%s：%v", attempt, retries, delay, file.Name, err)
+			u.update115Transfer(version.Key, file.Name, fmt.Sprintf("115 云解压重试中（%d/%d）", attempt, retries), func(task *CD2Transfer) { task.Error = err.Error() })
+			time.Sleep(delay)
+		}
+	}
+	u.Errorf("115 云解压最终失败（已重试 %d 次）：%s：%v", retries, file.Name, err)
 	u.notifyEvent(notifyComplete, "❌", "115 云解压失败", "115 云端", file.Name)
 	if !mapping.fallbackEnabled() {
 		u.update115Transfer(version.Key, file.Name, "115 云解压失败", func(task *CD2Transfer) { task.Error = err.Error() })
