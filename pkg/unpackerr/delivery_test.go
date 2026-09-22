@@ -297,6 +297,15 @@ func TestSettingsAPIReturnsAndPersists(t *testing.T) {
 	}
 }
 
+func TestDashboardJSUsesSafe115MappingSelector(t *testing.T) {
+	if bytes.Contains(dashboardJS, []byte("#115-mappings")) {
+		t.Fatal("115 mapping ID starts with a digit and must not be used as a CSS selector")
+	}
+	if !bytes.Contains(dashboardJS, []byte("list.querySelectorAll('.mapping-row')")) {
+		t.Fatal("115 mapping rows are not collected from the resolved container")
+	}
+}
+
 func TestCloudPathSettingsSaveWhenOptionalFeaturesAreDisabled(t *testing.T) {
 	dir := t.TempDir()
 	u := New()

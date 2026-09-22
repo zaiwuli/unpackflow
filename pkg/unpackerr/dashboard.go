@@ -257,6 +257,7 @@ func statusName(status ExtractStatus) string {
 }
 func (u *Unpackerr) dashboardPage(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	page := bytes.ReplaceAll(dashboardHTML, []byte("/*__CSS__*/"), dashboardCSS)
 	page = bytes.ReplaceAll(page, []byte("/*__JS__*/"), dashboardJS)
 	_, _ = w.Write(page)

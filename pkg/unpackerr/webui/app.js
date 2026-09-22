@@ -324,7 +324,9 @@ function fill115MappingRows(values) {
 }
 
 function collect115Mappings() {
-  return Array.from(document.querySelectorAll('#115-mappings .mapping-row')).map(row => {
+  const list = $('115-mappings');
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('.mapping-row')).map(row => {
     const source = row.querySelector('[data-mapping-field="source"]').value.trim();
     const fallback = row.querySelector('[data-mapping-field="fallback"]').value.trim();
     const path = row.querySelector('[data-mapping-field="path"]').value.trim();
