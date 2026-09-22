@@ -1,6 +1,7 @@
 package unpackerr
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -62,6 +63,24 @@ func TestN115SeparateFolderName(t *testing.T) {
 	}
 	if got := n115ExtractFolderName("movie.7z"); got != "movie" {
 		t.Fatalf("archive folder = %q", got)
+	}
+}
+
+func TestN115SeparateExtractKeepsOnlySuccessfulOutput(t *testing.T) {
+	for _, test := range []struct {
+		status string
+		err    error
+		keep   bool
+	}{
+		{status: "success", keep: true},
+		{status: "failed", keep: false},
+		{status: "password", keep: false},
+		{status: "", err: context.DeadlineExceeded, keep: false},
+	} {
+		keep := keep115ExtractOutput(test.status, test.err)
+		if keep != test.keep {
+			t.Fatalf("status=%q err=%v keep=%v, want %v", test.status, test.err, keep, test.keep)
+		}
 	}
 }
 

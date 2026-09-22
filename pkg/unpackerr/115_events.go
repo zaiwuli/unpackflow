@@ -620,7 +620,7 @@ func (u *Unpackerr) update115Transfer(key, fileName, state string, update func(*
 	})
 }
 
-func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (string, error) {
+func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (status string, extractErr error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	info, err := u.n115Request(ctx, http.MethodGet, n115APIBase+"/files/extract_info", url.Values{
@@ -640,6 +640,16 @@ func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (string
 	if err != nil {
 		return "", err
 	}
+	defer func() {
+		if keep115ExtractOutput(status, extractErr) {
+			return
+		}
+		if err := u.n115DeleteFile(targetCID, outputCID); err != nil {
+			u.Errorf("115 云解压失败目录清理失败：%s（CID %s）：%v", file.Name, outputCID, err)
+		} else {
+			u.Systemf("115 云解压失败目录已清理：%s（CID %s）", file.Name, outputCID)
+		}
+	}()
 	form := url.Values{"pick_code": {file.PickCode}, "to_pid": {outputCID}, "paths": {paths}}
 	for _, entry := range entries {
 		if entry.Category == 0 {
@@ -662,6 +672,10 @@ func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (string
 		}
 	}
 	return "failed", fmt.Errorf("需要密码或密码不正确")
+}
+
+func keep115ExtractOutput(status string, err error) bool {
+	return status == "success" && err == nil
 }
 
 func n115ExtractFolderName(name string) string {
