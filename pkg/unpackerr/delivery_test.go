@@ -472,6 +472,33 @@ func TestDashboardShowsExtractionFallbackProgress(t *testing.T) {
 	}
 }
 
+func TestDashboardMergesCD2CopyAndExtractionIntoOneTask(t *testing.T) {
+	u := New()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "mounted", "movie.rar")
+	cached := filepath.Join(dir, "cache", "movie.rar")
+	key := cloudDriveTaskKey(source)
+	u.updateCD2Transfer(key, source, "排队中", func(transfer *CD2Transfer) {
+		transfer.CachedPath = cached
+		transfer.Source = "CD2 实时推送"
+	})
+	u.Map[cached] = &Extract{
+		Path: cached, App: FolderString, Status: EXTRACTING, Updated: time.Now(),
+		XProg: &ExtractProgress{Progress: &xtractr.Progress{Total: 100, Wrote: 40}, Archives: 1},
+	}
+
+	snapshot := u.dashboardSnapshot()
+	if len(snapshot.Tasks) != 1 {
+		t.Fatalf("copy and extraction rendered as separate tasks: %#v", snapshot.Tasks)
+	}
+	if snapshot.Tasks[0].Key != key || snapshot.Tasks[0].Name != "movie.rar" || snapshot.Tasks[0].Status != "正在解压" {
+		t.Fatalf("unexpected unified task: %#v", snapshot.Tasks[0])
+	}
+	if snapshot.Tasks[0].Bytes != 40 || snapshot.Tasks[0].Total != 100 {
+		t.Fatalf("extraction byte progress missing: %#v", snapshot.Tasks[0])
+	}
+}
+
 func TestModernCloudSettingsClearLegacyConfigPaths(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "unpackerr.conf")

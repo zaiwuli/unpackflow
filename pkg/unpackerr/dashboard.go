@@ -139,6 +139,13 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			if progress := item.XProg.String(); progress != "no progress yet" {
 				task.Progress = progress
 			}
+			if item.XProg.Progress != nil {
+				if item.XProg.Total > 0 {
+					task.Bytes, task.Total = int64(item.XProg.Wrote), int64(item.XProg.Total)
+				} else if item.XProg.Compressed > 0 {
+					task.Bytes, task.Total = int64(item.XProg.Read), int64(item.XProg.Compressed)
+				}
+			}
 		}
 		if item.Status == EXTRACTING && task.Progress == "" {
 			task.Progress = "正在解压，解压工具暂未返回百分比"
@@ -149,9 +156,24 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		if item.Status == QUEUED || item.Status == EXTRACTING || item.Status == WAITING {
 			snapshot.Totals.Active++
 		}
+		if transferKey, transfer, linked := u.cd2TransferForCachedPath(name); linked {
+			task.Key = transferKey
+			task.Name = filepath.Base(transfer.Path)
+			if transfer.Source != "" {
+				task.Source = transfer.Source
+			}
+			task.Error = transfer.Error
+		}
 		snapshot.Tasks = append(snapshot.Tasks, task)
 	}
+	visibleTaskKeys := make(map[string]struct{}, len(snapshot.Tasks))
+	for _, task := range snapshot.Tasks {
+		visibleTaskKeys[task.Key] = struct{}{}
+	}
 	for _, transfer := range snapshot.Transfers {
+		if _, merged := visibleTaskKeys[transfer.Key]; merged {
+			continue
+		}
 		status := transfer.State
 		if _, cancelled := u.cancelled.Load(transfer.Key); cancelled {
 			status = "已取消"

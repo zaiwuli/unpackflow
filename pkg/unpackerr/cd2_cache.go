@@ -98,15 +98,43 @@ func (u *Unpackerr) beginCD2EventTask(paths []string, remotePath string) string 
 	return ""
 }
 
-func (u *Unpackerr) clearCD2TransferForCachedPath(cachedPath string) {
+// cd2TransferForCachedPath returns the original cloud transfer that produced a
+// cached archive. The cached path is deliberately an attribute of that task,
+// not a second task identity.
+func (u *Unpackerr) cd2TransferForCachedPath(cachedPath string) (string, *CD2Transfer, bool) {
 	clean := filepath.Clean(cachedPath)
+	var foundKey string
+	var found *CD2Transfer
 	u.cd2Tasks.Range(func(key, value any) bool {
 		transfer, ok := value.(*CD2Transfer)
 		if ok && transfer != nil && transfer.CachedPath != "" && filepath.Clean(transfer.CachedPath) == clean {
-			u.cd2Tasks.Delete(key)
+			foundKey, _ = key.(string)
+			copy := *transfer
+			found = &copy
+			return false
 		}
 		return true
 	})
+	return foundKey, found, found != nil
+}
+
+// clearCD2TransferForCachedPath is retained for terminal cleanup paths. Queue
+// and extraction transitions must update the existing transfer instead.
+func (u *Unpackerr) clearCD2TransferForCachedPath(cachedPath string) {
+	if key, _, ok := u.cd2TransferForCachedPath(cachedPath); ok {
+		u.cd2Tasks.Delete(key)
+	}
+}
+
+func (u *Unpackerr) updateCD2TransferForCachedPath(cachedPath, state string) bool {
+	key, transfer, ok := u.cd2TransferForCachedPath(cachedPath)
+	if !ok {
+		return false
+	}
+	u.updateCD2Transfer(key, transfer.Path, state, func(current *CD2Transfer) {
+		current.CachedPath = filepath.Clean(cachedPath)
+	})
+	return true
 }
 
 // validateCloudDriveCache creates an internal watched folder for cached CD2

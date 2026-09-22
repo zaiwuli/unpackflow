@@ -41,9 +41,18 @@ func (p *ExtractProgress) String() string {
 		wrote, total = p.Read, p.Compressed
 	}
 
+	currentFile := "正在处理压缩数据"
+	if p.XFile != nil {
+		currentFile = strings.TrimLeft(strings.TrimPrefix(p.XFile.FilePath, p.Path), string(filepath.Separator))
+	}
+	archiveTotal := p.Archives
+	if archiveTotal < 1 {
+		archiveTotal = 1
+	}
+
 	return fmt.Sprintf("解压进度：分卷 %d/%d · %sB/%sB · %.0f%% · %s",
-		p.Extracted+1, p.Archives, bytefmt.ByteSize(wrote), bytefmt.ByteSize(total),
-		p.Percent(), strings.TrimLeft(strings.TrimPrefix(p.XFile.FilePath, p.Path), string(filepath.Separator)))
+		p.Extracted+1, archiveTotal, bytefmt.ByteSize(wrote), bytefmt.ByteSize(total),
+		p.Percent(), currentFile)
 }
 
 func (u *Unpackerr) progressUpdateCallback(item *Extract) func(xtractr.Progress) {

@@ -871,7 +871,7 @@ func (u *Unpackerr) updateQueueStatus(data *newStatus, now time.Time, sendHook b
 		}
 
 		u.Map[data.Name].XProg = &ExtractProgress{Extract: u.Map[data.Name]}
-		u.clearCD2TransferForCachedPath(data.Name)
+		u.updateCD2TransferForCachedPath(data.Name, statusName(data.Status))
 
 		if sendHook {
 			u.runAllHooks(u.Map[data.Name])
@@ -886,11 +886,10 @@ func (u *Unpackerr) updateQueueStatus(data *newStatus, now time.Time, sendHook b
 	if data.Resp != nil {
 		u.Map[data.Name].Resp = data.Resp
 	}
-	// A CD2 cache transfer may have created this task before the folder event
-	// was delivered. Clear the transfer on every status update, not only when
-	// the task is first inserted, so completed work cannot remain stuck as
-	// "排队中" in the dashboard.
-	u.clearCD2TransferForCachedPath(data.Name)
+	// Keep the cloud discovery/copy identity and advance that same task through
+	// extraction. The dashboard will merge the internal folder worker with this
+	// transfer instead of rendering a cache row and an extraction row.
+	u.updateCD2TransferForCachedPath(data.Name, statusName(data.Status))
 
 	u.Map[data.Name].Status = data.Status
 	u.Map[data.Name].Updated = now
