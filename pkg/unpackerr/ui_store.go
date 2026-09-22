@@ -117,6 +117,7 @@ func normalizeMSNotificationURL(raw string) string {
 }
 
 type UIOverrides struct {
+	SchemaVersion       int                `json:"schema_version"`
 	Workers             uint               `json:"workers,omitempty"`
 	LocalSourceAction   string             `json:"local_source_action,omitempty"`
 	LocalArchiveDir     string             `json:"local_archive_dir,omitempty"`
@@ -126,10 +127,10 @@ type UIOverrides struct {
 	CD2URL              string             `json:"cd2_url,omitempty"`
 	CD2Token            string             `json:"cd2_token,omitempty"`
 	RefreshInterval     string             `json:"refresh_interval,omitempty"`
-	RefreshPath         string             `json:"refresh_path,omitempty"`
-	WatchPath           string             `json:"watch_path,omitempty"`
-	ManualWatchPaths    []string           `json:"manual_watch_paths,omitempty"`
-	PathOverrides       []string           `json:"path_overrides,omitempty"`
+	RefreshPath         string             `json:"refresh_path"`
+	WatchPath           string             `json:"watch_path"`
+	ManualWatchPaths    []string           `json:"manual_watch_paths"`
+	PathOverrides       []string           `json:"path_overrides"`
 	CacheDir            string             `json:"cache_dir,omitempty"`
 	CacheExtractPath    string             `json:"cache_extract_path,omitempty"`
 	KeepCache           *bool              `json:"keep_cache,omitempty"`
@@ -145,21 +146,21 @@ type UIOverrides struct {
 	N115Cookie          string             `json:"115_cookie,omitempty"`
 	N115CookieRemark    string             `json:"115_cookie_remark,omitempty"`
 	N115EventInterval   string             `json:"115_event_interval,omitempty"`
-	N115Mappings        []string           `json:"115_mappings,omitempty"`
-	N115SourceCIDs      []string           `json:"115_source_cids,omitempty"`
-	N115CIDRemarks      map[string]string  `json:"115_cid_remarks,omitempty"`
-	N115FailureCID      string             `json:"115_failure_cid,omitempty"`
-	N115FailureCD2Path  string             `json:"115_failure_cd2_path,omitempty"`
-	N115Downloads       []string           `json:"115_download_mappings,omitempty"`
+	N115Mappings        []string           `json:"115_mappings"`
+	N115SourceCIDs      []string           `json:"115_source_cids"`
+	N115CIDRemarks      map[string]string  `json:"115_cid_remarks"`
+	N115FailureCID      string             `json:"115_failure_cid"`
+	N115FailureCD2Path  string             `json:"115_failure_cd2_path"`
+	N115Downloads       []string           `json:"115_download_mappings"`
 	N115SuccessAction   string             `json:"115_success_action,omitempty"`
-	N115ArchiveCID      string             `json:"115_archive_cid,omitempty"`
+	N115ArchiveCID      string             `json:"115_archive_cid"`
 	N115AutoFallback    *bool              `json:"115_auto_fallback,omitempty"`
 	N115RetryCount      uint               `json:"115_retry_count,omitempty"`
 	N115RetryDelay      string             `json:"115_retry_delay,omitempty"`
-	N115Sources         []N115SourceRule   `json:"115_sources,omitempty"`
-	N115Failure         *N115FailureRule   `json:"115_failure,omitempty"`
-	N115DownloadRules   []N115DownloadRule `json:"115_download_rules,omitempty"`
-	N115Archive         *N115FolderRule    `json:"115_archive,omitempty"`
+	N115Sources         []N115SourceRule   `json:"115_sources"`
+	N115Failure         *N115FailureRule   `json:"115_failure"`
+	N115DownloadRules   []N115DownloadRule `json:"115_download_rules"`
+	N115Archive         *N115FolderRule    `json:"115_archive"`
 }
 
 type N115SourceRule struct {
@@ -204,6 +205,7 @@ func (u *Unpackerr) loadUIStore() error {
 		return fmt.Errorf("ui state: %w", err)
 	}
 	store.Path = filepath.Join(base, "unpackflow-ui.json")
+	modernCloudSettings := store.Overrides.SchemaVersion >= 2 || store.Overrides.N115Sources != nil || store.Overrides.N115DownloadRules != nil || store.Overrides.N115Failure != nil || store.Overrides.N115Archive != nil
 	migrateLegacyDataPaths(&store.Overrides)
 	normalizeStructured115Settings(&store.Overrides)
 	if len(store.Passwords) == 0 && len(u.Passwords) > 0 {
@@ -224,26 +226,33 @@ func (u *Unpackerr) loadUIStore() error {
 	if store.Overrides.CD2Token != "" {
 		u.CloudDrive2.Token = store.Overrides.CD2Token
 	}
-	if store.Overrides.RefreshPath != "" {
-		u.CloudDrive2.RefreshPath = store.Overrides.RefreshPath
-	}
-	if store.Overrides.WatchPath != "" {
-		u.CloudDrive2.WatchPath = store.Overrides.WatchPath
-	}
-	if store.Overrides.ManualWatchPaths != nil {
+	if modernCloudSettings {
+		u.CloudDrive2.RefreshPath = strings.TrimSpace(store.Overrides.RefreshPath)
+		u.CloudDrive2.WatchPath = strings.TrimSpace(store.Overrides.WatchPath)
 		u.CloudDrive2.ManualWatchPaths = append([]string(nil), store.Overrides.ManualWatchPaths...)
-	} else if store.Overrides.WatchPath != "" {
-		// Existing configurations used one CD2 watch path. Keep it as a daily
-		// local-download folder after upgrading.
-		u.CloudDrive2.ManualWatchPaths = []string{store.Overrides.WatchPath}
+		u.CloudDrive2.PathOverrides = append([]string(nil), store.Overrides.PathOverrides...)
+	} else {
+		if store.Overrides.RefreshPath != "" {
+			u.CloudDrive2.RefreshPath = store.Overrides.RefreshPath
+		}
+		if store.Overrides.WatchPath != "" {
+			u.CloudDrive2.WatchPath = store.Overrides.WatchPath
+		}
+		if store.Overrides.ManualWatchPaths != nil {
+			u.CloudDrive2.ManualWatchPaths = append([]string(nil), store.Overrides.ManualWatchPaths...)
+		} else if store.Overrides.WatchPath != "" {
+			// Existing configurations used one CD2 watch path. Keep it once when
+			// loading a genuinely old settings file.
+			u.CloudDrive2.ManualWatchPaths = []string{store.Overrides.WatchPath}
+		}
+		if store.Overrides.PathOverrides != nil {
+			u.CloudDrive2.PathOverrides = append([]string(nil), store.Overrides.PathOverrides...)
+		}
 	}
 	if store.Overrides.RefreshInterval != "" {
 		if d, e := time.ParseDuration(store.Overrides.RefreshInterval); e == nil {
 			u.CloudDrive2.RefreshInterval.Duration = d
 		}
-	}
-	if store.Overrides.PathOverrides != nil {
-		u.CloudDrive2.PathOverrides = append([]string(nil), store.Overrides.PathOverrides...)
 	}
 	if store.Overrides.CacheDir != "" {
 		u.CloudDrive2.CacheDir = store.Overrides.CacheDir
@@ -296,28 +305,44 @@ func (u *Unpackerr) loadUIStore() error {
 			u.CloudDrive2.N115EventInterval.Duration = d
 		}
 	}
-	if store.Overrides.N115CookieRemark != "" {
+	if modernCloudSettings {
+		u.CloudDrive2.N115CookieRemark = strings.TrimSpace(store.Overrides.N115CookieRemark)
+	} else if store.Overrides.N115CookieRemark != "" {
 		u.CloudDrive2.N115CookieRemark = store.Overrides.N115CookieRemark
 	}
-	if store.Overrides.N115Mappings != nil {
+	if modernCloudSettings {
 		u.CloudDrive2.N115Mappings = append([]string(nil), store.Overrides.N115Mappings...)
-	}
-	if store.Overrides.N115SourceCIDs != nil {
 		u.CloudDrive2.N115SourceCIDs = clean115CIDs(store.Overrides.N115SourceCIDs)
-	}
-	if store.Overrides.N115SourceCIDs != nil || store.Overrides.N115Downloads != nil {
 		u.CloudDrive2.N115FailureCID = strings.TrimSpace(store.Overrides.N115FailureCID)
 		u.CloudDrive2.N115FailureCD2Path = strings.TrimSpace(store.Overrides.N115FailureCD2Path)
-	}
-	if store.Overrides.N115Downloads != nil {
 		u.CloudDrive2.N115DownloadMappings = append([]string(nil), store.Overrides.N115Downloads...)
+	} else if store.Overrides.N115Mappings != nil {
+		u.CloudDrive2.N115Mappings = append([]string(nil), store.Overrides.N115Mappings...)
+		if store.Overrides.N115SourceCIDs != nil {
+			u.CloudDrive2.N115SourceCIDs = clean115CIDs(store.Overrides.N115SourceCIDs)
+		}
+		if store.Overrides.N115SourceCIDs != nil || store.Overrides.N115Downloads != nil {
+			u.CloudDrive2.N115FailureCID = strings.TrimSpace(store.Overrides.N115FailureCID)
+			u.CloudDrive2.N115FailureCD2Path = strings.TrimSpace(store.Overrides.N115FailureCD2Path)
+		}
+		if store.Overrides.N115Downloads != nil {
+			u.CloudDrive2.N115DownloadMappings = append([]string(nil), store.Overrides.N115Downloads...)
+		}
 	}
-	migrate115CloudSettings(&u.CloudDrive2)
-	if store.Overrides.N115SuccessAction != "" {
+	if !modernCloudSettings {
+		migrate115CloudSettings(&u.CloudDrive2)
+	}
+	if modernCloudSettings {
+		u.CloudDrive2.N115SuccessAction = strings.TrimSpace(store.Overrides.N115SuccessAction)
+		if u.CloudDrive2.N115SuccessAction == "" {
+			u.CloudDrive2.N115SuccessAction = "keep"
+		}
+		u.CloudDrive2.N115ArchiveCID = strings.TrimSpace(store.Overrides.N115ArchiveCID)
+	} else if store.Overrides.N115SuccessAction != "" {
 		u.CloudDrive2.N115SuccessAction = store.Overrides.N115SuccessAction
-	}
-	if store.Overrides.N115ArchiveCID != "" {
-		u.CloudDrive2.N115ArchiveCID = store.Overrides.N115ArchiveCID
+		if store.Overrides.N115ArchiveCID != "" {
+			u.CloudDrive2.N115ArchiveCID = store.Overrides.N115ArchiveCID
+		}
 	}
 	if store.Overrides.N115AutoFallback != nil {
 		u.CloudDrive2.N115AutoFallback = *store.Overrides.N115AutoFallback
@@ -331,6 +356,12 @@ func (u *Unpackerr) loadUIStore() error {
 		}
 	}
 	u.uiStore = store
+	if modernCloudSettings && store.Overrides.SchemaVersion < 2 {
+		store.Overrides.SchemaVersion = 2
+		if err := u.saveUIStore(); err != nil {
+			u.Errorf("升级云端设置格式失败：%v", err)
+		}
+	}
 	return nil
 }
 
@@ -455,6 +486,7 @@ func (u *Unpackerr) notificationSettings() UINotification {
 func (u *Unpackerr) uiSettings() UIOverrides {
 	enabled, keepCache := u.CloudDrive2.Enabled, u.CloudDrive2.KeepCache
 	settings := UIOverrides{
+		SchemaVersion:  2,
 		Workers:        u.Parallel,
 		FolderInterval: u.Folder.Interval.Duration.String(),
 		CD2Enabled:     &enabled,
@@ -714,6 +746,7 @@ func (u *Unpackerr) saveNotification(s UINotification) error {
 }
 func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	u.uiStore.mu.Lock()
+	s.SchemaVersion = 2
 	// The API intentionally never returns the CD2 token to the browser. An empty
 	// token submitted while editing another setting therefore means "keep the
 	// existing token", not "erase it".
@@ -892,7 +925,6 @@ func (u *Unpackerr) applyCloudDriveUIOverrides(s UIOverrides) {
 			u.CloudDrive2.N115RetryDelay.Duration = d
 		}
 	}
-	migrate115CloudSettings(&u.CloudDrive2)
 	u.refreshPending115ConfiguredPaths()
 }
 
@@ -915,9 +947,25 @@ func (u *Unpackerr) refreshPending115ConfiguredPaths() {
 				}
 			}
 		}
-		if pathValue != "" && pending.CD2Path != pathValue {
+		if pathValue == "" {
+			delete(u.state.Fallback115, key)
+			u.cd2Tasks.Delete(pending.TaskKey)
+			changed = true
+			continue
+		}
+		if pending.CD2Path != pathValue {
 			pending.CD2Path = pathValue
 			u.state.Fallback115[key] = pending
+			changed = true
+		}
+	}
+	for key, pending := range u.state.Pending {
+		if pending.N115TaskKey == "" {
+			continue
+		}
+		if _, ok := u.configured115LocalPath(pending.N115SourceCID); !ok {
+			delete(u.state.Pending, key)
+			u.cd2Tasks.Delete(pending.N115TaskKey)
 			changed = true
 		}
 	}
@@ -927,6 +975,20 @@ func (u *Unpackerr) refreshPending115ConfiguredPaths() {
 			u.Errorf("更新 115 待处理任务路径失败：%v", err)
 		}
 	}
+}
+
+func (u *Unpackerr) configured115LocalPath(cid string) (string, bool) {
+	cid = strings.TrimSpace(cid)
+	if cid != "" && cid == strings.TrimSpace(u.CloudDrive2.N115FailureCID) {
+		value := normalizeCloudDrivePath(u.CloudDrive2.N115FailureCD2Path)
+		return value, value != ""
+	}
+	for _, mapping := range parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings) {
+		if mapping.CID == cid {
+			return mapping.CD2Path, true
+		}
+	}
+	return "", false
 }
 
 func cleanN115CIDRemarks(values map[string]string) map[string]string {

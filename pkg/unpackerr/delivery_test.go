@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -429,6 +430,75 @@ func TestTaskSystemPausePersistsAcrossRestart(t *testing.T) {
 	}
 	if !restarted.taskSystemPaused.Load() || !restarted.downloadsPaused.Load() || !restarted.dashboardSnapshot().Paused {
 		t.Fatal("task system pause state was not restored")
+	}
+}
+
+func TestModernCloudSettingsClearLegacyConfigPaths(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "unpackerr.conf")
+	storePath := filepath.Join(dir, "unpackflow-ui.json")
+	data := "{\"settings\":{\"115_sources\":[{\"id\":\"source:100\",\"cid\":\"100\"}],\"115_failure\":{\"id\":\"cloud-failure\",\"cid\":\"900\",\"cd2_path\":\"/115open/NSFW/失败\",\"mode\":\"approval\"},\"115_download_rules\":[{\"id\":\"download:300\",\"cid\":\"300\",\"cd2_path\":\"/115open/绿联备份/下载\",\"mode\":\"auto\"}]}}"
+	if err := os.WriteFile(storePath, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := New()
+	u.ConfigFile = configPath
+	u.CloudDrive2.WatchPath = "/115open/上传下载/下载"
+	u.CloudDrive2.RefreshPath = "/115open/上传下载/下载"
+	u.CloudDrive2.ManualWatchPaths = []string{"/115open/上传下载/下载"}
+	u.CloudDrive2.N115Mappings = []string{"100 => 900 => /115open/上传下载/下载"}
+	u.CloudDrive2.N115ArchiveCID = "888"
+	u.CloudDrive2.N115CookieRemark = "旧备注"
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	if u.CloudDrive2.WatchPath != "" || u.CloudDrive2.RefreshPath != "" || len(u.CloudDrive2.ManualWatchPaths) != 0 || len(u.CloudDrive2.N115Mappings) != 0 {
+		t.Fatalf("legacy paths survived modern settings: %#v", u.CloudDrive2)
+	}
+	if u.CloudDrive2.N115ArchiveCID != "" || u.CloudDrive2.N115CookieRemark != "" {
+		t.Fatalf("cleared cloud values survived modern settings: %#v", u.CloudDrive2)
+	}
+	if got := cloudDriveConfiguredRefreshPaths(u.CloudDrive2); len(got) != 2 || slices.Contains(got, "/115open/上传下载/下载") {
+		t.Fatalf("unexpected refresh paths after migration: %#v", got)
+	}
+}
+
+func TestEmptyCloudSettingsPersistAsExplicitOverrides(t *testing.T) {
+	dir := t.TempDir()
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	settings := UIOverrides{ManualWatchPaths: []string{}, PathOverrides: []string{}, N115Mappings: []string{}, N115Sources: []N115SourceRule{}, N115DownloadRules: []N115DownloadRule{}}
+	if err := u.saveUIOverrides(settings); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "unpackflow-ui.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"\"schema_version\": 2", "\"watch_path\": \"\"", "\"manual_watch_paths\": []", "\"115_sources\": []", "\"115_download_rules\": []"} {
+		if !bytes.Contains(raw, []byte(marker)) {
+			t.Fatalf("saved settings do not preserve explicit empty value %s: %s", marker, raw)
+		}
+	}
+}
+
+func TestChangingCloudRulesRemovesStalePendingPaths(t *testing.T) {
+	dir := t.TempDir()
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	u.state = &ProcessingState{Path: filepath.Join(dir, "unpackflow-state.json"), Processed: map[string]ProcessedSource{}, Pending: map[string]PendingCD2{"old-copy": {Key: "old-copy", N115TaskKey: "old-task", N115SourceCID: "300"}}, Fallback115: map[string]Pending115{"old": {Key: "old", TaskKey: "old-task", SourceCID: "300", FallbackCID: "300", CD2Path: "/115open/上传下载/下载", Kind: "manual_download"}}}
+	settings := UIOverrides{N115Sources: []N115SourceRule{}, N115DownloadRules: []N115DownloadRule{}, N115Mappings: []string{}}
+	if err := u.saveUIOverrides(settings); err != nil {
+		t.Fatal(err)
+	}
+	if len(u.state.Fallback115) != 0 || len(u.state.Pending) != 0 {
+		t.Fatalf("stale pending paths survived configuration change: %#v %#v", u.state.Fallback115, u.state.Pending)
 	}
 }
 
