@@ -41,7 +41,7 @@ func (p *ExtractProgress) String() string {
 		wrote, total = p.Read, p.Compressed
 	}
 
-	return fmt.Sprintf("on archive: %d/%d @ %sB/%sB (%.0f%%): %s",
+	return fmt.Sprintf("解压进度：分卷 %d/%d · %sB/%sB · %.0f%% · %s",
 		p.Extracted+1, p.Archives, bytefmt.ByteSize(wrote), bytefmt.ByteSize(total),
 		p.Percent(), strings.TrimLeft(strings.TrimPrefix(p.XFile.FilePath, p.Path), string(filepath.Separator)))
 }

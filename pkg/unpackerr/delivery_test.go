@@ -447,6 +447,31 @@ func TestTaskSystemPausePersistsAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestFolderTaskInProgressBlocksDuplicateDiscovery(t *testing.T) {
+	u := New()
+	archive := filepath.Join(t.TempDir(), "active.rar")
+	for _, status := range []ExtractStatus{WAITING, QUEUED, EXTRACTING, EXTRACTED, DELETING} {
+		u.Map[archive] = &Extract{Path: archive, Status: status}
+		if !u.folderTaskInProgress(archive) {
+			t.Fatalf("status %v was not treated as active", status)
+		}
+	}
+	u.Map[archive] = &Extract{Path: archive, Status: EXTRACTFAILED}
+	if u.folderTaskInProgress(archive) {
+		t.Fatal("failed task should remain eligible for normal retry handling")
+	}
+}
+
+func TestDashboardShowsExtractionFallbackProgress(t *testing.T) {
+	u := New()
+	archive := filepath.Join(t.TempDir(), "active.rar")
+	u.Map[archive] = &Extract{Path: archive, App: FolderString, Status: EXTRACTING, Updated: time.Now(), XProg: &ExtractProgress{}}
+	snapshot := u.dashboardSnapshot()
+	if len(snapshot.Tasks) != 1 || snapshot.Tasks[0].Progress != "正在解压，解压工具暂未返回百分比" {
+		t.Fatalf("unexpected extraction progress: %#v", snapshot.Tasks)
+	}
+}
+
 func TestModernCloudSettingsClearLegacyConfigPaths(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "unpackerr.conf")

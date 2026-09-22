@@ -512,7 +512,7 @@ function renderTask(task) {
   const percent = hasCopyProgress ? Math.min(100, Number(task.bytes || 0) * 100 / Number(task.total)) : 0;
   let detail = task.progress || '';
   if (hasCopyProgress) {
-    detail = formatBytes(task.bytes) + ' / ' + formatBytes(task.total);
+    detail = '下载进度 ' + percent.toFixed(1) + '% · ' + formatBytes(task.bytes) + ' / ' + formatBytes(task.total);
     if (task.speed) detail += ' · ' + formatBytes(task.speed) + '/s';
     if (task.eta_seconds) detail += ' · 预计 ' + formatDuration(task.eta_seconds);
   }

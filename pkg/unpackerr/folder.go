@@ -208,6 +208,10 @@ func (u *Unpackerr) scanExistingFolderArchives() {
 			if entry.IsDir() || !xtractr.IsArchiveFile(entry.Name()) {
 				return nil
 			}
+			if u.folderTaskInProgress(path) {
+				u.Debugf("本地压缩包正在处理中，扫描跳过: %s", path)
+				return nil
+			}
 			version, versionErr := sourceVersion("local", path)
 			if versionErr == nil && u.wasProcessed(version) {
 				u.Debugf("本地压缩包已处理，跳过: %s", path)
@@ -616,6 +620,14 @@ func (u *Unpackerr) processEvent(event *eventData, now time.Time) {
 	if event.file == u.LogFile || event.file == u.Webserver.LogFile {
 		return
 	}
+	identityPath := event.file
+	if event.cnfg != nil && filepath.Dir(event.file) != event.cnfg.Path {
+		identityPath = filepath.Dir(event.file)
+	}
+	if u.folderTaskInProgress(identityPath) {
+		u.Debugf("压缩包正在处理中，忽略重复事件: %s", event.file)
+		return
+	}
 	if event.cnfg != nil && !event.cnfg.ExternalOnly {
 		// Match the identity recorded after extraction. Root-level archives are
 		// processed as files; archives below a child directory are processed as
@@ -633,6 +645,23 @@ func (u *Unpackerr) processEvent(event *eventData, now time.Time) {
 	}
 
 	u.folders.processEvent(event, now)
+}
+
+func (u *Unpackerr) folderTaskInProgress(name string) bool {
+	name = filepath.Clean(name)
+	item, ok := u.Map[name]
+	if ok && item != nil {
+		switch item.Status {
+		case WAITING, QUEUED, EXTRACTING, EXTRACTED, DELETING:
+			return true
+		}
+	}
+	if u.folders != nil {
+		if tracked, exists := u.folders.Folders[name]; exists && tracked != nil {
+			return tracked.status <= EXTRACTING
+		}
+	}
+	return false
 }
 
 // processEvent processes the event that was received.

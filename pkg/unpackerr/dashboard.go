@@ -140,6 +140,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 				task.Progress = progress
 			}
 		}
+		if item.Status == EXTRACTING && task.Progress == "" {
+			task.Progress = "正在解压，解压工具暂未返回百分比"
+		}
 		if _, cancelled := u.cancelled.Load(name); cancelled {
 			task.Status = "已取消"
 		}
