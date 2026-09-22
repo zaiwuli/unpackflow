@@ -730,6 +730,46 @@ func (u *Unpackerr) downloadsPauseAPI(w http.ResponseWriter, r *http.Request, _ 
 	u.writeJSON(w, map[string]any{"success": true, "paused": input.Paused})
 }
 
+// downloadsCleanupAPI deletes globally paused or failed cache downloads.
+// It intentionally refuses to run while downloads are active, avoiding races
+// with a live copy and making the operation explicit in the web UI.
+func (u *Unpackerr) downloadsCleanupAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	if !u.downloadsPaused.Load() {
+		http.Error(w, "请先暂停下载，再清理未完成缓存", http.StatusConflict)
+		return
+	}
+	u.cd2Cancel.Range(func(_, value any) bool {
+		if cancel, ok := value.(context.CancelFunc); ok && cancel != nil {
+			cancel()
+		}
+		return true
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		active := false
+		u.cd2Copy.Range(func(_, _ any) bool {
+			active = true
+			return false
+		})
+		if !active {
+			break
+		}
+		if time.Now().After(deadline) {
+			http.Error(w, "仍有下载任务正在停止，请稍后再试", http.StatusConflict)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	cleared, err := u.clearIncompleteCD2Cache()
+	if err != nil {
+		u.Errorf("清理未完成缓存失败：%v", err)
+		http.Error(w, "清理未完成缓存失败："+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	u.Printf("已清理 %d 个未完成的本地下载任务及缓存", cleared)
+	u.writeJSON(w, map[string]any{"success": true, "cleared": cleared})
+}
+
 func (u *Unpackerr) handleHistoryAction(action historyAction) error {
 	item, ok := u.deleteProcessed(action.Key)
 	if !ok {

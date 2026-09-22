@@ -186,6 +186,44 @@ func TestCacheStagingRootStaysInsideCacheMount(t *testing.T) {
 	}
 }
 
+func TestClearIncompleteCD2CacheKeepsCompletedCacheTask(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	staging := cacheStagingRoot(cacheDir)
+	if err := os.MkdirAll(filepath.Join(staging, "partial"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "partial", "release.7z"), []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := New()
+	u.CloudDrive2.CacheDir = cacheDir
+	u.state = &ProcessingState{
+		Path:      filepath.Join(t.TempDir(), "state.json"),
+		Processed: map[string]ProcessedSource{},
+		Pending: map[string]PendingCD2{
+			"copy|partial":    {Key: "copy|partial", Files: []string{"/mounted/release.7z"}},
+			"/cache/ready.7z": {Key: "/cache/ready.7z", CachedPrimary: "/cache/ready.7z", Files: []string{"/mounted/ready.7z"}},
+		},
+		Fallback115: map[string]Pending115{},
+	}
+	u.updateCD2Transfer("partial", "/mounted/release.7z", "下载已暂停", nil)
+	if cleared, err := u.clearIncompleteCD2Cache(); err != nil || cleared != 1 {
+		t.Fatalf("unexpected cleanup result: cleared=%d err=%v", cleared, err)
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Fatalf("staging root was not recreated: %v", err)
+	}
+	if _, exists := u.state.Pending["copy|partial"]; exists {
+		t.Fatal("incomplete pending task was not removed")
+	}
+	if _, exists := u.state.Pending["/cache/ready.7z"]; !exists {
+		t.Fatal("completed cache task was removed")
+	}
+	if _, exists := u.cd2Tasks.Load("partial"); exists {
+		t.Fatal("incomplete transfer was not removed")
+	}
+}
+
 func TestPromoteCachedFile(t *testing.T) {
 	dir := t.TempDir()
 	staged := filepath.Join(dir, "staged.7z")

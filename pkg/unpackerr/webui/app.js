@@ -479,6 +479,8 @@ function renderStatus(data) {
   if (downloadsPauseButton) {
     downloadsPauseButton.textContent = downloadsPaused ? '恢复下载' : '暂停下载';
   }
+  const downloadsCleanupButton = $('downloads-cleanup');
+  if (downloadsCleanupButton) downloadsCleanupButton.disabled = !downloadsPaused;
   renderList($('tasks'), data.tasks, renderTask, zh.noTasks);
   renderList($('folders'), data.folders, folder => '<div class="compact-item">' + esc(folder.path) + '<small>' + esc(folder.extract_path || '\u539f\u76ee\u5f55\u8f93\u51fa') + ' · ' + folder.tracked + '</small></div>', zh.noFolders);
   renderList($('history'), data.history, item => '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + ' · 解压完成 ' + esc(item.completed_at) + (item.cached_at ? ' · 缓存完成 ' + esc(item.cached_at) : '') + '</small></div><div class="history-actions"><button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button><button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
@@ -555,14 +557,23 @@ $('cd2-refresh').addEventListener('click', async () => {
 });
 function ensureDownloadsPauseButton() {
   let button = $('downloads-pause');
-  if (button) return button;
   const refresh = $('cd2-refresh');
-  if (!refresh || !refresh.parentElement) return null;
-  button = document.createElement('button');
-  button.id = 'downloads-pause';
-  button.type = 'button';
-  button.textContent = '暂停下载';
-  refresh.insertAdjacentElement('afterend', button);
+  if (!button) {
+    if (!refresh || !refresh.parentElement) return null;
+    button = document.createElement('button');
+    button.id = 'downloads-pause';
+    button.type = 'button';
+    button.textContent = '暂停下载';
+    refresh.insertAdjacentElement('afterend', button);
+  }
+  if (!$('downloads-cleanup')) {
+    const cleanup = document.createElement('button');
+    cleanup.id = 'downloads-cleanup';
+    cleanup.type = 'button';
+    cleanup.textContent = '清理未完成缓存';
+    cleanup.disabled = true;
+    button.insertAdjacentElement('afterend', cleanup);
+  }
   return button;
 }
 ensureDownloadsPauseButton().addEventListener('click', async () => {
@@ -579,6 +590,26 @@ ensureDownloadsPauseButton().addEventListener('click', async () => {
     $('refresh-message').textContent = '操作失败';
   } finally {
     button.disabled = false;
+  }
+});
+$('downloads-cleanup').addEventListener('click', async () => {
+  if (!downloadsPaused) {
+    $('refresh-message').textContent = '请先暂停下载，再清理未完成缓存';
+    return;
+  }
+  if (!window.confirm('将清理所有暂停、等待重试或复制未完成的本地缓存。不会删除云端原包，也不会影响正在解压的任务。确定继续吗？')) return;
+  const button = $('downloads-cleanup');
+  button.disabled = true;
+  $('refresh-message').textContent = '正在清理未完成缓存…';
+  try {
+    const response = await fetch('api/downloads/cleanup', {method: 'POST'});
+    const data = await response.json().catch(() => ({}));
+    $('refresh-message').textContent = response.ok ? ('已清理 ' + (data.cleared || 0) + ' 个未完成下载任务') : (data.error || '清理失败');
+    await load(false);
+  } catch (_) {
+    $('refresh-message').textContent = '清理失败';
+  } finally {
+    button.disabled = !downloadsPaused;
   }
 });
 $('password-form').addEventListener('submit', async event => {

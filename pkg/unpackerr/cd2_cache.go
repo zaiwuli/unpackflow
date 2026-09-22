@@ -743,6 +743,31 @@ func (u *Unpackerr) pauseCD2Task(groupKey string, files []string) {
 	})
 }
 
+// clearIncompleteCD2Cache removes only incomplete cache copies. Completed
+// cache files are outside the staging directory and pending extraction tasks
+// use CachedPrimary, so neither is touched here.
+func (u *Unpackerr) clearIncompleteCD2Cache() (int, error) {
+	cleared := 0
+	for _, pending := range u.pendingCD2() {
+		if !strings.HasPrefix(pending.Key, "copy|") || pending.CachedPrimary != "" {
+			continue
+		}
+		groupKey := strings.TrimPrefix(pending.Key, "copy|")
+		u.removePendingCD2(pending.Key)
+		u.cd2Tasks.Delete(groupKey)
+		u.cd2Copy.Delete(groupKey)
+		cleared++
+	}
+	staging := cacheStagingRoot(u.CloudDrive2.CacheDir)
+	if err := os.RemoveAll(staging); err != nil {
+		return cleared, err
+	}
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		return cleared, err
+	}
+	return cleared, nil
+}
+
 func (u *Unpackerr) resumeCD2Pending() {
 	if u.downloadsPaused.Load() {
 		return

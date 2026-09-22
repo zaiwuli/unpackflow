@@ -110,6 +110,7 @@ func (u *Unpackerr) webRoutes() {
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/history/delete"), u.historyAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/tasks/cancel"), u.cancelTaskAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/downloads/pause"), u.downloadsPauseAPI)
+	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/downloads/cleanup"), u.downloadsCleanupAPI)
 
 	if u.Webserver.Pprof {
 		u.registerPprof()
