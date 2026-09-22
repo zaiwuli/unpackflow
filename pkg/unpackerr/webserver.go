@@ -111,6 +111,8 @@ func (u *Unpackerr) webRoutes() {
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/tasks/cancel"), u.cancelTaskAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/downloads/pause"), u.downloadsPauseAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/downloads/cleanup"), u.downloadsCleanupAPI)
+	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/tasks/system"), u.taskSystemAPI)
+	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/maintenance"), u.maintenanceAPI)
 
 	if u.Webserver.Pprof {
 		u.registerPprof()

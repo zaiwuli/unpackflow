@@ -299,7 +299,7 @@ func TestCD2TransferAppearsInUnifiedTaskListImmediately(t *testing.T) {
 	if len(snapshot.Tasks) != 1 {
 		t.Fatalf("expected one unified task, got %#v", snapshot.Tasks)
 	}
-	if snapshot.Tasks[0].Name != "new-cloud.7z" || snapshot.Tasks[0].Status != "等待文件可见" || snapshot.Tasks[0].Source != "CloudDrive2" {
+	if snapshot.Tasks[0].Name != "new-cloud.7z" || snapshot.Tasks[0].Status != "等待文件可见" || snapshot.Tasks[0].Source != "CD2 实时推送" {
 		t.Fatalf("unexpected CD2 task: %#v", snapshot.Tasks[0])
 	}
 }

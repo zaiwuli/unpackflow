@@ -11,7 +11,9 @@ let latestLogs = [];
 let logView = 'user';
 let notificationTemplates = [];
 let activeNotificationTemplateID = '';
-let downloadsPaused = false;
+let taskSystemPaused = false;
+let currentTasks = [];
+let taskFilter = 'all';
 
 function esc(value) {
   const element = document.createElement('div');
@@ -251,17 +253,19 @@ function buildSettingsSections(localBlock, workers) {
   const heading = view.querySelector('.panel-heading');
   const nav = document.createElement('div');
   nav.id = 'settings-switch'; nav.className = 'settings-switch';
-  nav.innerHTML = '<button class="settings-switch-button active" data-settings-view="settings-basic" type="button">基础</button><button class="settings-switch-button" data-settings-view="settings-local" type="button">本地</button><button class="settings-switch-button" data-settings-view="settings-cloud" type="button">云端</button>';
+  nav.innerHTML = '<button class="settings-switch-button active" data-settings-view="settings-basic" type="button">基础</button><button class="settings-switch-button" data-settings-view="settings-local" type="button">本地</button><button class="settings-switch-button" data-settings-view="settings-cloud" type="button">云端</button><button class="settings-switch-button" data-settings-view="settings-maintenance" type="button">数据维护</button>';
   const basic = document.createElement('section'); basic.id = 'settings-basic'; basic.className = 'settings-section active-settings-section';
   const local = document.createElement('section'); local.id = 'settings-local'; local.className = 'settings-section';
   const cloud = document.createElement('section'); cloud.id = 'settings-cloud'; cloud.className = 'settings-section';
-  heading.insertAdjacentElement('afterend', nav); nav.insertAdjacentElement('afterend', basic); basic.insertAdjacentElement('afterend', local); local.insertAdjacentElement('afterend', cloud);
+  const maintenance = document.createElement('section'); maintenance.id = 'settings-maintenance'; maintenance.className = 'settings-section';
+  maintenance.innerHTML = '<div class="panel-heading"><div><h3>数据维护</h3><p>危险操作需要二次确认。清理缓存前必须先在任务页停止任务系统。</p></div></div><div class="form-actions"><button id="clear-all-cache" type="button">清除所有缓存</button><button id="clear-all-history" type="button">清除所有历史记录</button></div><p id="maintenance-message" class="form-message"></p>';
+  heading.insertAdjacentElement('afterend', nav); nav.insertAdjacentElement('afterend', basic); basic.insertAdjacentElement('afterend', local); local.insertAdjacentElement('afterend', cloud); cloud.insertAdjacentElement('afterend', maintenance);
   basic.appendChild(workers);
   const all = Array.from(view.children);
   const save = $('settings-save').closest('.form-actions');
   const message = $('settings-message');
   for (const node of all) {
-    if (node === heading || node === nav || node === basic || node === local || node === cloud || node === save || node === message || node === localBlock) continue;
+    if (node === heading || node === nav || node === basic || node === local || node === cloud || node === maintenance || node === save || node === message || node === localBlock) continue;
     cloud.appendChild(node);
   }
   const localChildren = Array.from(localBlock.children);
@@ -282,6 +286,21 @@ function buildSettingsSections(localBlock, workers) {
     view.querySelectorAll('.settings-section').forEach(item => item.classList.remove('active-settings-section'));
     button.classList.add('active'); $(button.dataset.settingsView).classList.add('active-settings-section');
   }));
+  $('clear-all-cache').addEventListener('click', () => runMaintenance('clear_cache'));
+  $('clear-all-history').addEventListener('click', () => runMaintenance('clear_history'));
+}
+
+async function runMaintenance(action) {
+  const cache = action === 'clear_cache';
+  const message = cache ? '将删除全部本地缓存，但不会删除解压输出或云端原包。任务系统必须已暂停。确定继续吗？' : '将清除全部历史记录和防重复记录；实际文件不会删除，旧压缩包之后可能再次被识别。确定继续吗？';
+  if (!window.confirm(message)) return;
+  $('maintenance-message').textContent = '正在处理…';
+  try {
+    const response = await fetch('api/maintenance', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action})});
+    const data = await response.json().catch(() => ({}));
+    $('maintenance-message').textContent = response.ok ? data.message : (data.error || '操作失败');
+    if (response.ok) await load(false);
+  } catch (_) { $('maintenance-message').textContent = '操作失败'; }
 }
 
 function update115ArchiveCIDVisibility() {
@@ -332,6 +351,14 @@ function collectSourceCIDs() {
   return Array.from($('115-sources').querySelectorAll('[data-field="cid"]')).map(input => input.value.trim()).filter(Boolean);
 }
 
+function collectSourceRules() {
+  return Array.from($('115-sources').querySelectorAll('.mapping-row')).map(row => {
+    const cid = row.querySelector('[data-field="cid"]').value.trim();
+    const remark = row.querySelector('[data-field="remark"]').value.trim();
+    return cid ? {id: 'source:' + cid, cid, remark} : null;
+  }).filter(Boolean);
+}
+
 function collectCIDRemarks() {
   const result = {};
   $('115-sources').querySelectorAll('.mapping-row').forEach(row => {
@@ -357,7 +384,7 @@ function addDownloadRow(value, remarks) {
   const item = typeof value === 'string' ? parseDownloadMapping(value) : (value || {});
   const mode = item.mode === 'approval' ? 'approval' : 'auto';
   const select = '<select class="mapping-select" data-field="mode"><option value="auto"' + (mode === 'auto' ? ' selected' : '') + '>自动下载</option><option value="approval"' + (mode === 'approval' ? ' selected' : '') + '>等待批准</option></select>';
-  list.appendChild(removableRow('', mappingInput('115 文件夹 CID', item.cid, 'cid') + mappingInput('备注，例如：手动下载', (remarks || {})[item.cid] || '', 'remark') + mappingInput('对应 CD2 路径', item.path, 'path') + select));
+  list.appendChild(removableRow('', mappingInput('115 文件夹 CID', item.cid, 'cid') + mappingInput('备注，例如：手动下载', item.remark || (remarks || {})[item.cid] || '', 'remark') + mappingInput('对应 CD2 路径', item.cd2_path || item.path, 'path') + select));
 }
 
 function fillDownloadRows(values, remarks) {
@@ -374,6 +401,16 @@ function collectDownloadMappings() {
     const path = row.querySelector('[data-field="path"]').value.trim();
     const mode = row.querySelector('[data-field="mode"]').value;
     return cid && path ? cid + ' => ' + path + ' => ' + mode : '';
+  }).filter(Boolean);
+}
+
+function collectDownloadRules() {
+  return Array.from($('115-downloads').querySelectorAll('.mapping-row')).map(row => {
+    const cid = row.querySelector('[data-field="cid"]').value.trim();
+    const remark = row.querySelector('[data-field="remark"]').value.trim();
+    const cd2Path = row.querySelector('[data-field="path"]').value.trim();
+    const mode = row.querySelector('[data-field="mode"]').value;
+    return cid && cd2Path ? {id: 'download:' + cid, cid, remark, cd2_path: cd2Path, mode} : null;
   }).filter(Boolean);
 }
 
@@ -437,17 +474,19 @@ function fillForms(data) {
   $('115-cookie-remark').value = (data.settings && data.settings['115_cookie_remark']) || '';
   $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
   $('115-success-action').value = (data.settings && data.settings['115_success_action']) || 'keep';
-  $('115-archive-cid').value = (data.settings && data.settings['115_archive_cid']) || '';
+  const archiveRule = (data.settings && data.settings['115_archive']) || {};
+  $('115-archive-cid').value = archiveRule.cid || (data.settings && data.settings['115_archive_cid']) || '';
   const cidRemarks = (data.settings && data.settings['115_cid_remarks']) || {};
-  $('115-archive-remark').value = cidRemarks[$('115-archive-cid').value] || '';
-	$('115-failure-cid').value = (data.settings && data.settings['115_failure_cid']) || '';
-  $('115-failure-remark').value = cidRemarks[$('115-failure-cid').value] || '';
-	$('115-failure-path').value = (data.settings && data.settings['115_failure_cd2_path']) || '';
+  $('115-archive-remark').value = archiveRule.remark || cidRemarks[$('115-archive-cid').value] || '';
+  const failureRule = (data.settings && data.settings['115_failure']) || {};
+	$('115-failure-cid').value = failureRule.cid || (data.settings && data.settings['115_failure_cid']) || '';
+  $('115-failure-remark').value = failureRule.remark || cidRemarks[$('115-failure-cid').value] || '';
+	$('115-failure-path').value = failureRule.cd2_path || (data.settings && data.settings['115_failure_cd2_path']) || '';
   $('115-auto-fallback').checked = !!(data.settings && data.settings['115_auto_fallback']);
 	$('115-retry-count').value = (data.settings && data.settings['115_retry_count']) || 3;
 	$('115-retry-delay').value = (data.settings && data.settings['115_retry_delay']) || '2m';
-	fillSourceRows((data.settings && data.settings['115_source_cids']) || [], cidRemarks);
-	fillDownloadRows((data.settings && data.settings['115_download_mappings']) || [], cidRemarks);
+	fillSourceRows((data.settings && data.settings['115_sources']) || (data.settings && data.settings['115_source_cids']) || [], cidRemarks);
+	fillDownloadRows((data.settings && data.settings['115_download_rules']) || (data.settings && data.settings['115_download_mappings']) || [], cidRemarks);
 	fillPathMappingRows((data.settings && data.settings.path_overrides) || []);
   const localFolder = (data.folders || []).find(folder => folder.path !== ((data.settings && data.settings.cache_dir) || '/cache')) || (data.folders || [])[0];
   $('local-path-summary').textContent = localFolder ? '\u76d1\u63a7\uff1a' + localFolder.path + '  \u00b7  \u8f93\u51fa\uff1a' + (localFolder.extract_path || '\u539f\u76ee\u5f55') : '';
@@ -493,14 +532,19 @@ function renderStatus(data) {
   $('finished-count').textContent = data.totals.finished;
   $('retry-count').textContent = data.totals.retries;
   $('worker-count').textContent = data.totals.workers;
-  downloadsPaused = !!(data.settings && data.settings.downloads_paused);
-  const downloadsPauseButton = $('downloads-pause');
-  if (downloadsPauseButton) {
-    downloadsPauseButton.textContent = downloadsPaused ? '恢复下载' : '暂停下载';
+  taskSystemPaused = !!data.paused;
+  const control = $('task-system-control');
+  if (control) {
+    control.textContent = taskSystemPaused ? '恢复任务系统' : '停止并清空等待任务';
+    control.classList.toggle('danger-button', !taskSystemPaused);
   }
-  const downloadsCleanupButton = $('downloads-cleanup');
-  if (downloadsCleanupButton) downloadsCleanupButton.disabled = !downloadsPaused;
-  renderList($('tasks'), data.tasks, renderTask, zh.noTasks);
+  if ($('task-system-state')) {
+    $('task-system-state').textContent = taskSystemPaused ? '任务系统已暂停：不会发现或提交新任务，正在解压的任务会继续完成。' : '任务系统运行中';
+    $('task-system-state').className = 'form-message ' + (taskSystemPaused ? 'paused-state' : 'running-state');
+  }
+  if ($('cd2-refresh')) $('cd2-refresh').disabled = taskSystemPaused;
+  currentTasks = data.tasks || [];
+  renderCurrentTasks();
   renderList($('folders'), data.folders, folder => '<div class="compact-item">' + esc(folder.path) + '<small>' + esc(folder.extract_path || '\u539f\u76ee\u5f55\u8f93\u51fa') + ' · ' + folder.tracked + '</small></div>', zh.noFolders);
   renderList($('history'), data.history, item => '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + ' · 解压完成 ' + esc(item.completed_at) + (item.cached_at ? ' · 缓存完成 ' + esc(item.cached_at) : '') + '</small></div><div class="history-actions"><button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button><button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
   latestLogs = data.logs || [];
@@ -508,6 +552,18 @@ function renderStatus(data) {
   $('transfers').innerHTML = '';
   renderList($('password-list'), data.passwords, (password, index) => '<div class="compact-item">' + esc(password) + '<button data-remove-password="' + index + '" type="button">\u5220\u9664</button></div>', zh.noPasswords);
   $('cd2-status').textContent = data.clouddrive2.enabled ? '\u5df2\u542f\u7528 · ' + (data.clouddrive2.url || '') : '\u672a\u542f\u7528';
+}
+
+function taskGroup(task) {
+  const status = task.status || '';
+  if (status.includes('失败') || task.error) return 'failed';
+  if (status.includes('等待') || status.includes('排队') || status.includes('暂停') || status.includes('批准')) return 'waiting';
+  return 'active';
+}
+
+function renderCurrentTasks() {
+  const values = taskFilter === 'all' ? currentTasks : currentTasks.filter(task => taskGroup(task) === taskFilter);
+  renderList($('tasks'), values, renderTask, zh.noTasks);
 }
 
 function renderLogs() {
@@ -574,63 +630,40 @@ $('cd2-refresh').addEventListener('click', async () => {
   } catch (_) { $('refresh-message').textContent = '刷新失败'; }
   $('cd2-refresh').disabled = false;
 });
-function ensureDownloadsPauseButton() {
-  let button = $('downloads-pause');
-  const refresh = $('cd2-refresh');
-  if (!button) {
-    if (!refresh || !refresh.parentElement) return null;
-    button = document.createElement('button');
-    button.id = 'downloads-pause';
-    button.type = 'button';
-    button.textContent = '暂停下载';
-    refresh.insertAdjacentElement('afterend', button);
-  }
-  if (!$('downloads-cleanup')) {
-    const cleanup = document.createElement('button');
-    cleanup.id = 'downloads-cleanup';
-    cleanup.type = 'button';
-    cleanup.textContent = '清理未完成缓存';
-    cleanup.disabled = true;
-    button.insertAdjacentElement('afterend', cleanup);
-  }
-  return button;
+function ensureTaskControls() {
+  if ($('task-system-control')) return;
+  const actions = $('cd2-refresh').parentElement;
+  const control = document.createElement('button');
+  control.id = 'task-system-control'; control.type = 'button';
+  actions.appendChild(control);
+  const state = document.createElement('p');
+  state.id = 'task-system-state'; state.className = 'form-message';
+  actions.parentElement.insertAdjacentElement('afterend', state);
+  const filters = document.createElement('div');
+  filters.id = 'task-filters'; filters.className = 'task-switch';
+  filters.innerHTML = '<button class="task-filter active" data-task-filter="all" type="button">全部</button><button class="task-filter" data-task-filter="active" type="button">进行中</button><button class="task-filter" data-task-filter="waiting" type="button">等待中</button><button class="task-filter" data-task-filter="failed" type="button">失败</button>';
+  $('current-task-panel').insertAdjacentElement('afterbegin', filters);
+  filters.addEventListener('click', event => {
+    if (!event.target.dataset.taskFilter) return;
+    taskFilter = event.target.dataset.taskFilter;
+    filters.querySelectorAll('button').forEach(button => button.classList.toggle('active', button === event.target));
+    renderCurrentTasks();
+  });
+  control.addEventListener('click', async () => {
+    if (!taskSystemPaused && !window.confirm('将暂停本地监听、CD2 推送与扫描、115 生活事件，并清除等待、复制、重试和待批准任务及未完成缓存。正在解压和已经开始的 115 云解压不会停止，云端原包不会删除。确定继续吗？')) return;
+    control.disabled = true;
+    const action = taskSystemPaused ? 'resume' : 'stop_clear';
+    $('refresh-message').textContent = taskSystemPaused ? '正在恢复任务系统…' : '正在停止并清理等待任务…';
+    try {
+      const response = await fetch('api/tasks/system', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action})});
+      const data = await response.json().catch(() => ({}));
+      $('refresh-message').textContent = response.ok ? data.message : (data.error || '操作失败');
+      await load(false);
+    } catch (_) { $('refresh-message').textContent = '操作失败'; }
+    control.disabled = false;
+  });
 }
-ensureDownloadsPauseButton().addEventListener('click', async () => {
-  const button = $('downloads-pause');
-  const paused = !downloadsPaused;
-  button.disabled = true;
-  $('refresh-message').textContent = paused ? '正在暂停下载…' : '正在恢复下载…';
-  try {
-    const response = await fetch('api/downloads/pause', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({paused})});
-    const data = await response.json().catch(() => ({}));
-    $('refresh-message').textContent = response.ok ? (data.paused ? '已暂停所有本地下载任务' : '已恢复本地下载任务') : (data.error || '操作失败');
-    await load(false);
-  } catch (_) {
-    $('refresh-message').textContent = '操作失败';
-  } finally {
-    button.disabled = false;
-  }
-});
-$('downloads-cleanup').addEventListener('click', async () => {
-  if (!downloadsPaused) {
-    $('refresh-message').textContent = '请先暂停下载，再清理未完成缓存';
-    return;
-  }
-  if (!window.confirm('将清理所有暂停、等待重试或复制未完成的本地缓存。不会删除云端原包，也不会影响正在解压的任务。确定继续吗？')) return;
-  const button = $('downloads-cleanup');
-  button.disabled = true;
-  $('refresh-message').textContent = '正在清理未完成缓存…';
-  try {
-    const response = await fetch('api/downloads/cleanup', {method: 'POST'});
-    const data = await response.json().catch(() => ({}));
-    $('refresh-message').textContent = response.ok ? ('已清理 ' + (data.cleared || 0) + ' 个未完成下载任务') : (data.error || '清理失败');
-    await load(false);
-  } catch (_) {
-    $('refresh-message').textContent = '清理失败';
-  } finally {
-    button.disabled = !downloadsPaused;
-  }
-});
+ensureTaskControls();
 $('password-form').addEventListener('submit', async event => {
   event.preventDefault();
   const password = $('password-input').value.trim();
@@ -696,15 +729,13 @@ $('settings-save').addEventListener('click', async () => {
       '115_cookie_remark': $('115-cookie-remark').value.trim(),
       '115_event_interval': $('115-event-interval').value.trim(),
       '115_success_action': $('115-success-action').value,
-      '115_archive_cid': $('115-archive-cid').value.trim(),
-		'115_failure_cid': $('115-failure-cid').value.trim(),
-		'115_failure_cd2_path': $('115-failure-path').value.trim(),
+      '115_archive': {cid: $('115-archive-cid').value.trim(), remark: $('115-archive-remark').value.trim()},
+      '115_failure': {id: 'cloud-failure', cid: $('115-failure-cid').value.trim(), remark: $('115-failure-remark').value.trim(), cd2_path: $('115-failure-path').value.trim(), mode: $('115-auto-fallback').checked ? 'auto' : 'approval'},
       '115_auto_fallback': $('115-auto-fallback').checked,
 		'115_retry_count': Number($('115-retry-count').value) || 3,
 		'115_retry_delay': $('115-retry-delay').value.trim(),
-		'115_source_cids': collectSourceCIDs(),
-		'115_cid_remarks': collectCIDRemarks(),
-		'115_download_mappings': collectDownloadMappings(),
+		'115_sources': collectSourceRules(),
+		'115_download_rules': collectDownloadRules(),
 		'115_mappings': [],
       cd2_enabled: $('cd2-enabled').checked,
       cd2_url: $('cd2-url').value.trim(), cd2_token: $('cd2-token').value.trim(),

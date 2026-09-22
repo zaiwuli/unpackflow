@@ -45,6 +45,7 @@ type DashboardSnapshot struct {
 	Settings     UIOverrides         `json:"settings"`
 	Logs         []DashboardLog      `json:"logs"`
 	Transfers    []CD2Transfer       `json:"transfers"`
+	Paused       bool                `json:"paused"`
 }
 
 type DashboardLog struct {
@@ -119,6 +120,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		Settings:     u.uiSettings(),
 		Logs:         u.Logger.dashboardLogs(),
 		Transfers:    u.dashboardTransfers(),
+		Paused:       u.taskSystemPaused.Load(),
 	}
 	for name, item := range u.Map {
 		source := sourceName(item.App)
@@ -168,7 +170,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			Error:       transfer.Error,
 			CanFallback: transfer.CanFallback,
 		})
-		snapshot.Totals.Active++
+		if dashboardTaskIsActive(status) {
+			snapshot.Totals.Active++
+		}
 	}
 	sort.Slice(snapshot.Tasks, func(i, j int) bool { return snapshot.Tasks[i].Updated > snapshot.Tasks[j].Updated })
 	for _, item := range u.processedHistory() {
@@ -200,6 +204,10 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 	return snapshot
 }
 
+func dashboardTaskIsActive(status string) bool {
+	return strings.Contains(status, "解压中") || strings.Contains(status, "复制") || strings.Contains(status, "缓存") || strings.Contains(status, "刷新")
+}
+
 func formatDashboardTime(value time.Time) string {
 	if value.IsZero() {
 		return ""
@@ -217,25 +225,60 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 		}
 		return true
 	})
-	// Approval tasks survive a restart. Rebuild a lightweight task row so the
-	// user never loses the explicit local-download action.
+	// Pending cloud/local download tasks survive a restart. Rebuild lightweight
+	// rows for every state so copying and waiting tasks are visible immediately.
 	if u.state != nil {
 		u.state.mu.RLock()
 		for _, item := range u.state.Fallback115 {
-			if item.TaskKey == "" || !item.Approval {
+			if item.TaskKey == "" {
 				continue
 			}
 			if _, exists := seen[item.TaskKey]; exists {
 				continue
 			}
-			state := "等待批准本地下载"
-			source := "115 日常下载"
-			if item.Kind == "cloud_failure" {
-				state = "云解压失败，等待批准本地下载"
-				source = "115 云解压"
+			state := "等待 CD2 文件可见"
+			source := item.RouteLabel
+			if source == "" {
+				source = "日常本地下载"
 			}
-			items = append(items, CD2Transfer{Key: item.TaskKey, Path: item.FileName, Source: source, State: state, StartedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, CanFallback: true})
+			if item.Kind == "cloud_failure" {
+				source = item.RouteLabel
+				if source == "" {
+					source = "云解压失败转本地"
+				}
+			}
+			if item.Approval {
+				state = "等待批准本地下载"
+				if item.Kind == "cloud_failure" {
+					state = "云解压失败，等待批准本地下载"
+				}
+			}
+			items = append(items, CD2Transfer{Key: item.TaskKey, Path: item.FileName, Source: source, State: state, StartedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, CanFallback: item.Approval})
 			seen[item.TaskKey] = struct{}{}
+		}
+		for _, item := range u.state.Pending {
+			key := item.Key
+			if key == "" {
+				key = item.CachedPrimary
+			}
+			if key == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			name := filepath.Base(key)
+			if len(item.Files) > 0 {
+				name = filepath.Base(item.Files[0])
+			}
+			state := "等待复制"
+			if item.CachedPrimary != "" {
+				state = "已缓存，等待本地解压"
+			} else if item.LastError != "" {
+				state = "复制失败，等待重试"
+			}
+			items = append(items, CD2Transfer{Key: key, Path: name, Source: "CD2 实时推送", State: state, UpdatedAt: item.NextAttempt, Error: item.LastError})
+			seen[key] = struct{}{}
 		}
 		u.state.mu.RUnlock()
 	}
@@ -566,6 +609,7 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 		http.Error(w, "\u8bf7\u6c42\u683c\u5f0f\u9519\u8bef", http.StatusBadRequest)
 		return
 	}
+	normalizeStructured115Settings(&overrides)
 	if overrides.Workers > 0 {
 		u.Parallel = overrides.Workers
 	}
@@ -768,6 +812,66 @@ func (u *Unpackerr) downloadsCleanupAPI(w http.ResponseWriter, r *http.Request, 
 	}
 	u.Printf("已清理 %d 个未完成的本地下载任务及缓存", cleared)
 	u.writeJSON(w, map[string]any{"success": true, "cleared": cleared})
+}
+
+func (u *Unpackerr) taskSystemAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var input struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || (input.Action != "stop_clear" && input.Action != "resume") {
+		http.Error(w, "请求格式错误", http.StatusBadRequest)
+		return
+	}
+	action := taskControlAction{Action: input.Action, result: make(chan taskControlResult, 1)}
+	select {
+	case u.taskActions <- action:
+	case <-r.Context().Done():
+		http.Error(w, "请求已取消", http.StatusRequestTimeout)
+		return
+	}
+	result := <-action.result
+	if result.Error != nil {
+		http.Error(w, result.Error.Error(), http.StatusInternalServerError)
+		return
+	}
+	message := "任务系统已恢复"
+	if input.Action == "stop_clear" {
+		message = fmt.Sprintf("任务系统已暂停，已清理 %d 个等待任务", result.Cleared)
+	}
+	u.writeJSON(w, map[string]any{"success": true, "paused": u.taskSystemPaused.Load(), "cleared": result.Cleared, "message": message})
+}
+
+func (u *Unpackerr) maintenanceAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var input struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "请求格式错误", http.StatusBadRequest)
+		return
+	}
+	if input.Action != "clear_cache" && input.Action != "clear_history" {
+		http.Error(w, "不支持的维护操作", http.StatusBadRequest)
+		return
+	}
+	action := taskControlAction{Action: input.Action, result: make(chan taskControlResult, 1)}
+	select {
+	case u.taskActions <- action:
+	case <-r.Context().Done():
+		http.Error(w, "请求已取消", http.StatusRequestTimeout)
+		return
+	}
+	result := <-action.result
+	if result.Error != nil {
+		http.Error(w, result.Error.Error(), http.StatusConflict)
+		return
+	}
+	if input.Action == "clear_cache" {
+		u.Printf("已清除全部本地缓存：%d 个项目", result.Cleared)
+		u.writeJSON(w, map[string]any{"success": true, "cleared": result.Cleared, "message": fmt.Sprintf("已清除 %d 个缓存项目", result.Cleared)})
+		return
+	}
+	u.Printf("已清除全部解压历史和防重复记录")
+	u.writeJSON(w, map[string]any{"success": true, "message": "已清除全部历史记录"})
 }
 
 func (u *Unpackerr) handleHistoryAction(action historyAction) error {

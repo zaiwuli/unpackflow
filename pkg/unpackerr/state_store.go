@@ -62,6 +62,8 @@ type Pending115 struct {
 	FID         string    `json:"fid"`
 	FileName    string    `json:"file_name"`
 	Kind        string    `json:"kind,omitempty"`
+	RouteID     string    `json:"route_id,omitempty"`
+	RouteLabel  string    `json:"route_label,omitempty"`
 	Approval    bool      `json:"approval,omitempty"`
 	Size        int64     `json:"size,omitempty"`
 	MTime       int64     `json:"mtime,omitempty"`

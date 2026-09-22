@@ -29,12 +29,17 @@ type N115Mapping struct {
 	SourceCID   string
 	FallbackCID string
 	CD2Path     string
+	RouteID     string
+	RouteLabel  string
+	Kind        string
 }
 
 type N115DownloadMapping struct {
 	CID      string
 	CD2Path  string
 	Approval bool
+	RouteID  string
+	Label    string
 }
 
 type n115APIError struct {
@@ -115,7 +120,7 @@ func parse115DownloadMappings(values []string) []N115DownloadMapping {
 		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
 			continue
 		}
-		mapping := N115DownloadMapping{CID: parts[0], CD2Path: normalizeCloudDrivePath(parts[1])}
+		mapping := N115DownloadMapping{CID: parts[0], CD2Path: normalizeCloudDrivePath(parts[1]), RouteID: "download:" + parts[0]}
 		if len(parts) >= 3 {
 			mapping.Approval = strings.EqualFold(parts[2], "approval") || strings.EqualFold(parts[2], "manual")
 		}
@@ -166,7 +171,7 @@ func n115SourceCIDs(cfg CloudDriveConfig) []string {
 
 func n115FailureMapping(cfg CloudDriveConfig, sourceCID string) N115Mapping {
 	migrate115CloudSettings(&cfg)
-	return N115Mapping{SourceCID: sourceCID, FallbackCID: strings.TrimSpace(cfg.N115FailureCID), CD2Path: strings.TrimSpace(cfg.N115FailureCD2Path)}
+	return N115Mapping{SourceCID: sourceCID, FallbackCID: strings.TrimSpace(cfg.N115FailureCID), CD2Path: strings.TrimSpace(cfg.N115FailureCD2Path), RouteID: "cloud-failure", Kind: "cloud_failure"}
 }
 
 func validate115CloudSettings(settings UIOverrides) error {
@@ -260,6 +265,9 @@ func (u *Unpackerr) start115Events() {
 // read from the configured source folders, so unrelated 115 activity is never
 // submitted as a task.
 func (u *Unpackerr) poll115RecentOperations() {
+	if u.taskSystemPaused.Load() {
+		return
+	}
 	u.n115SyncMu.Lock()
 	defer u.n115SyncMu.Unlock()
 	if err := u.validate115Cookie(); err != nil {
@@ -272,6 +280,7 @@ func (u *Unpackerr) poll115RecentOperations() {
 	}
 	for _, sourceCID := range n115SourceCIDs(u.CloudDrive2) {
 		mapping := n115FailureMapping(u.CloudDrive2, sourceCID)
+		mapping.RouteLabel = u.n115CIDRemark(mapping.FallbackCID, "云解压失败转本地")
 		files, err := u.n115ListFiles(ctx, sourceCID)
 		if err != nil {
 			u.Errorf("115 读取目录 %s 失败：%v", sourceCID, err)
@@ -293,11 +302,16 @@ func (u *Unpackerr) poll115RecentOperations() {
 				defer u.n115Running.Delete(version.Key)
 				u.n115Queue <- struct{}{}
 				defer func() { <-u.n115Queue }()
+				if u.taskSystemPaused.Load() {
+					u.cd2Tasks.Delete(version.Key)
+					return
+				}
 				u.run115CloudExtract(mapping, file, version)
 			}(mapping, file, version)
 		}
 	}
 	for _, mapping := range parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings) {
+		mapping.Label = u.n115CIDRemark(mapping.CID, "115 日常下载")
 		files, err := u.n115ListFiles(ctx, mapping.CID)
 		if err != nil {
 			u.Errorf("115 读取本地下载目录 %s 失败：%v", mapping.CID, err)
@@ -343,8 +357,9 @@ func (u *Unpackerr) hasPending115Task(taskKey string) bool {
 }
 
 func (u *Unpackerr) queue115LocalDownload(mapping N115DownloadMapping, file n115File, version ProcessedSource) {
-	fallback := N115Mapping{SourceCID: mapping.CID, FallbackCID: mapping.CID, CD2Path: mapping.CD2Path}
+	fallback := N115Mapping{SourceCID: mapping.CID, FallbackCID: mapping.CID, CD2Path: mapping.CD2Path, RouteID: mapping.RouteID, RouteLabel: mapping.Label, Kind: "manual_download"}
 	u.save115DownloadTask(version.Key, "manual_download", mapping.Approval, fallback, file)
+	u.update115Transfer(version.Key, file.Name, "正在创建本地下载任务", func(task *CD2Transfer) { task.Source = "日常本地下载｜" + mapping.Label })
 	if mapping.Approval {
 		u.update115Transfer(version.Key, file.Name, "等待批准本地下载", func(task *CD2Transfer) {
 			task.CanFallback = true
@@ -518,6 +533,10 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	}
 	var err error
 	for attempt := uint(1); attempt <= retries; attempt++ {
+		if u.taskSystemPaused.Load() {
+			u.update115Transfer(version.Key, file.Name, "已取消", func(task *CD2Transfer) { task.Error = "任务系统已暂停" })
+			return
+		}
 		u.update115Transfer(version.Key, file.Name, "115 云端解压中", func(task *CD2Transfer) {
 			task.Error = ""
 		})
@@ -563,7 +582,10 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	// whether to start a local copy, so a restart never loses the manual path.
 	u.save115DownloadTask(version.Key, "cloud_failure", !u.CloudDrive2.N115AutoFallback, mapping, file)
 	if u.CloudDrive2.N115AutoFallback {
-		u.update115Transfer(version.Key, file.Name, "等待下载到本地解压", func(task *CD2Transfer) { task.CanFallback = false })
+		u.update115Transfer(version.Key, file.Name, "等待下载到本地解压", func(task *CD2Transfer) {
+			task.CanFallback = false
+			task.Source = "云解压失败转本地｜" + mapping.RouteLabel
+		})
 		u.refresh115Fallback(mapping, file)
 		return
 	}
@@ -884,11 +906,18 @@ func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, file n115File) {
 func (u *Unpackerr) save115DownloadTask(taskKey, kind string, approval bool, mapping N115Mapping, file n115File) {
 	remoteFile := path.Join(mapping.CD2Path, file.Name)
 	paths := clouddrive.MapCloudPathWithOverrides(remoteFile, nil, u.CloudDrive2.PathOverrides)
-	fallback := Pending115{TaskKey: taskKey, SourceCID: mapping.FallbackCID, FallbackCID: mapping.FallbackCID, CD2Path: mapping.CD2Path, FID: file.FID, FileName: file.Name, Kind: kind, Approval: approval, Size: file.Size, MTime: file.MTime}
+	fallback := Pending115{TaskKey: taskKey, SourceCID: mapping.FallbackCID, FallbackCID: mapping.FallbackCID, CD2Path: mapping.CD2Path, FID: file.FID, FileName: file.Name, Kind: kind, RouteID: mapping.RouteID, RouteLabel: mapping.RouteLabel, Approval: approval, Size: file.Size, MTime: file.MTime}
 	for _, key := range n115FallbackKeys(paths, remoteFile) {
 		fallback.Key = key
 		u.savePending115Fallback(fallback)
 	}
+}
+
+func (u *Unpackerr) n115CIDRemark(cid, fallback string) string {
+	if remark := strings.TrimSpace(u.n115CIDRemarks()[strings.TrimSpace(cid)]); remark != "" {
+		return remark
+	}
+	return fallback
 }
 
 func n115FallbackKeys(paths []string, remoteFile string) []string {

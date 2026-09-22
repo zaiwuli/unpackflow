@@ -382,6 +382,56 @@ func TestSettingsAPIPersistsStructured115Folders(t *testing.T) {
 	}
 }
 
+func TestStructured115RulesCanBeDeletedWithoutLegacyResurrection(t *testing.T) {
+	dir := t.TempDir()
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	first := UIOverrides{
+		N115Sources:       []N115SourceRule{{ID: "source:100", CID: "100", Remark: "待解压"}},
+		N115DownloadRules: []N115DownloadRule{{ID: "download:300", CID: "300", Remark: "日常下载", CD2Path: "/115open/下载", Mode: "auto"}},
+	}
+	if err := u.saveUIOverrides(first); err != nil {
+		t.Fatal(err)
+	}
+	first.N115Sources = []N115SourceRule{}
+	first.N115DownloadRules = []N115DownloadRule{}
+	if err := u.saveUIOverrides(first); err != nil {
+		t.Fatal(err)
+	}
+	restarted := New()
+	restarted.ConfigFile = u.ConfigFile
+	if err := restarted.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	settings := restarted.uiSettings()
+	if len(settings.N115Sources) != 0 || len(settings.N115DownloadRules) != 0 || len(restarted.CloudDrive2.N115SourceCIDs) != 0 || len(restarted.CloudDrive2.N115DownloadMappings) != 0 {
+		t.Fatalf("deleted structured rules were restored: %#v", settings)
+	}
+}
+
+func TestTaskSystemPausePersistsAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.setTaskSystemPaused(true); err != nil {
+		t.Fatal(err)
+	}
+	restarted := New()
+	restarted.ConfigFile = u.ConfigFile
+	if err := restarted.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	if !restarted.taskSystemPaused.Load() || !restarted.downloadsPaused.Load() || !restarted.dashboardSnapshot().Paused {
+		t.Fatal("task system pause state was not restored")
+	}
+}
+
 func TestDashboardJSUsesStructuredCloudFolderRows(t *testing.T) {
 	for _, marker := range [][]byte{[]byte("115-source-add"), []byte("115-download-add"), []byte("path-mapping-add"), []byte("collectDownloadMappings"), []byte("collectCIDRemarks"), []byte("115-archive-remark"), []byte("collectPathMappings")} {
 		if !bytes.Contains(dashboardJS, marker) {

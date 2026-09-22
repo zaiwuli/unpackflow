@@ -65,25 +65,27 @@ type Unpackerr struct {
 	workChan       chan []func()
 	uiRequests     chan chan DashboardSnapshot
 	historyActions chan historyAction
+	taskActions    chan taskControlAction
 	*Logger
-	rotatorr        *rotatorr.Logger
-	menu            map[string]ui.MenuItem
-	uiStore         *UIStore
-	state           *ProcessingState
-	cd2Cache        sync.Map      // cache archive path -> []mounted CloudDrive source files
-	cd2Copy         sync.Map      // source group key -> struct{} while a cache copy is in progress
-	cd2Resume       sync.Map      // cached primary path -> struct{} after resume submission
-	cd2Tasks        sync.Map      // group key -> *CD2Transfer while copying or verifying
-	cd2Cancel       sync.Map      // group key -> context.CancelFunc for active copies
-	cd2Notice       sync.Map      // cached primary path -> discovery notification already sent
-	downloadsPaused atomic.Bool   // blocks CD2 cache submissions until explicitly resumed
-	n115Running     sync.Map      // 115 source identity -> struct{} while cloud extraction is active
-	n115Queue       chan struct{} // one 115 cloud extraction at a time
-	n115SyncMu      sync.Mutex    // prevents timer and manual 115 syncs from overlapping
-	cancelled       sync.Map      // task path/key -> struct{} for user-cancelled work
-	nameMappers     sync.Map      // task path/key -> *archiveNameMapper
-	cd2Mu           sync.RWMutex
-	cd2Client       *clouddrive.Client
+	rotatorr         *rotatorr.Logger
+	menu             map[string]ui.MenuItem
+	uiStore          *UIStore
+	state            *ProcessingState
+	cd2Cache         sync.Map      // cache archive path -> []mounted CloudDrive source files
+	cd2Copy          sync.Map      // source group key -> struct{} while a cache copy is in progress
+	cd2Resume        sync.Map      // cached primary path -> struct{} after resume submission
+	cd2Tasks         sync.Map      // group key -> *CD2Transfer while copying or verifying
+	cd2Cancel        sync.Map      // group key -> context.CancelFunc for active copies
+	cd2Notice        sync.Map      // cached primary path -> discovery notification already sent
+	downloadsPaused  atomic.Bool   // blocks CD2 cache submissions until explicitly resumed
+	taskSystemPaused atomic.Bool   // blocks every discovery source until explicitly resumed
+	n115Running      sync.Map      // 115 source identity -> struct{} while cloud extraction is active
+	n115Queue        chan struct{} // one 115 cloud extraction at a time
+	n115SyncMu       sync.Mutex    // prevents timer and manual 115 syncs from overlapping
+	cancelled        sync.Map      // task path/key -> struct{} for user-cancelled work
+	nameMappers      sync.Map      // task path/key -> *archiveNameMapper
+	cd2Mu            sync.RWMutex
+	cd2Client        *clouddrive.Client
 }
 
 type fileDeleteReq struct {
@@ -123,6 +125,7 @@ func New() *Unpackerr {
 		workChan:       make(chan []func(), 1),
 		uiRequests:     make(chan chan DashboardSnapshot),
 		historyActions: make(chan historyAction),
+		taskActions:    make(chan taskControlAction),
 		History:        &History{Map: make(map[string]*Extract)},
 		updates:        make(chan *xtractr.Response, updateChanBuf),
 		progChan:       make(chan *ExtractProgress),
@@ -455,9 +458,13 @@ func (u *Unpackerr) Run() {
 			request <- u.dashboardSnapshot()
 		case action := <-u.historyActions:
 			action.result <- u.handleHistoryAction(action)
+		case action := <-u.taskActions:
+			action.result <- u.handleTaskControlAction(action)
 		case event := <-u.folders.Events:
 			// file system event for watched folder.
-			u.processEvent(event, now)
+			if !u.taskSystemPaused.Load() {
+				u.processEvent(event, now)
+			}
 		case now := <-logger:
 			// Log/print current queue counts once in a while.
 			u.logCurrentQueue(now)

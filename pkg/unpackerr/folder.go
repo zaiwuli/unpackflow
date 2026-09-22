@@ -188,6 +188,9 @@ func (u *Unpackerr) PollFolders() {
 // External-only folders are CD2 cache folders and must only be submitted after
 // their copy operation has completed.
 func (u *Unpackerr) scanExistingFolderArchives() {
+	if u.taskSystemPaused.Load() {
+		return
+	}
 	for _, folder := range u.Folders {
 		if folder.ExternalOnly {
 			continue
@@ -690,6 +693,9 @@ func (f *Folders) saveEvent(event *eventData, dirPath string, now time.Time) {
 // checkFolderStats runs at an interval to see if any folders need work done on them.
 // This runs on an interval ticker in the main go routine.
 func (u *Unpackerr) checkFolderStats(now time.Time) {
+	if u.taskSystemPaused.Load() {
+		return
+	}
 	for name, folder := range u.folders.Folders {
 		switch elapsed := now.Sub(folder.updated); {
 		case WAITING == folder.status && elapsed >= u.StartDelay.Duration:

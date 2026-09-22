@@ -31,6 +31,9 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 		},
 		PathOverrides: cfg.PathOverrides,
 		OnChange: func(change clouddrive.Change, paths []string) error {
+			if u.taskSystemPaused.Load() {
+				return nil
+			}
 			currentWatchPaths := cloudDriveManualWatchPaths(u.CloudDrive2)
 			if !cloudDrivePathMatches(change.Path, currentWatchPaths) && !cloudDrivePathMatches(change.NewPath, currentWatchPaths) {
 				return nil
@@ -77,7 +80,7 @@ func (u *Unpackerr) startCloudDriveMonitor() {
 }
 
 func (u *Unpackerr) resume115LocalDownloads() {
-	if u.state == nil {
+	if u.state == nil || u.taskSystemPaused.Load() {
 		return
 	}
 	u.state.mu.RLock()
@@ -163,7 +166,13 @@ func (u *Unpackerr) handleCloudDriveChange(client *clouddrive.Client, change clo
 		}
 		u.Debugf("CloudDrive2 实时事件已收到，但挂载文件尚未出现，等待第 %d 次重试", index+1)
 	}
-	u.Errorf("CloudDrive2 实时事件对应的挂载文件未出现：%s", remotePath)
+	source := "CD2 实时推送"
+	if value, ok := u.cd2Tasks.Load(taskKey); ok {
+		if transfer, valid := value.(*CD2Transfer); valid && transfer != nil && transfer.Source != "" {
+			source = transfer.Source
+		}
+	}
+	u.Errorf("[%s] 挂载文件未出现：%s", source, remotePath)
 	if taskKey != "" {
 		u.updateCD2Transfer(taskKey, remotePath, "等待文件可见", func(transfer *CD2Transfer) {
 			transfer.Error = "挂载文件尚未出现，将等待补偿扫描"
@@ -268,6 +277,9 @@ func (u *Unpackerr) cloudDriveRefreshLoop(client *clouddrive.Client, interval ti
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
+		if u.taskSystemPaused.Load() {
+			continue
+		}
 		for _, refreshPath := range cloudDriveConfiguredRefreshPaths(u.CloudDrive2) {
 			if err := client.ForceRefresh(context.Background(), refreshPath); err != nil {
 				u.Errorf("CloudDrive2 定时刷新失败：%s：%v", refreshPath, err)
@@ -282,7 +294,7 @@ func (u *Unpackerr) cloudDriveFallbackLoop(client *clouddrive.Client, interval t
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
-		if u.CloudDrive2.FallbackScanEnabled {
+		if !u.taskSystemPaused.Load() && u.CloudDrive2.FallbackScanEnabled {
 			u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), u.CloudDrive2.PathOverrides)
 		}
 	}
@@ -364,7 +376,9 @@ func (u *Unpackerr) cloudDriveRetryLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		u.resumeCD2Pending()
+		if !u.taskSystemPaused.Load() {
+			u.resumeCD2Pending()
+		}
 	}
 }
 

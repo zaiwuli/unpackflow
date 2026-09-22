@@ -117,44 +117,76 @@ func normalizeMSNotificationURL(raw string) string {
 }
 
 type UIOverrides struct {
-	Workers             uint              `json:"workers,omitempty"`
-	LocalSourceAction   string            `json:"local_source_action,omitempty"`
-	LocalArchiveDir     string            `json:"local_archive_dir,omitempty"`
-	LocalSourceDelay    string            `json:"local_source_delay,omitempty"`
-	FolderInterval      string            `json:"folder_interval,omitempty"`
-	CD2Enabled          *bool             `json:"cd2_enabled,omitempty"`
-	CD2URL              string            `json:"cd2_url,omitempty"`
-	CD2Token            string            `json:"cd2_token,omitempty"`
-	RefreshInterval     string            `json:"refresh_interval,omitempty"`
-	RefreshPath         string            `json:"refresh_path,omitempty"`
-	WatchPath           string            `json:"watch_path,omitempty"`
-	ManualWatchPaths    []string          `json:"manual_watch_paths,omitempty"`
-	PathOverrides       []string          `json:"path_overrides,omitempty"`
-	CacheDir            string            `json:"cache_dir,omitempty"`
-	CacheExtractPath    string            `json:"cache_extract_path,omitempty"`
-	KeepCache           *bool             `json:"keep_cache,omitempty"`
-	DeleteSource        *bool             `json:"delete_source,omitempty"`
-	CacheDeleteDelay    string            `json:"cache_delete_delay,omitempty"`
-	CopyTimeout         string            `json:"copy_timeout,omitempty"`
-	DownloadsPaused     *bool             `json:"downloads_paused,omitempty"`
-	CD2FallbackEnabled  *bool             `json:"cd2_fallback_enabled,omitempty"`
-	CD2FallbackInterval string            `json:"cd2_fallback_interval,omitempty"`
-	N115Enabled         *bool             `json:"115_enabled,omitempty"`
-	N115EventEnabled    *bool             `json:"115_event_enabled,omitempty"`
-	N115Cookie          string            `json:"115_cookie,omitempty"`
-	N115CookieRemark    string            `json:"115_cookie_remark,omitempty"`
-	N115EventInterval   string            `json:"115_event_interval,omitempty"`
-	N115Mappings        []string          `json:"115_mappings,omitempty"`
-	N115SourceCIDs      []string          `json:"115_source_cids,omitempty"`
-	N115CIDRemarks      map[string]string `json:"115_cid_remarks,omitempty"`
-	N115FailureCID      string            `json:"115_failure_cid,omitempty"`
-	N115FailureCD2Path  string            `json:"115_failure_cd2_path,omitempty"`
-	N115Downloads       []string          `json:"115_download_mappings,omitempty"`
-	N115SuccessAction   string            `json:"115_success_action,omitempty"`
-	N115ArchiveCID      string            `json:"115_archive_cid,omitempty"`
-	N115AutoFallback    *bool             `json:"115_auto_fallback,omitempty"`
-	N115RetryCount      uint              `json:"115_retry_count,omitempty"`
-	N115RetryDelay      string            `json:"115_retry_delay,omitempty"`
+	Workers             uint               `json:"workers,omitempty"`
+	LocalSourceAction   string             `json:"local_source_action,omitempty"`
+	LocalArchiveDir     string             `json:"local_archive_dir,omitempty"`
+	LocalSourceDelay    string             `json:"local_source_delay,omitempty"`
+	FolderInterval      string             `json:"folder_interval,omitempty"`
+	CD2Enabled          *bool              `json:"cd2_enabled,omitempty"`
+	CD2URL              string             `json:"cd2_url,omitempty"`
+	CD2Token            string             `json:"cd2_token,omitempty"`
+	RefreshInterval     string             `json:"refresh_interval,omitempty"`
+	RefreshPath         string             `json:"refresh_path,omitempty"`
+	WatchPath           string             `json:"watch_path,omitempty"`
+	ManualWatchPaths    []string           `json:"manual_watch_paths,omitempty"`
+	PathOverrides       []string           `json:"path_overrides,omitempty"`
+	CacheDir            string             `json:"cache_dir,omitempty"`
+	CacheExtractPath    string             `json:"cache_extract_path,omitempty"`
+	KeepCache           *bool              `json:"keep_cache,omitempty"`
+	DeleteSource        *bool              `json:"delete_source,omitempty"`
+	CacheDeleteDelay    string             `json:"cache_delete_delay,omitempty"`
+	CopyTimeout         string             `json:"copy_timeout,omitempty"`
+	DownloadsPaused     *bool              `json:"downloads_paused,omitempty"`
+	TaskSystemPaused    *bool              `json:"task_system_paused,omitempty"`
+	CD2FallbackEnabled  *bool              `json:"cd2_fallback_enabled,omitempty"`
+	CD2FallbackInterval string             `json:"cd2_fallback_interval,omitempty"`
+	N115Enabled         *bool              `json:"115_enabled,omitempty"`
+	N115EventEnabled    *bool              `json:"115_event_enabled,omitempty"`
+	N115Cookie          string             `json:"115_cookie,omitempty"`
+	N115CookieRemark    string             `json:"115_cookie_remark,omitempty"`
+	N115EventInterval   string             `json:"115_event_interval,omitempty"`
+	N115Mappings        []string           `json:"115_mappings,omitempty"`
+	N115SourceCIDs      []string           `json:"115_source_cids,omitempty"`
+	N115CIDRemarks      map[string]string  `json:"115_cid_remarks,omitempty"`
+	N115FailureCID      string             `json:"115_failure_cid,omitempty"`
+	N115FailureCD2Path  string             `json:"115_failure_cd2_path,omitempty"`
+	N115Downloads       []string           `json:"115_download_mappings,omitempty"`
+	N115SuccessAction   string             `json:"115_success_action,omitempty"`
+	N115ArchiveCID      string             `json:"115_archive_cid,omitempty"`
+	N115AutoFallback    *bool              `json:"115_auto_fallback,omitempty"`
+	N115RetryCount      uint               `json:"115_retry_count,omitempty"`
+	N115RetryDelay      string             `json:"115_retry_delay,omitempty"`
+	N115Sources         []N115SourceRule   `json:"115_sources,omitempty"`
+	N115Failure         *N115FailureRule   `json:"115_failure,omitempty"`
+	N115DownloadRules   []N115DownloadRule `json:"115_download_rules,omitempty"`
+	N115Archive         *N115FolderRule    `json:"115_archive,omitempty"`
+}
+
+type N115SourceRule struct {
+	ID     string `json:"id"`
+	CID    string `json:"cid"`
+	Remark string `json:"remark,omitempty"`
+}
+
+type N115FolderRule struct {
+	CID    string `json:"cid"`
+	Remark string `json:"remark,omitempty"`
+}
+
+type N115FailureRule struct {
+	ID      string `json:"id"`
+	CID     string `json:"cid"`
+	Remark  string `json:"remark,omitempty"`
+	CD2Path string `json:"cd2_path"`
+	Mode    string `json:"mode"`
+}
+
+type N115DownloadRule struct {
+	ID      string `json:"id"`
+	CID     string `json:"cid"`
+	Remark  string `json:"remark,omitempty"`
+	CD2Path string `json:"cd2_path"`
+	Mode    string `json:"mode"`
 }
 
 func (u *Unpackerr) loadUIStore() error {
@@ -173,6 +205,7 @@ func (u *Unpackerr) loadUIStore() error {
 	}
 	store.Path = filepath.Join(base, "unpackflow-ui.json")
 	migrateLegacyDataPaths(&store.Overrides)
+	normalizeStructured115Settings(&store.Overrides)
 	if len(store.Passwords) == 0 && len(u.Passwords) > 0 {
 		store.Passwords = append([]string(nil), u.Passwords...)
 	}
@@ -235,6 +268,11 @@ func (u *Unpackerr) loadUIStore() error {
 	}
 	if store.Overrides.DownloadsPaused != nil {
 		u.downloadsPaused.Store(*store.Overrides.DownloadsPaused)
+	}
+	if store.Overrides.TaskSystemPaused != nil {
+		u.taskSystemPaused.Store(*store.Overrides.TaskSystemPaused)
+	} else if store.Overrides.DownloadsPaused != nil {
+		u.taskSystemPaused.Store(*store.Overrides.DownloadsPaused)
 	}
 	if store.Overrides.CD2FallbackEnabled != nil {
 		u.CloudDrive2.FallbackScanEnabled = *store.Overrides.CD2FallbackEnabled
@@ -438,6 +476,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		CacheDeleteDelay:    u.CloudDrive2.CacheDeleteDelay.Duration.String(),
 		CopyTimeout:         u.CloudDrive2.CopyTimeout.Duration.String(),
 		DownloadsPaused:     func() *bool { value := u.downloadsPaused.Load(); return &value }(),
+		TaskSystemPaused:    func() *bool { value := u.taskSystemPaused.Load(); return &value }(),
 		CD2FallbackEnabled:  func() *bool { v := u.CloudDrive2.FallbackScanEnabled; return &v }(),
 		CD2FallbackInterval: u.CloudDrive2.FallbackScanInterval.Duration.String(),
 		N115Enabled:         func() *bool { v := u.CloudDrive2.N115Enabled; return &v }(),
@@ -523,6 +562,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	if overrides.DownloadsPaused != nil {
 		settings.DownloadsPaused = overrides.DownloadsPaused
 	}
+	if overrides.TaskSystemPaused != nil {
+		settings.TaskSystemPaused = overrides.TaskSystemPaused
+	}
 	if overrides.CD2FallbackEnabled != nil {
 		settings.CD2FallbackEnabled = overrides.CD2FallbackEnabled
 	}
@@ -574,9 +616,24 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	if overrides.N115RetryDelay != "" {
 		settings.N115RetryDelay = overrides.N115RetryDelay
 	}
+	if overrides.N115Sources != nil {
+		settings.N115Sources = append([]N115SourceRule(nil), overrides.N115Sources...)
+	}
+	if overrides.N115Failure != nil {
+		copy := *overrides.N115Failure
+		settings.N115Failure = &copy
+	}
+	if overrides.N115DownloadRules != nil {
+		settings.N115DownloadRules = append([]N115DownloadRule(nil), overrides.N115DownloadRules...)
+	}
+	if overrides.N115Archive != nil {
+		copy := *overrides.N115Archive
+		settings.N115Archive = &copy
+	}
 	if overrides.N115Cookie != "" {
 		settings.N115Cookie = "********"
 	}
+	normalizeStructured115Settings(&settings)
 	return settings
 }
 
@@ -666,6 +723,7 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	if strings.TrimSpace(s.N115Cookie) == "" {
 		s.N115Cookie = u.uiStore.Overrides.N115Cookie
 	}
+	normalizeStructured115Settings(&s)
 	s.N115SourceCIDs = clean115CIDs(s.N115SourceCIDs)
 	s.N115CIDRemarks = cleanN115CIDRemarks(s.N115CIDRemarks)
 	s.N115FailureCID = strings.TrimSpace(s.N115FailureCID)
@@ -677,6 +735,107 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	}
 	u.applyCloudDriveUIOverrides(s)
 	return nil
+}
+
+func normalizeStructured115Settings(s *UIOverrides) {
+	if s == nil {
+		return
+	}
+	// A nil structured slice means an old configuration that still needs
+	// migration. A non-nil empty slice means the user intentionally deleted
+	// every rule and must not be repopulated from legacy fields.
+	if s.N115Sources == nil {
+		for _, cid := range clean115CIDs(s.N115SourceCIDs) {
+			s.N115Sources = append(s.N115Sources, N115SourceRule{ID: "source:" + cid, CID: cid, Remark: s.N115CIDRemarks[cid]})
+		}
+	}
+	s.N115SourceCIDs = s.N115SourceCIDs[:0]
+	for index := range s.N115Sources {
+		rule := &s.N115Sources[index]
+		rule.CID = strings.TrimSpace(rule.CID)
+		rule.Remark = strings.TrimSpace(rule.Remark)
+		if rule.ID == "" {
+			rule.ID = "source:" + rule.CID
+		}
+		if rule.CID != "" {
+			s.N115SourceCIDs = append(s.N115SourceCIDs, rule.CID)
+		}
+	}
+	if s.N115Archive == nil && strings.TrimSpace(s.N115ArchiveCID) != "" {
+		cid := strings.TrimSpace(s.N115ArchiveCID)
+		s.N115Archive = &N115FolderRule{CID: cid, Remark: s.N115CIDRemarks[cid]}
+	}
+	if s.N115Archive != nil {
+		s.N115Archive.CID = strings.TrimSpace(s.N115Archive.CID)
+		s.N115Archive.Remark = strings.TrimSpace(s.N115Archive.Remark)
+		s.N115ArchiveCID = s.N115Archive.CID
+	}
+	if s.N115Failure == nil && (s.N115FailureCID != "" || s.N115FailureCD2Path != "") {
+		cid := strings.TrimSpace(s.N115FailureCID)
+		mode := "approval"
+		if s.N115AutoFallback != nil && *s.N115AutoFallback {
+			mode = "auto"
+		}
+		s.N115Failure = &N115FailureRule{ID: "cloud-failure", CID: cid, Remark: s.N115CIDRemarks[cid], CD2Path: normalizeCloudDrivePath(s.N115FailureCD2Path), Mode: mode}
+	}
+	if s.N115Failure != nil {
+		s.N115Failure.CID = strings.TrimSpace(s.N115Failure.CID)
+		s.N115Failure.Remark = strings.TrimSpace(s.N115Failure.Remark)
+		s.N115Failure.CD2Path = normalizeCloudDrivePath(s.N115Failure.CD2Path)
+		if s.N115Failure.ID == "" {
+			s.N115Failure.ID = "cloud-failure"
+		}
+		if s.N115Failure.Mode != "auto" {
+			s.N115Failure.Mode = "approval"
+		}
+		s.N115FailureCID = s.N115Failure.CID
+		s.N115FailureCD2Path = s.N115Failure.CD2Path
+		auto := s.N115Failure.Mode == "auto"
+		s.N115AutoFallback = &auto
+	}
+	if s.N115DownloadRules == nil {
+		for _, mapping := range parse115DownloadMappings(s.N115Downloads) {
+			mode := "auto"
+			if mapping.Approval {
+				mode = "approval"
+			}
+			s.N115DownloadRules = append(s.N115DownloadRules, N115DownloadRule{ID: "download:" + mapping.CID, CID: mapping.CID, Remark: s.N115CIDRemarks[mapping.CID], CD2Path: mapping.CD2Path, Mode: mode})
+		}
+	}
+	s.N115Downloads = s.N115Downloads[:0]
+	for index := range s.N115DownloadRules {
+		rule := &s.N115DownloadRules[index]
+		rule.CID = strings.TrimSpace(rule.CID)
+		rule.Remark = strings.TrimSpace(rule.Remark)
+		rule.CD2Path = normalizeCloudDrivePath(rule.CD2Path)
+		if rule.ID == "" {
+			rule.ID = "download:" + rule.CID
+		}
+		if rule.Mode != "approval" {
+			rule.Mode = "auto"
+		}
+		if rule.CID != "" && rule.CD2Path != "" {
+			s.N115Downloads = append(s.N115Downloads, rule.CID+" => "+rule.CD2Path+" => "+rule.Mode)
+		}
+	}
+	remarks := make(map[string]string)
+	for _, rule := range s.N115Sources {
+		if rule.CID != "" && rule.Remark != "" {
+			remarks[rule.CID] = rule.Remark
+		}
+	}
+	if s.N115Archive != nil && s.N115Archive.CID != "" && s.N115Archive.Remark != "" {
+		remarks[s.N115Archive.CID] = s.N115Archive.Remark
+	}
+	if s.N115Failure != nil && s.N115Failure.CID != "" && s.N115Failure.Remark != "" {
+		remarks[s.N115Failure.CID] = s.N115Failure.Remark
+	}
+	for _, rule := range s.N115DownloadRules {
+		if rule.CID != "" && rule.Remark != "" {
+			remarks[rule.CID] = rule.Remark
+		}
+	}
+	s.N115CIDRemarks = remarks
 }
 
 // applyCloudDriveUIOverrides keeps path-based cloud processing in sync with
@@ -812,6 +971,19 @@ func (u *Unpackerr) setDownloadsPaused(paused bool) error {
 	u.uiStore.mu.Lock()
 	u.uiStore.Overrides.DownloadsPaused = &paused
 	u.uiStore.mu.Unlock()
+	return u.saveUIStore()
+}
+
+func (u *Unpackerr) setTaskSystemPaused(paused bool) error {
+	u.taskSystemPaused.Store(paused)
+	if u.uiStore == nil {
+		return nil
+	}
+	u.uiStore.mu.Lock()
+	u.uiStore.Overrides.TaskSystemPaused = &paused
+	u.uiStore.Overrides.DownloadsPaused = &paused
+	u.uiStore.mu.Unlock()
+	u.downloadsPaused.Store(paused)
 	return u.saveUIStore()
 }
 func (u *Unpackerr) notifyUI(status ExtractStatus, item *Extract) {

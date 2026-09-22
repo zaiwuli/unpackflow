@@ -79,12 +79,20 @@ func (u *Unpackerr) beginCD2EventTask(paths []string, remotePath string) string 
 			continue
 		}
 		key := cloudDriveTaskKey(mapped)
-		u.updateCD2Transfer(key, mapped, "等待文件可见", nil)
+		u.updateCD2Transfer(key, mapped, "等待文件可见", func(task *CD2Transfer) {
+			if task.Source == "" {
+				task.Source = "CD2 实时推送"
+			}
+		})
 		return key
 	}
 	if isCloudDriveArchiveEvent(remotePath) {
 		key := "remote|" + strings.ToLower(filepath.ToSlash(filepath.Clean(remotePath)))
-		u.updateCD2Transfer(key, remotePath, "等待文件可见", nil)
+		u.updateCD2Transfer(key, remotePath, "等待文件可见", func(task *CD2Transfer) {
+			if task.Source == "" {
+				task.Source = "CD2 实时推送"
+			}
+		})
 		return key
 	}
 	return ""
@@ -185,7 +193,7 @@ func cacheStagingRoot(cacheDir string) string {
 // cacheCloudDrivePaths copies a complete archive group off the mounted CloudDrive
 // filesystem before sending it to Unpackerr's native folder pipeline.
 func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
-	if len(paths) == 0 {
+	if len(paths) == 0 || u.taskSystemPaused.Load() {
 		return 0
 	}
 	submitted := 0
@@ -769,7 +777,7 @@ func (u *Unpackerr) clearIncompleteCD2Cache() (int, error) {
 }
 
 func (u *Unpackerr) resumeCD2Pending() {
-	if u.downloadsPaused.Load() {
+	if u.downloadsPaused.Load() || u.taskSystemPaused.Load() {
 		return
 	}
 	for _, pending := range u.pendingCD2() {
