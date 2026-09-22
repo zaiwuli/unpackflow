@@ -11,6 +11,7 @@ let latestLogs = [];
 let logView = 'user';
 let notificationTemplates = [];
 let activeNotificationTemplateID = '';
+let downloadsPaused = false;
 
 function esc(value) {
   const element = document.createElement('div');
@@ -473,6 +474,11 @@ function renderStatus(data) {
   $('finished-count').textContent = data.totals.finished;
   $('retry-count').textContent = data.totals.retries;
   $('worker-count').textContent = data.totals.workers;
+  downloadsPaused = !!(data.settings && data.settings.downloads_paused);
+  const downloadsPauseButton = $('downloads-pause');
+  if (downloadsPauseButton) {
+    downloadsPauseButton.textContent = downloadsPaused ? '恢复下载' : '暂停下载';
+  }
   renderList($('tasks'), data.tasks, renderTask, zh.noTasks);
   renderList($('folders'), data.folders, folder => '<div class="compact-item">' + esc(folder.path) + '<small>' + esc(folder.extract_path || '\u539f\u76ee\u5f55\u8f93\u51fa') + ' · ' + folder.tracked + '</small></div>', zh.noFolders);
   renderList($('history'), data.history, item => '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + ' · 解压完成 ' + esc(item.completed_at) + (item.cached_at ? ' · 缓存完成 ' + esc(item.cached_at) : '') + '</small></div><div class="history-actions"><button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button><button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
@@ -546,6 +552,34 @@ $('cd2-refresh').addEventListener('click', async () => {
     load(false);
   } catch (_) { $('refresh-message').textContent = '刷新失败'; }
   $('cd2-refresh').disabled = false;
+});
+function ensureDownloadsPauseButton() {
+  let button = $('downloads-pause');
+  if (button) return button;
+  const refresh = $('cd2-refresh');
+  if (!refresh || !refresh.parentElement) return null;
+  button = document.createElement('button');
+  button.id = 'downloads-pause';
+  button.type = 'button';
+  button.textContent = '暂停下载';
+  refresh.insertAdjacentElement('afterend', button);
+  return button;
+}
+ensureDownloadsPauseButton().addEventListener('click', async () => {
+  const button = $('downloads-pause');
+  const paused = !downloadsPaused;
+  button.disabled = true;
+  $('refresh-message').textContent = paused ? '正在暂停下载…' : '正在恢复下载…';
+  try {
+    const response = await fetch('api/downloads/pause', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({paused})});
+    const data = await response.json().catch(() => ({}));
+    $('refresh-message').textContent = response.ok ? (data.paused ? '已暂停所有本地下载任务' : '已恢复本地下载任务') : (data.error || '操作失败');
+    await load(false);
+  } catch (_) {
+    $('refresh-message').textContent = '操作失败';
+  } finally {
+    button.disabled = false;
+  }
 });
 $('password-form').addEventListener('submit', async event => {
   event.preventDefault();

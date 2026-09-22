@@ -136,6 +136,7 @@ type UIOverrides struct {
 	DeleteSource        *bool    `json:"delete_source,omitempty"`
 	CacheDeleteDelay    string   `json:"cache_delete_delay,omitempty"`
 	CopyTimeout         string   `json:"copy_timeout,omitempty"`
+	DownloadsPaused     *bool    `json:"downloads_paused,omitempty"`
 	CD2FallbackEnabled  *bool    `json:"cd2_fallback_enabled,omitempty"`
 	CD2FallbackInterval string   `json:"cd2_fallback_interval,omitempty"`
 	N115Enabled         *bool    `json:"115_enabled,omitempty"`
@@ -230,6 +231,9 @@ func (u *Unpackerr) loadUIStore() error {
 		if d, e := time.ParseDuration(store.Overrides.CopyTimeout); e == nil {
 			u.CloudDrive2.CopyTimeout.Duration = d
 		}
+	}
+	if store.Overrides.DownloadsPaused != nil {
+		u.downloadsPaused.Store(*store.Overrides.DownloadsPaused)
 	}
 	if store.Overrides.CD2FallbackEnabled != nil {
 		u.CloudDrive2.FallbackScanEnabled = *store.Overrides.CD2FallbackEnabled
@@ -432,6 +436,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		KeepCache:           &keepCache,
 		CacheDeleteDelay:    u.CloudDrive2.CacheDeleteDelay.Duration.String(),
 		CopyTimeout:         u.CloudDrive2.CopyTimeout.Duration.String(),
+		DownloadsPaused:     func() *bool { value := u.downloadsPaused.Load(); return &value }(),
 		CD2FallbackEnabled:  func() *bool { v := u.CloudDrive2.FallbackScanEnabled; return &v }(),
 		CD2FallbackInterval: u.CloudDrive2.FallbackScanInterval.Duration.String(),
 		N115Enabled:         func() *bool { v := u.CloudDrive2.N115Enabled; return &v }(),
@@ -512,6 +517,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.CopyTimeout != "" {
 		settings.CopyTimeout = overrides.CopyTimeout
+	}
+	if overrides.DownloadsPaused != nil {
+		settings.DownloadsPaused = overrides.DownloadsPaused
 	}
 	if overrides.CD2FallbackEnabled != nil {
 		settings.CD2FallbackEnabled = overrides.CD2FallbackEnabled
@@ -657,6 +665,17 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	s.N115FailureCID = strings.TrimSpace(s.N115FailureCID)
 	s.N115FailureCD2Path = strings.TrimSpace(s.N115FailureCD2Path)
 	u.uiStore.Overrides = s
+	u.uiStore.mu.Unlock()
+	return u.saveUIStore()
+}
+
+func (u *Unpackerr) setDownloadsPaused(paused bool) error {
+	u.downloadsPaused.Store(paused)
+	if u.uiStore == nil {
+		return nil
+	}
+	u.uiStore.mu.Lock()
+	u.uiStore.Overrides.DownloadsPaused = &paused
 	u.uiStore.mu.Unlock()
 	return u.saveUIStore()
 }

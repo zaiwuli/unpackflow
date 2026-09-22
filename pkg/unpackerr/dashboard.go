@@ -700,6 +700,36 @@ func (u *Unpackerr) cancelTaskAPI(w http.ResponseWriter, r *http.Request, _ http
 	u.writeJSON(w, map[string]any{"success": true})
 }
 
+// downloadsPauseAPI controls CloudDrive2-to-local cache copies only.
+// Extraction already in progress is deliberately not interrupted.
+func (u *Unpackerr) downloadsPauseAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var input struct {
+		Paused bool `json:"paused"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "请求格式错误", http.StatusBadRequest)
+		return
+	}
+	if err := u.setDownloadsPaused(input.Paused); err != nil {
+		u.Errorf("保存下载暂停状态失败：%v", err)
+		http.Error(w, "保存暂停状态失败："+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if input.Paused {
+		u.cd2Cancel.Range(func(_, value any) bool {
+			if cancel, ok := value.(context.CancelFunc); ok && cancel != nil {
+				cancel()
+			}
+			return true
+		})
+		u.Printf("已暂停所有本地下载任务，正在复制的任务将在当前进度停止")
+	} else {
+		u.Printf("已恢复本地下载任务")
+		go u.resumeCD2Pending()
+	}
+	u.writeJSON(w, map[string]any{"success": true, "paused": input.Paused})
+}
+
 func (u *Unpackerr) handleHistoryAction(action historyAction) error {
 	item, ok := u.deleteProcessed(action.Key)
 	if !ok {

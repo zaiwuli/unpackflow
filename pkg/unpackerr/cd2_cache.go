@@ -233,6 +233,11 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 		if _, loaded := u.cd2Copy.LoadOrStore(groupKey, struct{}{}); loaded {
 			continue
 		}
+		if u.downloadsPaused.Load() {
+			u.pauseCD2Task(groupKey, files)
+			u.cd2Copy.Delete(groupKey)
+			continue
+		}
 		u.updateCD2Transfer(groupKey, source, "准备复制到缓存", nil)
 		u.Systemf("CloudDrive2 文件变化触发任务：%s", source)
 		cachedPrimary := filepath.Join(u.CloudDrive2.CacheDir, filepath.Base(archivePrimary(files)))
@@ -242,6 +247,10 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 		go func(files []string, groupKey string) {
 			defer u.cd2Copy.Delete(groupKey)
 			if err := u.cacheCloudDriveGroup(files, groupKey); err != nil {
+				if u.downloadsPaused.Load() {
+					u.pauseCD2Task(groupKey, files)
+					return
+				}
 				u.Errorf("CloudDrive2 复制失败，将进入重试：%v", err)
 				u.updateCD2Transfer(groupKey, archivePrimary(files), "复制失败，等待重试", func(transfer *CD2Transfer) {
 					transfer.Error = err.Error()
@@ -699,6 +708,10 @@ func sameFileMetadata(source, target string) (bool, error) {
 }
 
 func (u *Unpackerr) queueCD2Retry(groupKey string, files []string, copyErr error) {
+	if u.downloadsPaused.Load() {
+		u.pauseCD2Task(groupKey, files)
+		return
+	}
 	if _, cancelled := u.cancelled.Load(groupKey); cancelled {
 		return
 	}
@@ -714,7 +727,26 @@ func (u *Unpackerr) queueCD2Retry(groupKey string, files []string, copyErr error
 	u.savePendingCD2(PendingCD2{Key: key, Files: append([]string(nil), files...), Attempts: attempts, NextAttempt: time.Now().Add(delay), LastError: copyErr.Error()})
 }
 
+// pauseCD2Task persists a cache task without treating it as a failure or a
+// user cancellation. The staging directory remains in place so copying can
+// resume from already cached bytes after downloads are resumed.
+func (u *Unpackerr) pauseCD2Task(groupKey string, files []string) {
+	u.savePendingCD2(PendingCD2{
+		Key:       "copy|" + filepath.Clean(groupKey),
+		Files:     append([]string(nil), files...),
+		LastError: "下载已暂停",
+	})
+	u.updateCD2Transfer(groupKey, archivePrimary(files), "下载已暂停", func(transfer *CD2Transfer) {
+		transfer.Error = ""
+		transfer.Speed = 0
+		transfer.ETA = 0
+	})
+}
+
 func (u *Unpackerr) resumeCD2Pending() {
+	if u.downloadsPaused.Load() {
+		return
+	}
 	for _, pending := range u.pendingCD2() {
 		pending := pending
 		if pending.CachedPrimary != "" {
@@ -736,7 +768,15 @@ func (u *Unpackerr) resumeCD2Pending() {
 		}
 		go func() {
 			defer u.cd2Copy.Delete(groupKey)
+			if u.downloadsPaused.Load() {
+				u.pauseCD2Task(groupKey, pending.Files)
+				return
+			}
 			if err := u.cacheCloudDriveGroup(pending.Files, groupKey); err != nil {
+				if u.downloadsPaused.Load() {
+					u.pauseCD2Task(groupKey, pending.Files)
+					return
+				}
 				u.queueCD2Retry(groupKey, pending.Files, err)
 				return
 			}
