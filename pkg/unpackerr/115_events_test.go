@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParse115MappingsAcceptsFallbackAndLegacyFormats(t *testing.T) {
@@ -63,6 +64,21 @@ func TestN115SeparateFolderName(t *testing.T) {
 	}
 	if got := n115ExtractFolderName("movie.7z"); got != "movie" {
 		t.Fatalf("archive folder = %q", got)
+	}
+}
+
+func TestAvailable115ExtractFolderNameAvoidsExistingFolders(t *testing.T) {
+	now := time.Date(2026, time.September, 22, 15, 45, 0, 0, time.Local)
+	if got := available115ExtractFolderName("电影", map[string]struct{}{}, now); got != "电影" {
+		t.Fatalf("unused name changed: %q", got)
+	}
+	existing := map[string]struct{}{
+		"电影":                      {},
+		"电影_解压_20260922-154500":   {},
+		"电影_解压_20260922-154500_2": {},
+	}
+	if got := available115ExtractFolderName("电影", existing, now); got != "电影_解压_20260922-154500_3" {
+		t.Fatalf("collision name = %q", got)
 	}
 }
 
