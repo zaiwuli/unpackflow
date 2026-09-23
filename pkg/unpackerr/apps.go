@@ -111,6 +111,7 @@ type CloudDriveConfig struct {
 	N115ExtractCIDs      map[string]string `json:"115_extract_cids" toml:"115_extract_cids" xml:"115_extract_cids" yaml:"115_extract_cids"`
 	N115FailureCID       string            `json:"115_failure_cid" toml:"115_failure_cid" xml:"115_failure_cid" yaml:"115_failure_cid"`
 	N115FailureCD2Path   string            `json:"115_failure_cd2_path" toml:"115_failure_cd2_path" xml:"115_failure_cd2_path" yaml:"115_failure_cd2_path"`
+	N115ScanFailure      bool              `json:"115_scan_failure" toml:"115_scan_failure" xml:"115_scan_failure" yaml:"115_scan_failure"`
 	N115DownloadMappings []string          `json:"115_download_mappings" toml:"115_download_mappings" xml:"115_download_mapping" yaml:"115_download_mappings"`
 	N115SuccessAction    string            `json:"115_success_action" toml:"115_success_action" xml:"115_success_action" yaml:"115_success_action"`
 	N115ArchiveCID       string            `json:"115_archive_cid" toml:"115_archive_cid" xml:"115_archive_cid" yaml:"115_archive_cid"`

@@ -61,6 +61,7 @@ type DashboardHistory struct {
 	Source      string `json:"source"`
 	CachedAt    string `json:"cached_at,omitempty"`
 	CompletedAt string `json:"completed_at"`
+	Ignored     bool   `json:"ignored,omitempty"`
 }
 
 type historyAction struct {
@@ -222,6 +223,13 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			CachedAt:    formatDashboardTime(item.CachedAt),
 			CompletedAt: item.CompletedAt.Format("2006-01-02 15:04:05"),
 		})
+	}
+	if u.state != nil {
+		u.state.mu.RLock()
+		for _, item := range u.state.Ignored {
+			snapshot.History = append(snapshot.History, DashboardHistory{Key: item.Key, Path: item.Path, Source: "已忽略压缩包", CompletedAt: formatDashboardTime(item.CompletedAt), Ignored: true})
+		}
+		u.state.mu.RUnlock()
 	}
 	for _, folder := range u.Folders {
 		tracked := 0

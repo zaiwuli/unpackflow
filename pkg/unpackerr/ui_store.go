@@ -153,6 +153,7 @@ type UIOverrides struct {
 	N115CIDRemarks      map[string]string  `json:"115_cid_remarks"`
 	N115FailureCID      string             `json:"115_failure_cid"`
 	N115FailureCD2Path  string             `json:"115_failure_cd2_path"`
+	N115ScanFailure     *bool              `json:"115_scan_failure,omitempty"`
 	N115Downloads       []string           `json:"115_download_mappings"`
 	N115SuccessAction   string             `json:"115_success_action,omitempty"`
 	N115ArchiveCID      string             `json:"115_archive_cid"`
@@ -539,6 +540,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115SuccessAction:   u.CloudDrive2.N115SuccessAction,
 		N115ArchiveCID:      u.CloudDrive2.N115ArchiveCID,
 		N115AutoFallback:    func() *bool { v := u.CloudDrive2.N115AutoFallback; return &v }(),
+		N115ScanFailure:     func() *bool { v := u.CloudDrive2.N115ScanFailure; return &v }(),
 		N115RetryCount:      u.CloudDrive2.N115RetryCount,
 		N115RetryDelay:      u.CloudDrive2.N115RetryDelay.Duration.String(),
 	}
@@ -932,6 +934,9 @@ func (u *Unpackerr) applyCloudDriveUIOverrides(s UIOverrides) {
 	}
 	u.CloudDrive2.N115FailureCID = strings.TrimSpace(s.N115FailureCID)
 	u.CloudDrive2.N115FailureCD2Path = normalizeCloudDrivePath(s.N115FailureCD2Path)
+	if s.N115ScanFailure != nil {
+		u.CloudDrive2.N115ScanFailure = *s.N115ScanFailure
+	}
 	u.CloudDrive2.N115DownloadMappings = append([]string(nil), s.N115Downloads...)
 	u.CloudDrive2.N115SuccessAction = s.N115SuccessAction
 	u.CloudDrive2.N115ArchiveCID = strings.TrimSpace(s.N115ArchiveCID)

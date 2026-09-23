@@ -236,7 +236,7 @@ func cloudDriveManualWatchPaths(cfg CloudDriveConfig) []string {
 			values = append(values, mapping.CD2Path)
 		}
 	}
-	if cfg.N115AutoFallback && strings.TrimSpace(cfg.N115FailureCD2Path) != "" {
+	if cfg.N115ScanFailure && strings.TrimSpace(cfg.N115FailureCD2Path) != "" {
 		values = append(values, cfg.N115FailureCD2Path)
 	}
 	for _, value := range values {

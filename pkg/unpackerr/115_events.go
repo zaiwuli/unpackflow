@@ -650,6 +650,8 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 			task.CanFallback = false
 			task.Source = "云解压失败转本地｜" + mapping.RouteLabel
 		})
+		// Failure directories are approval-only unless explicitly enabled for
+		// proactive scanning. This event remains the single-file trigger.
 		u.refresh115Fallback(mapping, file)
 		return
 	}

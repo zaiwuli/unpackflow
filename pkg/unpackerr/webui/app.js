@@ -226,6 +226,7 @@ function ensureLocalSettings() {
 		'<h3>云解压失败</h3><div class="field"><span>失败归档目录</span><div class="settings-pair"><input id="115-failure-cid" type="text" placeholder="115 解压失败文件夹 CID"><input id="115-failure-remark" type="text" placeholder="备注，例如：云解压失败"></div></div>' +
 		'<label class="field"><span>失败目录的 CD2 路径</span><input id="115-failure-path" type="text" placeholder="/115open/解压失败"></label>' +
     '<label class="check-row"><input id="115-auto-fallback" type="checkbox"> 最终失败后自动下载到本地解压</label><small style="color:var(--muted);font-size:12px">关闭后只移动到失败目录，并在任务页等待批准。</small>' +
+    '<label class="check-row"><input id="115-scan-failure" type="checkbox"> 主动扫描失败目录</label><small style="color:var(--muted);font-size:12px">关闭后只处理刚刚云解压失败的文件。</small>' +
 		'<div class="field"><span>失败重试</span><div class="settings-pair"><input id="115-retry-count" type="number" min="1" max="10" placeholder="3"><input id="115-retry-delay" type="text" placeholder="2m"></div><small style="color:var(--muted);font-size:12px">尝试次数与两次尝试之间的等待时间。</small></div>' +
 		'<h3>日常本地下载</h3><div class="field"><div id="115-downloads" class="mapping-list"></div><div class="form-actions"><button id="115-download-add" type="button">添加下载文件夹</button></div><small style="color:var(--muted);font-size:12px">手动将压缩包移入这些 115 文件夹后，工具刷新对应 CD2 路径；每行可选择自动下载或等待批准。</small></div>' +
 		'<h3>CD2 挂载路径映射</h3><div class="field"><div id="path-mappings" class="mapping-list"></div><div class="form-actions"><button id="path-mapping-add" type="button">添加路径映射</button></div></div>';
@@ -486,6 +487,7 @@ function fillForms(data) {
   $('115-failure-remark').value = failureRule.remark || cidRemarks[$('115-failure-cid').value] || '';
 	$('115-failure-path').value = failureRule.cd2_path || (data.settings && data.settings['115_failure_cd2_path']) || '';
   $('115-auto-fallback').checked = !!(data.settings && data.settings['115_auto_fallback']);
+  $('115-scan-failure').checked = !!(data.settings && data.settings['115_scan_failure']);
 	$('115-retry-count').value = (data.settings && data.settings['115_retry_count']) || 3;
 	$('115-retry-delay').value = (data.settings && data.settings['115_retry_delay']) || '2m';
 	fillSourceRows((data.settings && data.settings['115_sources']) || (data.settings && data.settings['115_source_cids']) || [], cidRemarks);
@@ -550,7 +552,7 @@ function renderStatus(data) {
   currentTasks = data.tasks || [];
   renderCurrentTasks();
   renderList($('folders'), data.folders, folder => '<div class="compact-item">' + esc(folder.path) + '<small>' + esc(folder.extract_path || '\u539f\u76ee\u5f55\u8f93\u51fa') + ' · ' + folder.tracked + '</small></div>', zh.noFolders);
-  renderList($('history'), data.history, item => '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + ' · 解压完成 ' + esc(item.completed_at) + (item.cached_at ? ' · 缓存完成 ' + esc(item.cached_at) : '') + '</small></div><div class="history-actions"><button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button><button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
+  renderList($('history'), data.history, item => '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + (item.ignored ? ' · 已忽略' : ' · 解压完成 ' + esc(item.completed_at)) + (item.cached_at ? ' · 缓存完成 ' + esc(item.cached_at) : '') + '</small></div><div class="history-actions">' + (item.ignored ? '<button data-ignore-history="' + esc(item.key) + '" type="button">取消忽略</button>' : '<button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button>') + '<button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
   latestLogs = data.logs || [];
   renderLogs();
   $('transfers').innerHTML = '';
@@ -683,6 +685,8 @@ $('password-list').addEventListener('click', async event => {
 });
 
 $('history').addEventListener('click', async event => {
+  const ignored = event.target.dataset.ignoreHistory;
+  if (ignored) { await fetch('api/tasks/cancel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key:ignored, action:'unignore'})}); load(false); return; }
   const key = event.target.dataset.historyKey;
   const action = event.target.dataset.historyAction;
   if (!key || !action) return;
@@ -742,6 +746,7 @@ $('settings-save').addEventListener('click', async () => {
       '115_archive': {cid: $('115-archive-cid').value.trim(), remark: $('115-archive-remark').value.trim()},
       '115_failure': {id: 'cloud-failure', cid: $('115-failure-cid').value.trim(), remark: $('115-failure-remark').value.trim(), cd2_path: $('115-failure-path').value.trim(), mode: $('115-auto-fallback').checked ? 'auto' : 'approval'},
       '115_auto_fallback': $('115-auto-fallback').checked,
+      '115_scan_failure': $('115-scan-failure').checked,
 		'115_retry_count': Number($('115-retry-count').value) || 3,
 		'115_retry_delay': $('115-retry-delay').value.trim(),
 		'115_sources': collectSourceRules(),
