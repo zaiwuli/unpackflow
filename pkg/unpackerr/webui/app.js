@@ -233,7 +233,7 @@ function ensureLocalSettings() {
   if (!document.getElementById('115-mapping-style')) {
     const style = document.createElement('style');
     style.id = '115-mapping-style';
-		style.textContent = '.mapping-list{display:grid;gap:8px;margin-top:8px}.mapping-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(180px,2fr) minmax(120px,1fr) 34px;gap:8px;align-items:center}.mapping-row.single{grid-template-columns:1fr 34px}.mapping-row.pair{grid-template-columns:1fr 1.4fr 34px}.mapping-input,.mapping-select{min-width:0;width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit}.mapping-remove{width:34px;height:34px;padding:0;border:1px solid #d8dce5;border-radius:8px;background:#fff;color:#b42318;font-size:22px;line-height:1}.settings-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}@media(max-width:680px){.mapping-row,.mapping-row.single,.mapping-row.pair,.settings-pair{grid-template-columns:1fr}.mapping-remove{width:100%;font-size:16px}}';
+    style.textContent = '.mapping-list{display:grid;gap:8px;margin-top:8px}.mapping-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(180px,2fr) minmax(120px,1fr) 34px;gap:8px;align-items:center}.mapping-row.single{grid-template-columns:1fr 34px}.mapping-row.pair{grid-template-columns:1fr 1.4fr 34px}.mapping-row.source-rule{grid-template-columns:minmax(0,1fr) 34px}.source-rule-grid{display:grid;grid-template-columns:minmax(150px,0.8fr) minmax(120px,1fr) minmax(150px,0.8fr) minmax(120px,1fr);gap:8px}.source-rule-grid input[data-field=cid],.source-rule-grid input[data-field=extract_cid]{max-width:25ch}.mapping-input,.mapping-select{min-width:0;width:100%;border:1px solid #d8dce5;border-radius:8px;padding:9px 10px;background:#fff;font:inherit}.mapping-remove{width:34px;height:34px;padding:0;border:1px solid #d8dce5;border-radius:8px;background:#fff;color:#b42318;font-size:22px;line-height:1}.settings-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}@media(max-width:680px){.mapping-row,.mapping-row.single,.mapping-row.pair,.mapping-row.source-rule,.settings-pair{grid-template-columns:1fr}.source-rule-grid{grid-template-columns:1fr}.mapping-remove{width:100%;font-size:16px}}';
     document.head.appendChild(style);
   }
   const select = $('local-source-action');
@@ -336,7 +336,8 @@ function addSourceRow(value, remarks) {
   const list = $('115-sources');
   const cid = typeof value === 'string' ? value : ((value && value.cid) || '');
   const remark = typeof value === 'object' && value ? (value.remark || '') : ((remarks || {})[cid] || '');
-  if (list) list.appendChild(removableRow('pair', mappingInput('来源文件夹 CID', cid, 'cid') + mappingInput('云解压目标 CID（留空使用来源）', typeof value === 'object' && value ? (value.extract_cid || '') : '', 'extract_cid') + mappingInput('备注，例如：待云解压', remark, 'remark')));
+  const extractRemark = typeof value === 'object' && value ? (value.extract_remark || '') : '';
+  if (list) list.appendChild(removableRow('source-rule', '<div class="source-rule-grid">' + mappingInput('来源 CID（最多25位）', cid, 'cid') + mappingInput('来源备注', remark, 'remark') + mappingInput('目标 CID（最多25位，留空使用来源）', typeof value === 'object' && value ? (value.extract_cid || '') : '', 'extract_cid') + mappingInput('目标备注', extractRemark, 'extract_remark') + '</div>'));
 }
 
 function fillSourceRows(values, remarks) {
@@ -356,7 +357,8 @@ function collectSourceRules() {
     const cid = row.querySelector('[data-field="cid"]').value.trim();
     const remark = row.querySelector('[data-field="remark"]').value.trim();
     const extract = row.querySelector('[data-field="extract_cid"]');
-    return cid ? {id: 'source:' + cid, cid, extract_cid: extract ? extract.value.trim() : '', remark} : null;
+    const extractRemark = row.querySelector('[data-field="extract_remark"]');
+    return cid ? {id: 'source:' + cid, cid, extract_cid: extract ? extract.value.trim() : '', remark, extract_remark: extractRemark ? extractRemark.value.trim() : ''} : null;
   }).filter(Boolean);
 }
 

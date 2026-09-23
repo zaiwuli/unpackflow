@@ -166,10 +166,11 @@ type UIOverrides struct {
 }
 
 type N115SourceRule struct {
-	ID         string `json:"id"`
-	CID        string `json:"cid"`
-	ExtractCID string `json:"extract_cid,omitempty"`
-	Remark     string `json:"remark,omitempty"`
+	ID            string `json:"id"`
+	CID           string `json:"cid"`
+	ExtractCID    string `json:"extract_cid,omitempty"`
+	Remark        string `json:"remark,omitempty"`
+	ExtractRemark string `json:"extract_remark,omitempty"`
 }
 
 type N115FolderRule struct {
