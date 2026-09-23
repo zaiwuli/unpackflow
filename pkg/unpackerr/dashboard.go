@@ -720,7 +720,8 @@ func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, _ *http.Request, _ httpro
 
 func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	var input struct {
-		Key string `json:"key"`
+		Key    string `json:"key"`
+		Action string `json:"action"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Key) == "" {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
@@ -875,13 +876,23 @@ func (u *Unpackerr) historyAPI(w http.ResponseWriter, r *http.Request, _ httprou
 
 func (u *Unpackerr) cancelTaskAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	var input struct {
-		Key string `json:"key"`
+		Key    string `json:"key"`
+		Action string `json:"action"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Key) == "" {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
 		return
 	}
 	key := strings.TrimSpace(input.Key)
+	if input.Action == "ignore" || input.Action == "unignore" {
+		if err := u.setIgnoredPath(key, input.Action == "ignore"); err != nil {
+			http.Error(w, "保存忽略状态失败", http.StatusInternalServerError)
+			return
+		}
+		u.cancelled.Store(key, struct{}{})
+		u.writeJSON(w, map[string]any{"success": true})
+		return
+	}
 	if cancel, ok := u.cd2Cancel.Load(key); ok {
 		cancel.(context.CancelFunc)()
 	}

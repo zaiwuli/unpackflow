@@ -166,9 +166,10 @@ type UIOverrides struct {
 }
 
 type N115SourceRule struct {
-	ID     string `json:"id"`
-	CID    string `json:"cid"`
-	Remark string `json:"remark,omitempty"`
+	ID         string `json:"id"`
+	CID        string `json:"cid"`
+	ExtractCID string `json:"extract_cid,omitempty"`
+	Remark     string `json:"remark,omitempty"`
 }
 
 type N115FolderRule struct {
@@ -911,6 +912,12 @@ func (u *Unpackerr) applyCloudDriveUIOverrides(s UIOverrides) {
 	}
 	u.CloudDrive2.N115Mappings = append([]string(nil), s.N115Mappings...)
 	u.CloudDrive2.N115SourceCIDs = clean115CIDs(s.N115SourceCIDs)
+	u.CloudDrive2.N115ExtractCIDs = make(map[string]string)
+	for _, rule := range s.N115Sources {
+		if strings.TrimSpace(rule.CID) != "" && strings.TrimSpace(rule.ExtractCID) != "" {
+			u.CloudDrive2.N115ExtractCIDs[strings.TrimSpace(rule.CID)] = strings.TrimSpace(rule.ExtractCID)
+		}
+	}
 	u.CloudDrive2.N115FailureCID = strings.TrimSpace(s.N115FailureCID)
 	u.CloudDrive2.N115FailureCD2Path = normalizeCloudDrivePath(s.N115FailureCD2Path)
 	u.CloudDrive2.N115DownloadMappings = append([]string(nil), s.N115Downloads...)

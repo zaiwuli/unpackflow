@@ -229,6 +229,9 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 		if !isCloudDriveArchiveEvent(source) {
 			continue
 		}
+		if u.isIgnoredPath(source) {
+			continue
+		}
 		candidateKey := cloudDriveTaskKey(source)
 		u.updateCD2Transfer(candidateKey, source, "检查文件完整性", nil)
 		files, groupKey, err := archiveVolumeGroup(source)

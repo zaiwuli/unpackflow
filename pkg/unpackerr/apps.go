@@ -83,39 +83,40 @@ type Config struct {
 // CloudDriveConfig controls the optional direct CloudDrive2 change stream.
 // The token is intentionally never included in startup logs or status output.
 type CloudDriveConfig struct {
-	Enabled              bool          `json:"enabled"          toml:"enabled"          xml:"enabled"          yaml:"enabled"`
-	URL                  string        `json:"url"              toml:"url"              xml:"url"              yaml:"url"`
-	Token                string        `json:"token"            toml:"token"            xml:"token"            yaml:"token"`
-	RefreshInterval      cnfg.Duration `json:"refresh_interval"  toml:"refresh_interval"  xml:"refresh_interval"  yaml:"refresh_interval"`
-	RefreshPath          string        `json:"refresh_path"      toml:"refresh_path"      xml:"refresh_path"      yaml:"refresh_path"`
-	WatchPath            string        `json:"watch_path"        toml:"watch_path"        xml:"watch_path"        yaml:"watch_path"`
-	ManualWatchPaths     []string      `json:"manual_watch_paths" toml:"manual_watch_paths" xml:"manual_watch_path" yaml:"manual_watch_paths"`
-	ReconnectMin         cnfg.Duration `json:"reconnect_min"     toml:"reconnect_min"     xml:"reconnect_min"     yaml:"reconnect_min"`
-	ReconnectMax         cnfg.Duration `json:"reconnect_max"     toml:"reconnect_max"     xml:"reconnect_max"     yaml:"reconnect_max"`
-	PathOverrides        []string      `json:"path_overrides"    toml:"path_overrides"    xml:"path_override"    yaml:"path_overrides"`
-	CacheDir             string        `json:"cache_dir"         toml:"cache_dir"         xml:"cache_dir"         yaml:"cache_dir"`
-	CacheExtractPath     string        `json:"cache_extract_path" toml:"cache_extract_path" xml:"cache_extract_path" yaml:"cache_extract_path"`
-	KeepCache            bool          `json:"keep_cache"        toml:"keep_cache"        xml:"keep_cache"        yaml:"keep_cache"`
-	DeleteSource         bool          `json:"delete_source"     toml:"delete_source"     xml:"delete_source"     yaml:"delete_source"`
-	CacheDeleteDelay     cnfg.Duration `json:"cache_delete_delay" toml:"cache_delete_delay" xml:"cache_delete_delay" yaml:"cache_delete_delay"`
-	CopyTimeout          cnfg.Duration `json:"copy_timeout"       toml:"copy_timeout"       xml:"copy_timeout"       yaml:"copy_timeout"`
-	FallbackScanEnabled  bool          `json:"fallback_scan_enabled" toml:"fallback_scan_enabled" xml:"fallback_scan_enabled" yaml:"fallback_scan_enabled"`
-	FallbackScanInterval cnfg.Duration `json:"fallback_scan_interval" toml:"fallback_scan_interval" xml:"fallback_scan_interval" yaml:"fallback_scan_interval"`
-	N115Enabled          bool          `json:"115_enabled" toml:"115_enabled" xml:"115_enabled" yaml:"115_enabled"`
-	N115Cookie           string        `json:"115_cookie" toml:"115_cookie" xml:"115_cookie" yaml:"115_cookie"`
-	N115CookieRemark     string        `json:"115_cookie_remark" toml:"115_cookie_remark" xml:"115_cookie_remark" yaml:"115_cookie_remark"`
-	N115EventEnabled     bool          `json:"115_event_enabled" toml:"115_event_enabled" xml:"115_event_enabled" yaml:"115_event_enabled"`
-	N115EventInterval    cnfg.Duration `json:"115_event_interval" toml:"115_event_interval" xml:"115_event_interval" yaml:"115_event_interval"`
-	N115Mappings         []string      `json:"115_mappings" toml:"115_mappings" xml:"115_mapping" yaml:"115_mappings"`
-	N115SourceCIDs       []string      `json:"115_source_cids" toml:"115_source_cids" xml:"115_source_cid" yaml:"115_source_cids"`
-	N115FailureCID       string        `json:"115_failure_cid" toml:"115_failure_cid" xml:"115_failure_cid" yaml:"115_failure_cid"`
-	N115FailureCD2Path   string        `json:"115_failure_cd2_path" toml:"115_failure_cd2_path" xml:"115_failure_cd2_path" yaml:"115_failure_cd2_path"`
-	N115DownloadMappings []string      `json:"115_download_mappings" toml:"115_download_mappings" xml:"115_download_mapping" yaml:"115_download_mappings"`
-	N115SuccessAction    string        `json:"115_success_action" toml:"115_success_action" xml:"115_success_action" yaml:"115_success_action"`
-	N115ArchiveCID       string        `json:"115_archive_cid" toml:"115_archive_cid" xml:"115_archive_cid" yaml:"115_archive_cid"`
-	N115AutoFallback     bool          `json:"115_auto_fallback" toml:"115_auto_fallback" xml:"115_auto_fallback" yaml:"115_auto_fallback"`
-	N115RetryCount       uint          `json:"115_retry_count" toml:"115_retry_count" xml:"115_retry_count" yaml:"115_retry_count"`
-	N115RetryDelay       cnfg.Duration `json:"115_retry_delay" toml:"115_retry_delay" xml:"115_retry_delay" yaml:"115_retry_delay"`
+	Enabled              bool              `json:"enabled"          toml:"enabled"          xml:"enabled"          yaml:"enabled"`
+	URL                  string            `json:"url"              toml:"url"              xml:"url"              yaml:"url"`
+	Token                string            `json:"token"            toml:"token"            xml:"token"            yaml:"token"`
+	RefreshInterval      cnfg.Duration     `json:"refresh_interval"  toml:"refresh_interval"  xml:"refresh_interval"  yaml:"refresh_interval"`
+	RefreshPath          string            `json:"refresh_path"      toml:"refresh_path"      xml:"refresh_path"      yaml:"refresh_path"`
+	WatchPath            string            `json:"watch_path"        toml:"watch_path"        xml:"watch_path"        yaml:"watch_path"`
+	ManualWatchPaths     []string          `json:"manual_watch_paths" toml:"manual_watch_paths" xml:"manual_watch_path" yaml:"manual_watch_paths"`
+	ReconnectMin         cnfg.Duration     `json:"reconnect_min"     toml:"reconnect_min"     xml:"reconnect_min"     yaml:"reconnect_min"`
+	ReconnectMax         cnfg.Duration     `json:"reconnect_max"     toml:"reconnect_max"     xml:"reconnect_max"     yaml:"reconnect_max"`
+	PathOverrides        []string          `json:"path_overrides"    toml:"path_overrides"    xml:"path_override"    yaml:"path_overrides"`
+	CacheDir             string            `json:"cache_dir"         toml:"cache_dir"         xml:"cache_dir"         yaml:"cache_dir"`
+	CacheExtractPath     string            `json:"cache_extract_path" toml:"cache_extract_path" xml:"cache_extract_path" yaml:"cache_extract_path"`
+	KeepCache            bool              `json:"keep_cache"        toml:"keep_cache"        xml:"keep_cache"        yaml:"keep_cache"`
+	DeleteSource         bool              `json:"delete_source"     toml:"delete_source"     xml:"delete_source"     yaml:"delete_source"`
+	CacheDeleteDelay     cnfg.Duration     `json:"cache_delete_delay" toml:"cache_delete_delay" xml:"cache_delete_delay" yaml:"cache_delete_delay"`
+	CopyTimeout          cnfg.Duration     `json:"copy_timeout"       toml:"copy_timeout"       xml:"copy_timeout"       yaml:"copy_timeout"`
+	FallbackScanEnabled  bool              `json:"fallback_scan_enabled" toml:"fallback_scan_enabled" xml:"fallback_scan_enabled" yaml:"fallback_scan_enabled"`
+	FallbackScanInterval cnfg.Duration     `json:"fallback_scan_interval" toml:"fallback_scan_interval" xml:"fallback_scan_interval" yaml:"fallback_scan_interval"`
+	N115Enabled          bool              `json:"115_enabled" toml:"115_enabled" xml:"115_enabled" yaml:"115_enabled"`
+	N115Cookie           string            `json:"115_cookie" toml:"115_cookie" xml:"115_cookie" yaml:"115_cookie"`
+	N115CookieRemark     string            `json:"115_cookie_remark" toml:"115_cookie_remark" xml:"115_cookie_remark" yaml:"115_cookie_remark"`
+	N115EventEnabled     bool              `json:"115_event_enabled" toml:"115_event_enabled" xml:"115_event_enabled" yaml:"115_event_enabled"`
+	N115EventInterval    cnfg.Duration     `json:"115_event_interval" toml:"115_event_interval" xml:"115_event_interval" yaml:"115_event_interval"`
+	N115Mappings         []string          `json:"115_mappings" toml:"115_mappings" xml:"115_mapping" yaml:"115_mappings"`
+	N115SourceCIDs       []string          `json:"115_source_cids" toml:"115_source_cids" xml:"115_source_cid" yaml:"115_source_cids"`
+	N115ExtractCIDs      map[string]string `json:"115_extract_cids" toml:"115_extract_cids" xml:"115_extract_cids" yaml:"115_extract_cids"`
+	N115FailureCID       string            `json:"115_failure_cid" toml:"115_failure_cid" xml:"115_failure_cid" yaml:"115_failure_cid"`
+	N115FailureCD2Path   string            `json:"115_failure_cd2_path" toml:"115_failure_cd2_path" xml:"115_failure_cd2_path" yaml:"115_failure_cd2_path"`
+	N115DownloadMappings []string          `json:"115_download_mappings" toml:"115_download_mappings" xml:"115_download_mapping" yaml:"115_download_mappings"`
+	N115SuccessAction    string            `json:"115_success_action" toml:"115_success_action" xml:"115_success_action" yaml:"115_success_action"`
+	N115ArchiveCID       string            `json:"115_archive_cid" toml:"115_archive_cid" xml:"115_archive_cid" yaml:"115_archive_cid"`
+	N115AutoFallback     bool              `json:"115_auto_fallback" toml:"115_auto_fallback" xml:"115_auto_fallback" yaml:"115_auto_fallback"`
+	N115RetryCount       uint              `json:"115_retry_count" toml:"115_retry_count" xml:"115_retry_count" yaml:"115_retry_count"`
+	N115RetryDelay       cnfg.Duration     `json:"115_retry_delay" toml:"115_retry_delay" xml:"115_retry_delay" yaml:"115_retry_delay"`
 }
 
 type FoldersConfig struct {

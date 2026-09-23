@@ -336,7 +336,7 @@ function addSourceRow(value, remarks) {
   const list = $('115-sources');
   const cid = typeof value === 'string' ? value : ((value && value.cid) || '');
   const remark = typeof value === 'object' && value ? (value.remark || '') : ((remarks || {})[cid] || '');
-  if (list) list.appendChild(removableRow('pair', mappingInput('来源文件夹 CID', cid, 'cid') + mappingInput('备注，例如：待云解压', remark, 'remark')));
+  if (list) list.appendChild(removableRow('pair', mappingInput('来源文件夹 CID', cid, 'cid') + mappingInput('云解压目标 CID（留空使用来源）', typeof value === 'object' && value ? (value.extract_cid || '') : '', 'extract_cid') + mappingInput('备注，例如：待云解压', remark, 'remark')));
 }
 
 function fillSourceRows(values, remarks) {
@@ -355,7 +355,8 @@ function collectSourceRules() {
   return Array.from($('115-sources').querySelectorAll('.mapping-row')).map(row => {
     const cid = row.querySelector('[data-field="cid"]').value.trim();
     const remark = row.querySelector('[data-field="remark"]').value.trim();
-    return cid ? {id: 'source:' + cid, cid, remark} : null;
+    const extract = row.querySelector('[data-field="extract_cid"]');
+    return cid ? {id: 'source:' + cid, cid, extract_cid: extract ? extract.value.trim() : '', remark} : null;
   }).filter(Boolean);
 }
 
@@ -517,12 +518,13 @@ function renderTask(task) {
     if (task.eta_seconds) detail += ' · 预计 ' + formatDuration(task.eta_seconds);
   }
   const canCancel = ['已取消', '已完成', '已解压', '已导入', '解压失败', '清理失败'].indexOf(task.status) < 0;
+  const canIgnore = task.status.includes('失败') || task.error;
   return '<article class="task"><div class="task-content"><div class="task-name" title="' + esc(task.name) + '">' + esc(task.name) + '</div>' +
     '<div class="task-meta">' + esc(task.source) + ' · ' + esc(task.updated) + '</div>' +
     (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
-    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button" style="margin-left:8px">批准下载</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button" style="margin-left:8px">批准下载</button>' : '') + (canIgnore ? '<button data-ignore-task="' + esc(task.cancel_key || task.key) + '" type="button" style="margin-left:8px">忽略</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
 }
 
 function renderStatus(data) {
@@ -687,6 +689,12 @@ $('history').addEventListener('click', async event => {
 });
 
 $('tasks').addEventListener('click', async event => {
+  const ignoreKey = event.target.dataset.ignoreTask;
+  if (ignoreKey) {
+    event.target.disabled = true;
+    await fetch('api/tasks/cancel', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: ignoreKey, action: 'ignore'})});
+    load(false); return;
+  }
 	const fallbackKey = event.target.dataset.fallbackTask;
 	if (fallbackKey) {
 		event.target.disabled = true;

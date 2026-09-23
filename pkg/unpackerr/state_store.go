@@ -20,6 +20,7 @@ type ProcessingState struct {
 	Pending       map[string]PendingCD2      `json:"pending_cd2"`
 	Fallback115   map[string]Pending115      `json:"pending_115_fallback"`
 	Notifications map[string]time.Time       `json:"notifications,omitempty"`
+	Ignored       map[string]ProcessedSource `json:"ignored,omitempty"`
 	mu            sync.RWMutex               `json:"-"`
 }
 
@@ -82,6 +83,7 @@ func (u *Unpackerr) loadProcessingState() error {
 		Pending:       make(map[string]PendingCD2),
 		Fallback115:   make(map[string]Pending115),
 		Notifications: make(map[string]time.Time),
+		Ignored:       make(map[string]ProcessedSource),
 	}
 	data, err := os.ReadFile(state.Path)
 	if err == nil {
@@ -106,6 +108,9 @@ func (u *Unpackerr) loadProcessingState() error {
 	}
 	if state.Notifications == nil {
 		state.Notifications = make(map[string]time.Time)
+	}
+	if state.Ignored == nil {
+		state.Ignored = make(map[string]ProcessedSource)
 	}
 	state.Processed = compactProcessedSources(state.Processed)
 	state.Path = filepath.Join(base, "unpackflow-state.json")
@@ -150,7 +155,8 @@ func (u *Unpackerr) saveProcessingState() error {
 		Pending       map[string]PendingCD2      `json:"pending_cd2"`
 		Fallback115   map[string]Pending115      `json:"pending_115_fallback"`
 		Notifications map[string]time.Time       `json:"notifications,omitempty"`
-	}{u.state.Processed, u.state.Pending, u.state.Fallback115, u.state.Notifications}, "", "  ")
+		Ignored       map[string]ProcessedSource `json:"ignored,omitempty"`
+	}{u.state.Processed, u.state.Pending, u.state.Fallback115, u.state.Notifications, u.state.Ignored}, "", "  ")
 	path := u.state.Path
 	u.state.mu.RUnlock()
 	if err != nil {
@@ -235,6 +241,46 @@ func (u *Unpackerr) wasProcessed(version ProcessedSource) bool {
 	}
 	u.state.mu.RUnlock()
 	return ok
+}
+
+func ignoredIdentity(path string, size int64) string {
+	return strings.ToLower(filepath.Base(filepath.Clean(path))) + "|" + fmt.Sprintf("%d", size)
+}
+
+func (u *Unpackerr) isIgnoredPath(path string) bool {
+	if u.state == nil {
+		return false
+	}
+	info, err := os.Stat(path)
+	size := int64(0)
+	if err == nil && !info.IsDir() {
+		size = info.Size()
+	}
+	key := ignoredIdentity(path, size)
+	u.state.mu.RLock()
+	_, ok := u.state.Ignored[key]
+	u.state.mu.RUnlock()
+	return ok
+}
+
+func (u *Unpackerr) setIgnoredPath(path string, ignored bool) error {
+	if u.state == nil {
+		return nil
+	}
+	info, err := os.Stat(path)
+	size := int64(0)
+	if err == nil && !info.IsDir() {
+		size = info.Size()
+	}
+	key := ignoredIdentity(path, size)
+	u.state.mu.Lock()
+	if ignored {
+		u.state.Ignored[key] = ProcessedSource{Key: key, Path: path, Size: size, Source: "用户忽略", CompletedAt: time.Now()}
+	} else {
+		delete(u.state.Ignored, key)
+	}
+	u.state.mu.Unlock()
+	return u.saveProcessingState()
 }
 
 func (u *Unpackerr) markProcessed(version ProcessedSource) {

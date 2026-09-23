@@ -601,7 +601,11 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 			task.Error = ""
 		})
 		u.Systemf("115 云解压开始（第 %d/%d 次）：%s", attempt, retries, file.Name)
-		status, extractErr := u.n115SeparateExtract(file, mapping.SourceCID)
+		targetCID := mapping.SourceCID
+		if value := strings.TrimSpace(u.CloudDrive2.N115ExtractCIDs[mapping.SourceCID]); value != "" {
+			targetCID = value
+		}
+		status, extractErr := u.n115SeparateExtract(file, targetCID)
 		if extractErr == nil && status == "success" {
 			u.markProcessed(version)
 			u.cd2Tasks.Delete(version.Key)

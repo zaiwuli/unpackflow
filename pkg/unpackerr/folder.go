@@ -616,6 +616,10 @@ func (f *Folders) InjectFileEvent(name, operation string) {
 
 // processEvent is here to process the event in the `*Unpackerr` scope before sending it back to the `*Folders` scope.
 func (u *Unpackerr) processEvent(event *eventData, now time.Time) {
+	if u.isIgnoredPath(event.file) {
+		u.Debugf("已忽略压缩包，跳过重复发现：%s", event.file)
+		return
+	}
 	// Do not watch our own log file.
 	if event.file == u.LogFile || event.file == u.Webserver.LogFile {
 		return
