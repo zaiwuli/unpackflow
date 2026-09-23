@@ -258,8 +258,17 @@ func (u *Unpackerr) isIgnoredPath(path string) bool {
 		size = info.Size()
 	}
 	key := ignoredIdentity(path, size)
+	name := strings.ToLower(filepath.Base(filepath.Clean(path)))
 	u.state.mu.RLock()
 	_, ok := u.state.Ignored[key]
+	if !ok {
+		for _, item := range u.state.Ignored {
+			if strings.ToLower(filepath.Base(filepath.Clean(item.Path))) == name && (item.Size == 0 || size == 0 || item.Size == size) {
+				ok = true
+				break
+			}
+		}
+	}
 	u.state.mu.RUnlock()
 	return ok
 }
@@ -279,6 +288,12 @@ func (u *Unpackerr) setIgnoredPath(path string, ignored bool) error {
 		u.state.Ignored[key] = ProcessedSource{Key: key, Path: path, Size: size, Source: "用户忽略", CompletedAt: time.Now()}
 	} else {
 		delete(u.state.Ignored, key)
+		name := strings.ToLower(filepath.Base(filepath.Clean(path)))
+		for itemKey, item := range u.state.Ignored {
+			if strings.ToLower(filepath.Base(filepath.Clean(item.Path))) == name {
+				delete(u.state.Ignored, itemKey)
+			}
+		}
 	}
 	u.state.mu.Unlock()
 	return u.saveProcessingState()

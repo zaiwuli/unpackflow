@@ -290,6 +290,9 @@ func (u *Unpackerr) poll115RecentOperations() {
 			if file.FID == "" || file.PickCode == "" || !isCloudDriveArchiveEvent(file.Name) {
 				continue
 			}
+			if u.isIgnoredPath(file.Name) {
+				continue
+			}
 			version := ProcessedSource{Key: n115FileKey(mapping.SourceCID, file), Source: "115", Path: file.Name, Size: file.Size, ModifiedNS: file.MTime}
 			if u.wasProcessed(version) {
 				continue
@@ -321,6 +324,9 @@ func (u *Unpackerr) poll115RecentOperations() {
 			if file.FID == "" || !isCloudDriveArchiveEvent(file.Name) {
 				continue
 			}
+			if u.isIgnoredPath(file.Name) {
+				continue
+			}
 			version := ProcessedSource{Key: n115DownloadFileKey(mapping.CID, file), Source: "115 本地下载", Path: file.Name, Size: file.Size, ModifiedNS: file.MTime}
 			if u.wasProcessed(version) || u.hasPending115Task(version.Key) {
 				continue
@@ -338,7 +344,7 @@ func (u *Unpackerr) poll115RecentOperations() {
 // failed archive has already left its cloud extraction source folder, so a
 // source-only scan cannot discover it again.
 func (u *Unpackerr) scan115FailureFolder() {
-	if u.taskSystemPaused.Load() || !u.CloudDrive2.N115Enabled || strings.TrimSpace(u.CloudDrive2.N115Cookie) == "" {
+	if u.taskSystemPaused.Load() || !u.CloudDrive2.N115Enabled || !u.CloudDrive2.N115ScanFailure || strings.TrimSpace(u.CloudDrive2.N115Cookie) == "" {
 		return
 	}
 	cid := strings.TrimSpace(u.CloudDrive2.N115FailureCID)
@@ -356,6 +362,9 @@ func (u *Unpackerr) scan115FailureFolder() {
 	count := 0
 	for _, file := range files {
 		if file.FID == "" || !isCloudDriveArchiveEvent(file.Name) {
+			continue
+		}
+		if u.isIgnoredPath(file.Name) {
 			continue
 		}
 		key := n115DownloadFileKey(cid, file)

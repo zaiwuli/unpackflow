@@ -135,6 +135,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		tasks[task.Key] = task
 	}
 	for name, item := range u.Map {
+		if u.isIgnoredPath(name) {
+			continue
+		}
 		source := sourceName(item.App)
 		if _, ok := u.cd2Cache.Load(filepath.Clean(name)); ok || dashboardPathPrefix(name, u.CloudDrive2.CacheDir) {
 			source = "CloudDrive2"
@@ -177,6 +180,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		mergeTask(task)
 	}
 	for _, transfer := range snapshot.Transfers {
+		if u.isIgnoredPath(transfer.Path) {
+			continue
+		}
 		status := transfer.State
 		if _, cancelled := u.cancelled.Load(transfer.Key); cancelled {
 			status = "已取消"
