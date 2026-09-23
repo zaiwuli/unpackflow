@@ -1086,13 +1086,15 @@ func (u *Unpackerr) notifyEvent(stage notificationStage, icon, title, source, ta
 		u.Debugf("通知未发送：已关闭“%s”阶段通知（%s）", notificationStageName(stage), title)
 		return
 	}
-	// Multiple discovery channels can reach the same stage concurrently. Keep
-	// retry semantics inside one delivery, but avoid starting another delivery
-	// for the same file and outcome in a short event burst.
-	key := string(stage) + "|" + icon + "|" + title + "|" + source + "|" + task
+	// 115, CD2 and the cache watcher may report the same archive using different
+	// paths and source labels. Notifications are task-lifecycle events, so the
+	// identity intentionally uses the normalized archive name and stage rather
+	// than the reporting channel.
+	identity := notificationTaskIdentity(task)
+	key := string(stage) + "|" + identity
 	now := time.Now()
 	u.noticeMu.Lock()
-	if last, exists := u.noticeRecent[key]; exists && now.Sub(last) < 30*time.Second {
+	if last, exists := u.noticeRecent[key]; exists && now.Sub(last) < 24*time.Hour {
 		u.noticeMu.Unlock()
 		return
 	}
@@ -1106,7 +1108,32 @@ func (u *Unpackerr) notifyEvent(stage notificationStage, icon, title, source, ta
 	}
 	u.noticeRecent[key] = now
 	u.noticeMu.Unlock()
+	if u.state != nil {
+		u.state.mu.Lock()
+		if u.state.Notifications == nil {
+			u.state.Notifications = make(map[string]time.Time)
+		}
+		if last, exists := u.state.Notifications[key]; exists && now.Sub(last) < 24*time.Hour {
+			u.state.mu.Unlock()
+			return
+		}
+		u.state.Notifications[key] = now
+		u.state.mu.Unlock()
+		if err := u.saveProcessingState(); err != nil {
+			u.Debugf("保存通知去重状态失败：%v", err)
+		}
+	}
 	u.sendNotification(s, icon, title, source, task)
+}
+
+func notificationTaskIdentity(task string) string {
+	clean := filepath.ToSlash(strings.TrimSpace(task))
+	clean = strings.TrimSuffix(clean, "/")
+	name := path.Base(clean)
+	if name == "." || name == "" || name == "/" {
+		name = clean
+	}
+	return strings.ToLower(name)
 }
 
 func (u *Unpackerr) sendNotification(s UINotification, icon, title, source, task string) {

@@ -15,11 +15,12 @@ import (
 // successfully processed archive from being extracted again after a restart.
 // It deliberately remains a JSON file instead of introducing a database.
 type ProcessingState struct {
-	Path        string                     `json:"-"`
-	Processed   map[string]ProcessedSource `json:"processed"`
-	Pending     map[string]PendingCD2      `json:"pending_cd2"`
-	Fallback115 map[string]Pending115      `json:"pending_115_fallback"`
-	mu          sync.RWMutex               `json:"-"`
+	Path          string                     `json:"-"`
+	Processed     map[string]ProcessedSource `json:"processed"`
+	Pending       map[string]PendingCD2      `json:"pending_cd2"`
+	Fallback115   map[string]Pending115      `json:"pending_115_fallback"`
+	Notifications map[string]time.Time       `json:"notifications,omitempty"`
+	mu            sync.RWMutex               `json:"-"`
 }
 
 type ProcessedSource struct {
@@ -76,10 +77,11 @@ func (u *Unpackerr) loadProcessingState() error {
 		base, _ = os.Getwd()
 	}
 	state := &ProcessingState{
-		Path:        filepath.Join(base, "unpackflow-state.json"),
-		Processed:   make(map[string]ProcessedSource),
-		Pending:     make(map[string]PendingCD2),
-		Fallback115: make(map[string]Pending115),
+		Path:          filepath.Join(base, "unpackflow-state.json"),
+		Processed:     make(map[string]ProcessedSource),
+		Pending:       make(map[string]PendingCD2),
+		Fallback115:   make(map[string]Pending115),
+		Notifications: make(map[string]time.Time),
 	}
 	data, err := os.ReadFile(state.Path)
 	if err == nil {
@@ -101,6 +103,9 @@ func (u *Unpackerr) loadProcessingState() error {
 	}
 	if state.Fallback115 == nil {
 		state.Fallback115 = make(map[string]Pending115)
+	}
+	if state.Notifications == nil {
+		state.Notifications = make(map[string]time.Time)
 	}
 	state.Processed = compactProcessedSources(state.Processed)
 	state.Path = filepath.Join(base, "unpackflow-state.json")
@@ -141,10 +146,11 @@ func (u *Unpackerr) saveProcessingState() error {
 	}
 	u.state.mu.RLock()
 	data, err := json.MarshalIndent(struct {
-		Processed   map[string]ProcessedSource `json:"processed"`
-		Pending     map[string]PendingCD2      `json:"pending_cd2"`
-		Fallback115 map[string]Pending115      `json:"pending_115_fallback"`
-	}{u.state.Processed, u.state.Pending, u.state.Fallback115}, "", "  ")
+		Processed     map[string]ProcessedSource `json:"processed"`
+		Pending       map[string]PendingCD2      `json:"pending_cd2"`
+		Fallback115   map[string]Pending115      `json:"pending_115_fallback"`
+		Notifications map[string]time.Time       `json:"notifications,omitempty"`
+	}{u.state.Processed, u.state.Pending, u.state.Fallback115, u.state.Notifications}, "", "  ")
 	path := u.state.Path
 	u.state.mu.RUnlock()
 	if err != nil {
