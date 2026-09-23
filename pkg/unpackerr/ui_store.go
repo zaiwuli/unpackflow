@@ -359,6 +359,17 @@ func (u *Unpackerr) loadUIStore() error {
 			u.CloudDrive2.N115RetryDelay.Duration = d
 		}
 	}
+	// Restore per-source cloud extraction destinations on startup. Without this
+	// rebuild, the UI value was saved but a restarted container silently used
+	// the source CID as the destination again.
+	u.CloudDrive2.N115ExtractCIDs = make(map[string]string)
+	for _, rule := range store.Overrides.N115Sources {
+		if source := strings.TrimSpace(rule.CID); source != "" {
+			if target := strings.TrimSpace(rule.ExtractCID); target != "" {
+				u.CloudDrive2.N115ExtractCIDs[source] = target
+			}
+		}
+	}
 	u.uiStore = store
 	if modernCloudSettings && store.Overrides.SchemaVersion < 2 {
 		store.Overrides.SchemaVersion = 2
