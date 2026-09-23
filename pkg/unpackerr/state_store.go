@@ -36,20 +36,21 @@ type ProcessedSource struct {
 }
 
 type PendingCD2 struct {
-	Key           string          `json:"key"`
-	Files         []string        `json:"files"`
-	CachedPrimary string          `json:"cached_primary,omitempty"`
-	Attempts      int             `json:"attempts"`
-	NextAttempt   time.Time       `json:"next_attempt"`
-	LastError     string          `json:"last_error,omitempty"`
-	Version       ProcessedSource `json:"version,omitempty"`
-	N115Fallback  string          `json:"115_fallback_key,omitempty"`
-	N115SourceCID string          `json:"115_source_cid,omitempty"`
-	N115FID       string          `json:"115_fid,omitempty"`
-	N115FileName  string          `json:"115_file_name,omitempty"`
-	N115TaskKey   string          `json:"115_task_key,omitempty"`
-	N115Size      int64           `json:"115_size,omitempty"`
-	N115MTime     int64           `json:"115_mtime,omitempty"`
+	Key            string          `json:"key"`
+	Files          []string        `json:"files"`
+	CachedPrimary  string          `json:"cached_primary,omitempty"`
+	Attempts       int             `json:"attempts"`
+	NextAttempt    time.Time       `json:"next_attempt"`
+	LastError      string          `json:"last_error,omitempty"`
+	Version        ProcessedSource `json:"version,omitempty"`
+	N115Fallback   string          `json:"115_fallback_key,omitempty"`
+	N115SourceCID  string          `json:"115_source_cid,omitempty"`
+	N115FailureCID string          `json:"115_failure_cid,omitempty"`
+	N115FID        string          `json:"115_fid,omitempty"`
+	N115FileName   string          `json:"115_file_name,omitempty"`
+	N115TaskKey    string          `json:"115_task_key,omitempty"`
+	N115Size       int64           `json:"115_size,omitempty"`
+	N115MTime      int64           `json:"115_mtime,omitempty"`
 }
 
 // Pending115 tracks a cloud file moved to a CD2 fallback folder before its

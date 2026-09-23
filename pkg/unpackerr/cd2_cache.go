@@ -531,6 +531,7 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	if fallback, ok := u.pending115Fallback(key); ok {
 		pending.N115Fallback = fallback.Key
 		pending.N115SourceCID = fallback.SourceCID
+		pending.N115FailureCID = fallback.FallbackCID
 		pending.N115FID = fallback.FID
 		pending.N115FileName = fallback.FileName
 		pending.N115TaskKey = fallback.TaskKey

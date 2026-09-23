@@ -691,9 +691,15 @@ func (u *Unpackerr) handle115FallbackLocalSuccess(pending PendingCD2) {
 	if pending.N115TaskKey != "" {
 		u.markProcessed(ProcessedSource{Key: pending.N115TaskKey, Source: "115 本地下载", Path: pending.N115FileName, Size: pending.N115Size, ModifiedNS: pending.N115MTime})
 	}
-	// Files routed through the failure archive or a daily download folder stay
-	// where the user placed them. Successful cloud extraction has its own
-	// delete/archive policy and is handled separately.
+	if pending.N115FailureCID != "" && pending.N115FID != "" {
+		if archiveCID := strings.TrimSpace(u.CloudDrive2.N115ArchiveCID); archiveCID != "" {
+			if err := u.n115MoveToFallback(pending.N115FID, archiveCID); err != nil {
+				u.Errorf("本地兜底解压成功后归档原包失败：%s：%v", pending.N115FileName, err)
+			} else {
+				u.Printf("本地兜底解压成功后已将原包移入归档目录：%s", pending.N115FileName)
+			}
+		}
+	}
 	u.removePending115FallbackForFile(pending.N115SourceCID, pending.N115FID)
 }
 
