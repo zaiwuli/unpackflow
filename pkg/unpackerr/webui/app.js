@@ -221,6 +221,7 @@ function ensureLocalSettings() {
     '<label class="field"><span>\u4e8b\u4ef6\u540c\u6b65\u95f4\u9694</span><input id="115-event-interval" type="text" placeholder="5m"></label>' +
     '<div class="form-actions"><button id="115-sync" type="button">\u624b\u52a8\u540c\u6b65 115</button></div><p id="115-sync-message" class="form-message"></p>' +
 		'<h3>云解压来源</h3><div class="field"><div id="115-sources" class="mapping-list"></div><div class="form-actions"><button id="115-source-add" type="button">添加来源文件夹</button></div></div>' +
+    '<label class="check-row"><input id="115-extract-by-date" type="checkbox"> 按日期创建云解压目录</label><small style="color:var(--muted);font-size:12px">开启后先在目标目录创建 YYYY-MM-DD 日期文件夹，再按压缩包名称分别解压。</small>' +
     '<label class="field"><span>云解压成功后的原包处理</span><select id="115-success-action"><option value="keep">保留原包</option><option value="delete">删除原包</option><option value="archive">移入成功归档目录</option></select></label>' +
     '<div class="field" id="115-archive-cid-row"><span>成功归档目录</span><div class="settings-pair"><input id="115-archive-cid" type="text" placeholder="115 成功归档文件夹 CID"><input id="115-archive-remark" type="text" placeholder="备注，例如：云解压成功归档"></div></div>' +
 		'<h3>云解压失败</h3><div class="field"><span>失败归档目录</span><div class="settings-pair"><input id="115-failure-cid" type="text" placeholder="115 解压失败文件夹 CID"><input id="115-failure-remark" type="text" placeholder="备注，例如：云解压失败"></div></div>' +
@@ -488,6 +489,7 @@ function fillForms(data) {
 	$('115-failure-path').value = failureRule.cd2_path || (data.settings && data.settings['115_failure_cd2_path']) || '';
   $('115-auto-fallback').checked = !!(data.settings && data.settings['115_auto_fallback']);
   $('115-scan-failure').checked = !!(data.settings && data.settings['115_scan_failure']);
+  $('115-extract-by-date').checked = !!(data.settings && data.settings['115_extract_by_date']);
 	$('115-retry-count').value = (data.settings && data.settings['115_retry_count']) || 3;
 	$('115-retry-delay').value = (data.settings && data.settings['115_retry_delay']) || '2m';
 	fillSourceRows((data.settings && data.settings['115_sources']) || (data.settings && data.settings['115_source_cids']) || [], cidRemarks);
@@ -747,6 +749,7 @@ $('settings-save').addEventListener('click', async () => {
       '115_failure': {id: 'cloud-failure', cid: $('115-failure-cid').value.trim(), remark: $('115-failure-remark').value.trim(), cd2_path: $('115-failure-path').value.trim(), mode: $('115-auto-fallback').checked ? 'auto' : 'approval'},
       '115_auto_fallback': $('115-auto-fallback').checked,
       '115_scan_failure': $('115-scan-failure').checked,
+      '115_extract_by_date': $('115-extract-by-date').checked,
 		'115_retry_count': Number($('115-retry-count').value) || 3,
 		'115_retry_delay': $('115-retry-delay').value.trim(),
 		'115_sources': collectSourceRules(),

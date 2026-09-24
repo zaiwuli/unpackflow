@@ -109,6 +109,7 @@ type CloudDriveConfig struct {
 	N115Mappings         []string          `json:"115_mappings" toml:"115_mappings" xml:"115_mapping" yaml:"115_mappings"`
 	N115SourceCIDs       []string          `json:"115_source_cids" toml:"115_source_cids" xml:"115_source_cid" yaml:"115_source_cids"`
 	N115ExtractCIDs      map[string]string `json:"115_extract_cids" toml:"115_extract_cids" xml:"115_extract_cids" yaml:"115_extract_cids"`
+	N115ExtractByDate    bool              `json:"115_extract_by_date" toml:"115_extract_by_date" xml:"115_extract_by_date" yaml:"115_extract_by_date"`
 	N115FailureCID       string            `json:"115_failure_cid" toml:"115_failure_cid" xml:"115_failure_cid" yaml:"115_failure_cid"`
 	N115FailureCD2Path   string            `json:"115_failure_cd2_path" toml:"115_failure_cd2_path" xml:"115_failure_cd2_path" yaml:"115_failure_cd2_path"`
 	N115ScanFailure      bool              `json:"115_scan_failure" toml:"115_scan_failure" xml:"115_scan_failure" yaml:"115_scan_failure"`

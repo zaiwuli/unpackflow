@@ -739,7 +739,13 @@ func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (status
 	// "Separate extraction" means each archive receives its own target folder.
 	// This is deliberately created before submitting the extraction task, rather
 	// than relying on the archive's internal top-level directory.
-	outputName, err := u.n115AvailableExtractFolderName(ctx, targetCID, n115ExtractFolderName(file.Name), time.Now())
+	if u.CloudDrive2.N115ExtractByDate {
+		targetCID, err = u.n115FindOrCreateFolder(ctx, targetCID, time.Now().Format("2006-01-02"))
+		if err != nil {
+			return "", fmt.Errorf("创建云解压日期目录失败：%w", err)
+		}
+	}
+	outputName, err := u.n115AvailableExtractFolderName(ctx, targetCID, n115ExtractFolderName(file.Name))
 	if err != nil {
 		return "", fmt.Errorf("检查云解压同名目录失败：%w", err)
 	}
@@ -785,26 +791,63 @@ func keep115ExtractOutput(status string, err error) bool {
 	return status == "success" && err == nil
 }
 
-func (u *Unpackerr) n115AvailableExtractFolderName(ctx context.Context, parentCID, base string, now time.Time) (string, error) {
+func (u *Unpackerr) n115AvailableExtractFolderName(ctx context.Context, parentCID, base string) (string, error) {
 	names, err := u.n115ChildNames(ctx, parentCID)
 	if err != nil {
 		return "", err
 	}
-	return available115ExtractFolderName(base, names, now), nil
+	return available115ExtractFolderName(base, names), nil
 }
 
-func available115ExtractFolderName(base string, existing map[string]struct{}, now time.Time) string {
+func available115ExtractFolderName(base string, existing map[string]struct{}) string {
 	if _, exists := existing[base]; !exists {
 		return base
 	}
-	prefix := base + "_解压_" + now.Format("20060102-150405")
-	if _, exists := existing[prefix]; !exists {
-		return prefix
-	}
-	for index := 2; ; index++ {
-		candidate := fmt.Sprintf("%s_%d", prefix, index)
+	for index := 1; ; index++ {
+		candidate := fmt.Sprintf("%s（%d）", base, index)
 		if _, exists := existing[candidate]; !exists {
 			return candidate
+		}
+	}
+}
+
+func (u *Unpackerr) n115FindOrCreateFolder(ctx context.Context, parentCID, name string) (string, error) {
+	folders, err := u.n115ChildFolderCIDs(ctx, parentCID)
+	if err != nil {
+		return "", err
+	}
+	if cid := folders[name]; cid != "" {
+		return cid, nil
+	}
+	return u.n115CreateFolder(ctx, parentCID, name)
+}
+
+func (u *Unpackerr) n115ChildFolderCIDs(ctx context.Context, cid string) (map[string]string, error) {
+	const limit = 115
+	folders := make(map[string]string)
+	for offset := 0; ; offset += limit {
+		response, err := u.n115Request(ctx, http.MethodGet, n115FilesBase+"/natsort/files.php", url.Values{
+			"cid": {cid}, "aid": {"1"}, "o": {"user_ptime"}, "asc": {"0"}, "offset": {strconv.Itoa(offset)},
+			"show_dir": {"1"}, "limit": {strconv.Itoa(limit)}, "type": {"5"}, "natsort": {"1"}, "format": {"json"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		rawFiles, _ := response["data"].([]any)
+		for _, raw := range rawFiles {
+			file, ok := decode115File(raw)
+			if ok && file.Name != "" {
+				folderCID := file.CID
+				if folderCID == "" {
+					folderCID = file.FID
+				}
+				if folderCID != "" {
+					folders[file.Name] = folderCID
+				}
+			}
+		}
+		if len(rawFiles) < limit {
+			return folders, nil
 		}
 	}
 }

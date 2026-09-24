@@ -160,6 +160,7 @@ type UIOverrides struct {
 	N115AutoFallback    *bool              `json:"115_auto_fallback,omitempty"`
 	N115RetryCount      uint               `json:"115_retry_count,omitempty"`
 	N115RetryDelay      string             `json:"115_retry_delay,omitempty"`
+	N115ExtractByDate   *bool              `json:"115_extract_by_date,omitempty"`
 	N115Sources         []N115SourceRule   `json:"115_sources"`
 	N115Failure         *N115FailureRule   `json:"115_failure"`
 	N115DownloadRules   []N115DownloadRule `json:"115_download_rules"`
@@ -360,6 +361,9 @@ func (u *Unpackerr) loadUIStore() error {
 			u.CloudDrive2.N115RetryDelay.Duration = d
 		}
 	}
+	if store.Overrides.N115ExtractByDate != nil {
+		u.CloudDrive2.N115ExtractByDate = *store.Overrides.N115ExtractByDate
+	}
 	// Restore per-source cloud extraction destinations on startup. Without this
 	// rebuild, the UI value was saved but a restarted container silently used
 	// the source CID as the destination again.
@@ -543,6 +547,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115ScanFailure:     func() *bool { v := u.CloudDrive2.N115ScanFailure; return &v }(),
 		N115RetryCount:      u.CloudDrive2.N115RetryCount,
 		N115RetryDelay:      u.CloudDrive2.N115RetryDelay.Duration.String(),
+		N115ExtractByDate:   func() *bool { v := u.CloudDrive2.N115ExtractByDate; return &v }(),
 	}
 	if folder := u.localFolder(); folder != nil {
 		settings.LocalSourceAction = localSourceAction(folder)
@@ -664,6 +669,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.N115RetryDelay != "" {
 		settings.N115RetryDelay = overrides.N115RetryDelay
+	}
+	if overrides.N115ExtractByDate != nil {
+		settings.N115ExtractByDate = overrides.N115ExtractByDate
 	}
 	if overrides.N115Sources != nil {
 		settings.N115Sources = append([]N115SourceRule(nil), overrides.N115Sources...)
@@ -950,6 +958,9 @@ func (u *Unpackerr) applyCloudDriveUIOverrides(s UIOverrides) {
 		if d, err := time.ParseDuration(s.N115RetryDelay); err == nil {
 			u.CloudDrive2.N115RetryDelay.Duration = d
 		}
+	}
+	if s.N115ExtractByDate != nil {
+		u.CloudDrive2.N115ExtractByDate = *s.N115ExtractByDate
 	}
 	u.refreshPending115ConfiguredPaths()
 }
