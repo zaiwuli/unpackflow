@@ -741,7 +741,7 @@ func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (status
 	// This is deliberately created before submitting the extraction task, rather
 	// than relying on the archive's internal top-level directory.
 	if u.CloudDrive2.N115ExtractByDate {
-		targetCID, err = u.n115FindOrCreateFolder(ctx, targetCID, time.Now().Format("2006-01-02"))
+		targetCID, err = u.n115DateFolderCID(ctx, targetCID, time.Now().Format("2006-01-02"))
 		if err != nil {
 			return "", fmt.Errorf("创建云解压日期目录失败：%w", err)
 		}

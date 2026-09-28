@@ -2,6 +2,7 @@ package unpackerr
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -77,6 +78,49 @@ func TestAvailable115ExtractFolderNameAvoidsExistingFolders(t *testing.T) {
 	}
 	if got := available115ExtractFolderName("电影", existing); got != "电影（3）" {
 		t.Fatalf("collision name = %q", got)
+	}
+}
+
+func TestN115DateFolderCachePersistsAndExpiresByDate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), n115DateCacheFilename)
+	initial := n115DateFolderCache{Date: "2026-09-28", Folders: map[string]string{"source-cid": "date-cid"}}
+	if err := writeN115DateFolderCache(path, initial); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	loaded, err := readN115DateFolderCache(path, "2026-09-28")
+	if err != nil {
+		t.Fatalf("read same-day cache: %v", err)
+	}
+	if loaded.Folders["source-cid"] != "date-cid" {
+		t.Fatalf("same-day CID = %q, want date-cid", loaded.Folders["source-cid"])
+	}
+
+	nextDay, err := readN115DateFolderCache(path, "2026-09-29")
+	if err != nil {
+		t.Fatalf("read next-day cache: %v", err)
+	}
+	if nextDay.Date != "2026-09-29" || len(nextDay.Folders) != 0 {
+		t.Fatalf("next-day cache was not cleared: %#v", nextDay)
+	}
+	if err := writeN115DateFolderCache(path, nextDay); err != nil {
+		t.Fatalf("replace cache on day rollover: %v", err)
+	}
+	cleared, err := readN115DateFolderCache(path, "2026-09-29")
+	if err != nil || cleared.Date != "2026-09-29" || len(cleared.Folders) != 0 {
+		t.Fatalf("persisted rollover cache = %#v, err=%v", cleared, err)
+	}
+}
+
+func TestN115DateFolderCIDUsesSameDayCacheWithoutNetwork(t *testing.T) {
+	u := New()
+	u.n115DateCache = n115DateFolderCache{Date: "2026-09-28", Folders: map[string]string{"parent-cid": "date-cid"}}
+	got, err := u.n115DateFolderCID(context.Background(), "parent-cid", "2026-09-28")
+	if err != nil {
+		t.Fatalf("cached date folder lookup failed: %v", err)
+	}
+	if got != "date-cid" {
+		t.Fatalf("cached CID = %q, want date-cid", got)
 	}
 }
 
