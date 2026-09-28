@@ -775,8 +775,9 @@ func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (status
 	if _, err := u.n115Request(ctx, http.MethodPost, n115APIBase+"/files/add_extract_file", form); err != nil {
 		return "", err
 	}
-	passwords := append([]string{}, u.uiPasswords()...)
-	passwords = append(passwords, "")
+	// Try the no-password request first. Only when 115 reports that a
+	// password is required do we retry with the configured passwords.
+	passwords := append([]string{""}, u.uiPasswords()...)
 	for _, password := range passwords {
 		status, err := u.n115WaitForExtract(ctx, file.PickCode, password)
 		if err != nil {
