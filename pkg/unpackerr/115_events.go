@@ -634,6 +634,7 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 		}
 	}
 	u.Errorf("115 云解压最终失败（已重试 %d 次）：%s：%v", retries, file.Name, err)
+	u.markFailed(version)
 	if n115ServiceFailure(err) {
 		u.update115Transfer(version.Key, file.Name, "115 服务异常，等待下次同步", func(task *CD2Transfer) { task.Error = err.Error() })
 		u.notifyEvent(notifyComplete, "❌", "115 服务异常", "115 云端", file.Name)
@@ -774,7 +775,8 @@ func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (status
 	if _, err := u.n115Request(ctx, http.MethodPost, n115APIBase+"/files/add_extract_file", form); err != nil {
 		return "", err
 	}
-	passwords := append([]string{""}, u.uiPasswords()...)
+	passwords := append([]string{}, u.uiPasswords()...)
+	passwords = append(passwords, "")
 	for _, password := range passwords {
 		status, err := u.n115WaitForExtract(ctx, file.PickCode, password)
 		if err != nil {

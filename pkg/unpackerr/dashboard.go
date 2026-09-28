@@ -230,10 +230,17 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			CompletedAt: item.CompletedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
+	for _, item := range u.failedHistory() {
+		snapshot.History = append(snapshot.History, DashboardHistory{Key: item.Key, Path: item.Path, Source: "解压失败", CachedAt: formatDashboardTime(item.CachedAt), CompletedAt: formatDashboardTime(item.CompletedAt)})
+	}
 	if u.state != nil {
 		u.state.mu.RLock()
 		for _, item := range u.state.Ignored {
-			snapshot.History = append(snapshot.History, DashboardHistory{Key: item.Key, Path: item.Path, Source: "已忽略压缩包", CompletedAt: formatDashboardTime(item.CompletedAt), Ignored: true})
+			name := filepath.Base(item.Path)
+			if name == "." || name == "" {
+				name = item.Path
+			}
+			snapshot.History = append(snapshot.History, DashboardHistory{Key: item.Key, Path: name, Source: "已忽略压缩包", CompletedAt: formatDashboardTime(item.CompletedAt), Ignored: true})
 		}
 		u.state.mu.RUnlock()
 	}
@@ -389,6 +396,9 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 	if u.state != nil {
 		u.state.mu.RLock()
 		for _, item := range u.state.Fallback115 {
+			if u.isIgnoredPath(item.FileName) {
+				continue
+			}
 			if item.TaskKey == "" {
 				continue
 			}
@@ -416,6 +426,13 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 			seen[item.TaskKey] = struct{}{}
 		}
 		for _, item := range u.state.Pending {
+			name := filepath.Base(item.Key)
+			if len(item.Files) > 0 {
+				name = filepath.Base(item.Files[0])
+			}
+			if u.isIgnoredPath(name) {
+				continue
+			}
 			key := item.Key
 			if key == "" {
 				key = item.CachedPrimary
@@ -425,10 +442,6 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 			}
 			if _, exists := seen[key]; exists {
 				continue
-			}
-			name := filepath.Base(key)
-			if len(item.Files) > 0 {
-				name = filepath.Base(item.Files[0])
 			}
 			state := "等待复制"
 			if item.CachedPrimary != "" {

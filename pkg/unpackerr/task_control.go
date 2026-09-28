@@ -160,6 +160,7 @@ func (u *Unpackerr) clearAllHistory() error {
 	}
 	u.state.mu.Lock()
 	u.state.Processed = make(map[string]ProcessedSource)
+	u.state.Failed = make(map[string]ProcessedSource)
 	u.state.mu.Unlock()
 	return u.saveProcessingState()
 }

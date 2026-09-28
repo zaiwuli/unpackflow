@@ -17,6 +17,7 @@ import (
 type ProcessingState struct {
 	Path          string                     `json:"-"`
 	Processed     map[string]ProcessedSource `json:"processed"`
+	Failed        map[string]ProcessedSource `json:"failed,omitempty"`
 	Pending       map[string]PendingCD2      `json:"pending_cd2"`
 	Fallback115   map[string]Pending115      `json:"pending_115_fallback"`
 	Notifications map[string]time.Time       `json:"notifications,omitempty"`
@@ -81,6 +82,7 @@ func (u *Unpackerr) loadProcessingState() error {
 	state := &ProcessingState{
 		Path:          filepath.Join(base, "unpackflow-state.json"),
 		Processed:     make(map[string]ProcessedSource),
+		Failed:        make(map[string]ProcessedSource),
 		Pending:       make(map[string]PendingCD2),
 		Fallback115:   make(map[string]Pending115),
 		Notifications: make(map[string]time.Time),
@@ -92,6 +94,7 @@ func (u *Unpackerr) loadProcessingState() error {
 			// Preserve a damaged file for diagnosis and start with an empty state.
 			_ = os.Rename(state.Path, state.Path+".corrupt-"+time.Now().Format("20060102-150405"))
 			state.Processed = make(map[string]ProcessedSource)
+			state.Failed = make(map[string]ProcessedSource)
 			state.Pending = make(map[string]PendingCD2)
 			state.Fallback115 = make(map[string]Pending115)
 		}
@@ -100,6 +103,9 @@ func (u *Unpackerr) loadProcessingState() error {
 	}
 	if state.Processed == nil {
 		state.Processed = make(map[string]ProcessedSource)
+	}
+	if state.Failed == nil {
+		state.Failed = make(map[string]ProcessedSource)
 	}
 	if state.Pending == nil {
 		state.Pending = make(map[string]PendingCD2)
@@ -153,11 +159,12 @@ func (u *Unpackerr) saveProcessingState() error {
 	u.state.mu.RLock()
 	data, err := json.MarshalIndent(struct {
 		Processed     map[string]ProcessedSource `json:"processed"`
+		Failed        map[string]ProcessedSource `json:"failed,omitempty"`
 		Pending       map[string]PendingCD2      `json:"pending_cd2"`
 		Fallback115   map[string]Pending115      `json:"pending_115_fallback"`
 		Notifications map[string]time.Time       `json:"notifications,omitempty"`
 		Ignored       map[string]ProcessedSource `json:"ignored,omitempty"`
-	}{u.state.Processed, u.state.Pending, u.state.Fallback115, u.state.Notifications, u.state.Ignored}, "", "  ")
+	}{u.state.Processed, u.state.Failed, u.state.Pending, u.state.Fallback115, u.state.Notifications, u.state.Ignored}, "", "  ")
 	path := u.state.Path
 	u.state.mu.RUnlock()
 	if err != nil {
@@ -305,6 +312,11 @@ func (u *Unpackerr) markProcessed(version ProcessedSource) {
 	}
 	version.CompletedAt = time.Now()
 	u.state.mu.Lock()
+	for key, failed := range u.state.Failed {
+		if processedIdentity(failed) == processedIdentity(version) {
+			delete(u.state.Failed, key)
+		}
+	}
 	for key, processed := range u.state.Processed {
 		if processedIdentity(processed) == processedIdentity(version) {
 			delete(u.state.Processed, key)
@@ -319,6 +331,19 @@ func (u *Unpackerr) markProcessed(version ProcessedSource) {
 	u.Printf("历史记录已保存：%s", version.Path)
 }
 
+func (u *Unpackerr) markFailed(version ProcessedSource) {
+	if u.state == nil || version.Key == "" {
+		return
+	}
+	version.CompletedAt = time.Now()
+	u.state.mu.Lock()
+	u.state.Failed[version.Key] = version
+	u.state.mu.Unlock()
+	if err := u.saveProcessingState(); err != nil {
+		u.Errorf("保存失败记录失败: %v", err)
+	}
+}
+
 func (u *Unpackerr) processedHistory() []ProcessedSource {
 	if u.state == nil {
 		return nil
@@ -326,6 +351,20 @@ func (u *Unpackerr) processedHistory() []ProcessedSource {
 	u.state.mu.RLock()
 	items := make([]ProcessedSource, 0, len(u.state.Processed))
 	for _, item := range u.state.Processed {
+		items = append(items, item)
+	}
+	u.state.mu.RUnlock()
+	sort.Slice(items, func(i, j int) bool { return items[i].CompletedAt.After(items[j].CompletedAt) })
+	return items
+}
+
+func (u *Unpackerr) failedHistory() []ProcessedSource {
+	if u.state == nil {
+		return nil
+	}
+	u.state.mu.RLock()
+	items := make([]ProcessedSource, 0, len(u.state.Failed))
+	for _, item := range u.state.Failed {
 		items = append(items, item)
 	}
 	u.state.mu.RUnlock()

@@ -897,6 +897,9 @@ func (u *Unpackerr) updateQueueStatus(data *newStatus, now time.Time, sendHook b
 
 	u.Map[data.Name].Status = data.Status
 	u.Map[data.Name].Updated = now
+	if data.Status == EXTRACTFAILED {
+		u.markFailed(ProcessedSource{Key: data.Name, Source: "local", Path: data.Name})
+	}
 
 	if sendHook {
 		u.runAllHooks(u.Map[data.Name])
