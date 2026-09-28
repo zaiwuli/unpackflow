@@ -14,6 +14,9 @@ let activeNotificationTemplateID = '';
 let taskSystemPaused = false;
 let currentTasks = [];
 let taskFilter = 'all';
+let historyFilter = 'all';
+let currentHistory = [];
+const pendingActions = new Set();
 
 function esc(value) {
   const element = document.createElement('div');
@@ -294,7 +297,7 @@ function buildSettingsSections(localBlock, workers) {
 
 async function runMaintenance(action) {
   const cache = action === 'clear_cache';
-  const message = cache ? '将删除全部本地缓存，但不会删除解压输出或云端原包。任务系统必须已暂停。确定继续吗？' : '将清除全部历史记录和防重复记录；实际文件不会删除，旧压缩包之后可能再次被识别。确定继续吗？';
+  const message = cache ? '将删除全部本地缓存，但不会删除解压输出或云端原包。任务系统必须已暂停。确定继续吗？' : '将清除历史展示，保留防重复和忽略规则，不删除实际文件。确定继续吗？';
   if (!window.confirm(message)) return;
   $('maintenance-message').textContent = '正在处理…';
   try {
@@ -519,18 +522,20 @@ function renderTask(task) {
   const percent = hasCopyProgress ? Math.min(100, Number(task.bytes || 0) * 100 / Number(task.total)) : 0;
   let detail = task.progress || '';
   if (hasCopyProgress) {
-    detail = '下载进度 ' + percent.toFixed(1) + '% · ' + formatBytes(task.bytes) + ' / ' + formatBytes(task.total);
+    detail = (task.status.includes('正在解压') ? '解压进度 ' : '下载进度 ') + percent.toFixed(1) + '% · ' + formatBytes(task.bytes) + ' / ' + formatBytes(task.total);
     if (task.speed) detail += ' · ' + formatBytes(task.speed) + '/s';
     if (task.eta_seconds) detail += ' · 预计 ' + formatDuration(task.eta_seconds);
   }
-  const canCancel = ['已取消', '已完成', '已解压', '已导入', '解压失败', '清理失败'].indexOf(task.status) < 0;
-  const canIgnore = task.status.includes('失败') || task.error;
+  const canCancel = !task.can_fallback && !['已取消', '正在取消', '已完成', '已解压', '已导入', '解压失败', '清理失败'].includes(task.status);
+  const canIgnore = task.can_fallback || taskGroup(task) === 'waiting';
+  const disabled = pendingActions.has(task.cancel_key || task.key) ? ' disabled' : '';
   return '<article class="task"><div class="task-content"><div class="task-name" title="' + esc(task.name) + '">' + esc(task.name) + '</div>' +
     '<div class="task-meta">' + esc(task.source) + ' · ' + esc(task.updated) + '</div>' +
     (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
-    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button" style="margin-left:8px">批准下载</button>' : '') + (canIgnore ? '<button data-ignore-task="' + esc(task.cancel_key || task.key) + '" type="button" style="margin-left:8px">忽略</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button" style="margin-left:8px">取消</button>' : '') + '</div></article>';
+    '<details><summary>详情</summary><div class="progress">来源路径：' + esc(task.path || task.name) + (task.cached_path ? '<br>缓存路径：' + esc(task.cached_path) : '') + (task.output_path ? '<br>输出路径：' + esc(task.output_path) : '') + '<br>重试次数：' + Number(task.retries || 0) + '</div></details>' +
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button"' + disabled + '>批准下载</button>' : '') + (canIgnore ? '<button data-ignore-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>忽略</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>取消</button>' : '') + '</div></article>';
 }
 
 function renderStatus(data) {
@@ -554,7 +559,8 @@ function renderStatus(data) {
   currentTasks = data.tasks || [];
   renderCurrentTasks();
   renderList($('folders'), data.folders, folder => '<div class="compact-item">' + esc(folder.path) + '<small>' + esc(folder.extract_path || '\u539f\u76ee\u5f55\u8f93\u51fa') + ' · ' + folder.tracked + '</small></div>', zh.noFolders);
-  renderList($('history'), data.history, item => '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + (item.ignored ? ' · 已忽略' : ' · 解压完成 ' + esc(item.completed_at)) + (item.cached_at ? ' · 缓存完成 ' + esc(item.cached_at) : '') + '</small></div><div class="history-actions">' + (item.ignored ? '<button data-ignore-history="' + esc(item.key) + '" type="button">取消忽略</button>' : '<button data-history-action="retry" data-history-key="' + esc(item.key) + '" type="button">重试</button>') + '<button data-history-action="delete" data-history-key="' + esc(item.key) + '" type="button">删除</button></div></div>', zh.noHistory);
+  currentHistory = data.history || [];
+  renderHistory();
   latestLogs = data.logs || [];
   renderLogs();
   $('transfers').innerHTML = '';
@@ -564,9 +570,38 @@ function renderStatus(data) {
 
 function taskGroup(task) {
   const status = task.status || '';
-  if (status.includes('失败') || task.error) return 'failed';
-  if (status.includes('等待') || status.includes('排队') || status.includes('暂停') || status.includes('批准')) return 'waiting';
+  if (task.can_fallback || status.includes('等待') || status.includes('排队') || status.includes('暂停') || status.includes('批准') || status.includes('重试中')) return 'waiting';
+  if (status.includes('失败')) return 'failed';
   return 'active';
+}
+
+function renderHistory() {
+  const labels = {success: '已完成', failed: '失败', cancelled: '已取消', ignored: '已忽略'};
+  const values = currentHistory.filter(item => historyFilter === 'all' || item.status === historyFilter);
+  renderList($('history'), values, item => {
+    const disabled = pendingActions.has(item.key) ? ' disabled' : '';
+    const button = (action, label) => '<button data-history-action="' + action + '" data-history-key="' + esc(item.key) + '" type="button"' + disabled + '>' + label + '</button>';
+    return '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + ' · ' + (labels[item.status] || '已完成') + ' · ' + esc(item.completed_at) + '</small>' + (item.error ? '<small class="history-error">' + esc(item.error) + '</small>' : '') + '</div><div class="history-actions">' + (item.ignored ? button('unignore', '取消忽略') : (item.can_retry ? button('retry', item.stage === 'cleanup' ? '重试清理' : item.stage === 'move' ? '重试移动' : '重试') + button('ignore', '忽略') : '')) + button('delete', '删除记录') + '</div></div>';
+  }, zh.noHistory);
+}
+
+async function runTaskAction(key, endpoint, action, button) {
+  if (pendingActions.has(key)) return;
+  pendingActions.add(key);
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch(endpoint, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key, action})});
+    if (!response.ok) throw new Error(await response.text() || '操作失败');
+    $('refresh-message').textContent = '操作已提交';
+    await load(false);
+  } catch (error) {
+    $('refresh-message').textContent = error.message || '网络异常，请重试';
+  } finally {
+    pendingActions.delete(key);
+    if (button) button.disabled = false;
+    renderHistory();
+    renderCurrentTasks();
+  }
 }
 
 function renderCurrentTasks() {
@@ -649,13 +684,24 @@ function ensureTaskControls() {
   actions.parentElement.insertAdjacentElement('afterend', state);
   const filters = document.createElement('div');
   filters.id = 'task-filters'; filters.className = 'task-switch';
-  filters.innerHTML = '<button class="task-filter active" data-task-filter="all" type="button">全部</button><button class="task-filter" data-task-filter="active" type="button">进行中</button><button class="task-filter" data-task-filter="waiting" type="button">等待中</button><button class="task-filter" data-task-filter="failed" type="button">失败</button>';
+  filters.innerHTML = '<button class="task-filter active" data-task-filter="all" type="button">全部</button><button class="task-filter" data-task-filter="active" type="button">进行中</button><button class="task-filter" data-task-filter="waiting" type="button">等待中</button>';
   $('current-task-panel').insertAdjacentElement('afterbegin', filters);
   filters.addEventListener('click', event => {
     if (!event.target.dataset.taskFilter) return;
     taskFilter = event.target.dataset.taskFilter;
     filters.querySelectorAll('button').forEach(button => button.classList.toggle('active', button === event.target));
     renderCurrentTasks();
+  });
+  const historyFilters = document.createElement('div');
+  historyFilters.className = 'task-switch';
+  historyFilters.setAttribute('aria-label', '历史状态筛选');
+  historyFilters.innerHTML = Object.entries({all:'全部', success:'成功', failed:'失败', cancelled:'已取消', ignored:'已忽略'}).map(([value, label]) => '<button type="button" data-history-filter="' + value + '" class="task-filter' + (value === 'all' ? ' active' : '') + '">' + label + '</button>').join('');
+  $('task-history-panel').prepend(historyFilters);
+  historyFilters.addEventListener('click', event => {
+    if (!event.target.dataset.historyFilter) return;
+    historyFilter = event.target.dataset.historyFilter;
+    historyFilters.querySelectorAll('button').forEach(button => button.classList.toggle('active', button === event.target));
+    renderHistory();
   });
   control.addEventListener('click', async () => {
     if (!taskSystemPaused && !window.confirm('将暂停本地监听、CD2 推送与扫描、115 生活事件，并清除等待、复制、重试和待批准任务及未完成缓存。正在解压和已经开始的 115 云解压不会停止，云端原包不会删除。确定继续吗？')) return;
@@ -687,35 +733,17 @@ $('password-list').addEventListener('click', async event => {
 });
 
 $('history').addEventListener('click', async event => {
-  const ignored = event.target.dataset.ignoreHistory;
-  if (ignored) { await fetch('api/tasks/cancel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key:ignored, action:'unignore'})}); load(false); return; }
   const key = event.target.dataset.historyKey;
   const action = event.target.dataset.historyAction;
   if (!key || !action) return;
-  const response = await fetch('api/history/delete', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key, action})});
-  if (response.ok) load(false);
+  await runTaskAction(key, action === 'ignore' || action === 'unignore' ? 'api/tasks/cancel' : 'api/history/delete', action, event.target);
 });
 
 $('tasks').addEventListener('click', async event => {
-  const ignoreKey = event.target.dataset.ignoreTask;
-  if (ignoreKey) {
-    event.target.disabled = true;
-    await fetch('api/tasks/cancel', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: ignoreKey, action: 'ignore'})});
-    load(false); return;
-  }
-	const fallbackKey = event.target.dataset.fallbackTask;
-	if (fallbackKey) {
-		event.target.disabled = true;
-		const response = await fetch('api/115/fallback', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: fallbackKey})});
-		if (response.ok) load(false); else { $('refresh-message').textContent = await response.text() || '批准本地下载失败'; event.target.disabled = false; }
-		return;
-	}
-	const key = event.target.dataset.cancelTask;
+  const data = event.target.dataset;
+  const key = data.ignoreTask || data.fallbackTask || data.cancelTask;
   if (!key) return;
-  event.target.disabled = true;
-  const response = await fetch('api/tasks/cancel', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key})});
-  if (response.ok) load(false);
-  else event.target.disabled = false;
+  await runTaskAction(key, data.fallbackTask ? 'api/115/fallback' : 'api/tasks/cancel', data.ignoreTask ? 'ignore' : data.fallbackTask ? 'approve' : 'cancel', event.target);
 });
 
 $('notify-save').addEventListener('click', async () => {

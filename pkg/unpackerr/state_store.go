@@ -23,20 +23,30 @@ type ProcessingState struct {
 	Notifications map[string]time.Time       `json:"notifications,omitempty"`
 	Ignored       map[string]ProcessedSource `json:"ignored,omitempty"`
 	mu            sync.RWMutex               `json:"-"`
+	saveMu        sync.Mutex                 `json:"-"`
 }
 
 type ProcessedSource struct {
-	Key         string    `json:"key"`
-	Source      string    `json:"source"`
-	Path        string    `json:"path"`
-	Files       []string  `json:"files,omitempty"`
-	Size        int64     `json:"size"`
-	ModifiedNS  int64     `json:"modified_ns"`
-	CachedAt    time.Time `json:"cached_at,omitempty"`
-	CompletedAt time.Time `json:"completed_at"`
+	Key         string      `json:"key"`
+	Source      string      `json:"source"`
+	Path        string      `json:"path"`
+	Files       []string    `json:"files,omitempty"`
+	Size        int64       `json:"size"`
+	ModifiedNS  int64       `json:"modified_ns"`
+	CachedAt    time.Time   `json:"cached_at,omitempty"`
+	CompletedAt time.Time   `json:"completed_at"`
+	Hidden      bool        `json:"hidden,omitempty"`
+	Stage       string      `json:"stage,omitempty"`
+	Error       string      `json:"error,omitempty"`
+	CachedPath  string      `json:"cached_path,omitempty"`
+	SourceCID   string      `json:"source_cid,omitempty"`
+	CloudFile   *n115File   `json:"cloud_file,omitempty"`
+	Download    *Pending115 `json:"download,omitempty"`
+	CleanupKind string      `json:"cleanup_kind,omitempty"`
 }
 
 type PendingCD2 struct {
+	CreatedAt      time.Time       `json:"created_at,omitempty"`
 	Key            string          `json:"key"`
 	Files          []string        `json:"files"`
 	CachedPrimary  string          `json:"cached_primary,omitempty"`
@@ -156,6 +166,9 @@ func (u *Unpackerr) saveProcessingState() error {
 	if u.state == nil {
 		return nil
 	}
+	// Serialize snapshots and replacement so an older writer cannot overwrite a newer state.
+	u.state.saveMu.Lock()
+	defer u.state.saveMu.Unlock()
 	u.state.mu.RLock()
 	data, err := json.MarshalIndent(struct {
 		Processed     map[string]ProcessedSource `json:"processed"`
@@ -237,9 +250,7 @@ func (u *Unpackerr) wasProcessed(version ProcessedSource) bool {
 	u.state.mu.RLock()
 	_, ok := u.state.Processed[version.Key]
 	if !ok {
-		// A successful history entry owns this archive name + total size until
-		// the user deletes it from the UI. Keep the source path and mtime only
-		// for history display and diagnosis.
+		// Hiding history does not remove the successful processing identity.
 		for _, processed := range u.state.Processed {
 			if processedIdentity(processed) == processedIdentity(version) {
 				ok = true
@@ -267,6 +278,7 @@ func (u *Unpackerr) isIgnoredPath(path string) bool {
 	key := ignoredIdentity(path, size)
 	name := strings.ToLower(filepath.Base(filepath.Clean(path)))
 	u.state.mu.RLock()
+	defer u.state.mu.RUnlock()
 	_, ok := u.state.Ignored[key]
 	if !ok {
 		for _, item := range u.state.Ignored {
@@ -276,8 +288,54 @@ func (u *Unpackerr) isIgnoredPath(path string) bool {
 			}
 		}
 	}
-	u.state.mu.RUnlock()
+	if !ok {
+		for _, item := range u.state.Ignored {
+			resolved := u.resolveIgnoredTaskLocked(item.Path)
+			if resolved.Path == path || (strings.EqualFold(filepath.Base(resolved.Path), name) && (resolved.Size == 0 || size == 0 || resolved.Size == size)) {
+				return true
+			}
+		}
+	}
 	return ok
+}
+
+// Caller holds state.mu. Resolve an operation key using durable task metadata,
+// not the text submitted by the browser.
+func (u *Unpackerr) resolveIgnoredTaskLocked(key string) ProcessedSource {
+	if item, ok := u.state.Ignored[key]; ok {
+		key = item.Path
+	}
+	for _, item := range u.state.Fallback115 {
+		if key == item.TaskKey || key == item.Key {
+			copy := item
+			return ProcessedSource{Key: item.TaskKey, Source: "115 本地下载", Path: item.FileName, Size: item.Size, Download: &copy}
+		}
+	}
+	for _, item := range u.state.Pending {
+		if key == item.Key || key == item.N115TaskKey || key == item.CachedPrimary {
+			name := item.N115FileName
+			if name == "" {
+				name = item.Version.Path
+			}
+			if name == "" && len(item.Files) > 0 {
+				name = archivePrimary(item.Files)
+			}
+			if name != "" {
+				return ProcessedSource{Path: name, Size: item.N115Size}
+			}
+		}
+	}
+	for _, records := range []map[string]ProcessedSource{u.state.Failed, u.state.Processed} {
+		if item, ok := records[key]; ok {
+			return item
+		}
+	}
+	if value, ok := u.cd2Tasks.Load(key); ok {
+		if item, ok := value.(*CD2Transfer); ok && item != nil && item.Path != key {
+			return ProcessedSource{Path: item.Path, Size: item.Total}
+		}
+	}
+	return ProcessedSource{Path: key}
 }
 
 func (u *Unpackerr) setIgnoredPath(path string, ignored bool) error {
@@ -291,13 +349,22 @@ func (u *Unpackerr) setIgnoredPath(path string, ignored bool) error {
 	}
 	key := ignoredIdentity(path, size)
 	u.state.mu.Lock()
+	resolved := u.resolveIgnoredTaskLocked(path)
+	if resolved.Path != path {
+		path, size = resolved.Path, resolved.Size
+		key = ignoredIdentity(path, size)
+	}
 	if ignored {
+		if u.state.Ignored == nil {
+			u.state.Ignored = make(map[string]ProcessedSource)
+		}
 		u.state.Ignored[key] = ProcessedSource{Key: key, Path: path, Size: size, Source: "用户忽略", CompletedAt: time.Now()}
 	} else {
 		delete(u.state.Ignored, key)
 		name := strings.ToLower(filepath.Base(filepath.Clean(path)))
 		for itemKey, item := range u.state.Ignored {
-			if strings.ToLower(filepath.Base(filepath.Clean(item.Path))) == name {
+			resolved := u.resolveIgnoredTaskLocked(item.Path)
+			if strings.ToLower(filepath.Base(filepath.Clean(resolved.Path))) == name || strings.ToLower(filepath.Base(filepath.Clean(item.Path))) == name {
 				delete(u.state.Ignored, itemKey)
 			}
 		}
@@ -311,6 +378,7 @@ func (u *Unpackerr) markProcessed(version ProcessedSource) {
 		return
 	}
 	version.CompletedAt = time.Now()
+	version.Hidden = false
 	u.state.mu.Lock()
 	for key, failed := range u.state.Failed {
 		if processedIdentity(failed) == processedIdentity(version) {
@@ -336,7 +404,11 @@ func (u *Unpackerr) markFailed(version ProcessedSource) {
 		return
 	}
 	version.CompletedAt = time.Now()
+	version.Hidden = false
 	u.state.mu.Lock()
+	if u.state.Failed == nil {
+		u.state.Failed = make(map[string]ProcessedSource)
+	}
 	u.state.Failed[version.Key] = version
 	u.state.mu.Unlock()
 	if err := u.saveProcessingState(); err != nil {
@@ -351,7 +423,9 @@ func (u *Unpackerr) processedHistory() []ProcessedSource {
 	u.state.mu.RLock()
 	items := make([]ProcessedSource, 0, len(u.state.Processed))
 	for _, item := range u.state.Processed {
-		items = append(items, item)
+		if !item.Hidden {
+			items = append(items, item)
+		}
 	}
 	u.state.mu.RUnlock()
 	sort.Slice(items, func(i, j int) bool { return items[i].CompletedAt.After(items[j].CompletedAt) })
@@ -365,11 +439,27 @@ func (u *Unpackerr) failedHistory() []ProcessedSource {
 	u.state.mu.RLock()
 	items := make([]ProcessedSource, 0, len(u.state.Failed))
 	for _, item := range u.state.Failed {
-		items = append(items, item)
+		if !item.Hidden {
+			items = append(items, item)
+		}
 	}
 	u.state.mu.RUnlock()
 	sort.Slice(items, func(i, j int) bool { return items[i].CompletedAt.After(items[j].CompletedAt) })
 	return items
+}
+
+func (u *Unpackerr) hasFailedVersion(version ProcessedSource) bool {
+	if u.state == nil {
+		return false
+	}
+	u.state.mu.RLock()
+	defer u.state.mu.RUnlock()
+	for _, failed := range u.state.Failed {
+		if failed.Key == version.Key || processedIdentity(failed) == processedIdentity(version) {
+			return true
+		}
+	}
+	return false
 }
 
 func (u *Unpackerr) deleteProcessed(key string) (ProcessedSource, bool) {
@@ -411,6 +501,12 @@ func (u *Unpackerr) savePendingCD2(pending PendingCD2) {
 		return
 	}
 	u.state.mu.Lock()
+	if pending.CreatedAt.IsZero() {
+		pending.CreatedAt = u.state.Pending[pending.Key].CreatedAt
+		if pending.CreatedAt.IsZero() {
+			pending.CreatedAt = time.Now()
+		}
+	}
 	u.state.Pending[pending.Key] = pending
 	u.state.mu.Unlock()
 	if err := u.saveProcessingState(); err != nil {

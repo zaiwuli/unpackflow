@@ -17,19 +17,20 @@ import (
 )
 
 type CD2Transfer struct {
-	Key         string    `json:"key"`
-	Path        string    `json:"path"`
-	Source      string    `json:"source,omitempty"`
-	CachedPath  string    `json:"cached_path,omitempty"`
-	State       string    `json:"state"`
-	Bytes       int64     `json:"bytes"`
-	Total       int64     `json:"total"`
-	StartedAt   time.Time `json:"started_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Speed       int64     `json:"speed"`
-	ETA         int64     `json:"eta_seconds"`
-	Error       string    `json:"error,omitempty"`
-	CanFallback bool      `json:"can_fallback,omitempty"`
+	Key         string          `json:"key"`
+	Path        string          `json:"path"`
+	Source      string          `json:"source,omitempty"`
+	CachedPath  string          `json:"cached_path,omitempty"`
+	State       string          `json:"state"`
+	Bytes       int64           `json:"bytes"`
+	Total       int64           `json:"total"`
+	StartedAt   time.Time       `json:"started_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	Speed       int64           `json:"speed"`
+	ETA         int64           `json:"eta_seconds"`
+	Error       string          `json:"error,omitempty"`
+	CanFallback bool            `json:"can_fallback,omitempty"`
+	Version     ProcessedSource `json:"-"`
 }
 
 var (
@@ -221,6 +222,10 @@ func cacheStagingRoot(cacheDir string) string {
 // cacheCloudDrivePaths copies a complete archive group off the mounted CloudDrive
 // filesystem before sending it to Unpackerr's native folder pipeline.
 func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
+	return u.cacheCloudDrivePathsForRetry(paths, "")
+}
+
+func (u *Unpackerr) cacheCloudDrivePathsForRetry(paths []string, retryKey string) int {
 	if len(paths) == 0 || u.taskSystemPaused.Load() {
 		return 0
 	}
@@ -229,7 +234,7 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 		if !isCloudDriveArchiveEvent(source) {
 			continue
 		}
-		if u.isIgnoredPath(source) {
+		if u.isIgnoredPath(source) || u.taskCancelled(cloudDriveTaskKey(source)) {
 			continue
 		}
 		candidateKey := cloudDriveTaskKey(source)
@@ -250,6 +255,10 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 		}
 		if version.Key != "" && u.wasProcessed(version) {
 			u.Debugf("CloudDrive2 压缩包已有成功记录，跳过：%s", source)
+			u.cd2Tasks.Delete(groupKey)
+			continue
+		}
+		if version.Key != retryKey && u.hasFailedVersion(version) {
 			u.cd2Tasks.Delete(groupKey)
 			continue
 		}
@@ -277,7 +286,7 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 			u.cd2Copy.Delete(groupKey)
 			continue
 		}
-		u.updateCD2Transfer(groupKey, source, "准备复制到缓存", nil)
+		u.updateCD2Transfer(groupKey, source, "准备复制到缓存", func(task *CD2Transfer) { task.Version = version })
 		u.Systemf("CloudDrive2 文件变化触发任务：%s", source)
 		cachedPrimary := filepath.Join(u.CloudDrive2.CacheDir, filepath.Base(archivePrimary(files)))
 		u.cd2Notice.Store(filepath.Clean(cachedPrimary), struct{}{})
@@ -286,6 +295,9 @@ func (u *Unpackerr) cacheCloudDrivePaths(paths []string) int {
 		go func(files []string, groupKey string) {
 			defer u.cd2Copy.Delete(groupKey)
 			if err := u.cacheCloudDriveGroup(files, groupKey); err != nil {
+				if u.taskCancelled(groupKey) || u.isIgnoredPath(archivePrimary(files)) {
+					return
+				}
 				if u.downloadsPaused.Load() {
 					u.pauseCD2Task(groupKey, files)
 					return
@@ -443,6 +455,9 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	defer cancel()
 	u.cd2Cancel.Store(key, cancel)
 	defer u.cd2Cancel.Delete(key)
+	if u.taskCancelled(key) || u.isIgnoredPath(archivePrimary(files)) {
+		return context.Canceled
+	}
 	startedAt := time.Now()
 	if current, ok := u.cd2Tasks.Load(key); ok {
 		if transfer, valid := current.(*CD2Transfer); valid && transfer != nil && !transfer.StartedAt.IsZero() {
@@ -505,6 +520,9 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	if err := verifyCopiedGroup(files, staging); err != nil {
 		return err
 	}
+	if u.taskCancelled(key) || u.isIgnoredPath(archivePrimary(files)) {
+		return context.Canceled
+	}
 	for _, source := range files {
 		name := filepath.Base(source)
 		target := filepath.Join(finalDir, name)
@@ -527,7 +545,7 @@ func (u *Unpackerr) cacheCloudDriveGroup(files []string, key string) error {
 	u.cd2Cache.Store(filepath.Clean(primaryPath), append([]string(nil), files...))
 	version, _ := sourceGroupVersion("cd2", files)
 	version.CachedAt = time.Now()
-	pending := PendingCD2{Key: filepath.Clean(primaryPath), Files: append([]string(nil), files...), CachedPrimary: primaryPath, Version: version}
+	pending := PendingCD2{Key: filepath.Clean(primaryPath), Files: append([]string(nil), files...), CachedPrimary: primaryPath, Version: version, CreatedAt: startedAt}
 	if fallback, ok := u.pending115Fallback(key); ok {
 		pending.N115Fallback = fallback.Key
 		pending.N115SourceCID = fallback.SourceCID
@@ -814,7 +832,19 @@ func (u *Unpackerr) resumeCD2Pending() {
 	}
 	for _, pending := range u.pendingCD2() {
 		pending := pending
+		if u.isIgnoredPath(pending.CachedPrimary) || u.isIgnoredPath(archivePrimary(pending.Files)) ||
+			u.taskCancelled(pending.CachedPrimary) || u.taskCancelled(strings.TrimPrefix(pending.Key, "copy|")) {
+			continue
+		}
+		if pending.CachedPrimary == "" {
+			if version, err := sourceGroupVersion("cd2", pending.Files); err == nil && u.hasFailedVersion(version) {
+				continue
+			}
+		}
 		if pending.CachedPrimary != "" {
+			if u.hasFailedVersion(pending.Version) {
+				continue
+			}
 			if _, err := os.Stat(pending.CachedPrimary); err == nil {
 				if _, loaded := u.cd2Resume.LoadOrStore(filepath.Clean(pending.CachedPrimary), struct{}{}); loaded {
 					continue
@@ -851,6 +881,9 @@ func (u *Unpackerr) resumeCD2Pending() {
 }
 
 func archivePrimary(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
 	for _, file := range files {
 		name := strings.ToLower(filepath.Base(file))
 		if strings.HasSuffix(name, ".7z.001") || strings.HasSuffix(name, ".part1.rar") || strings.HasSuffix(name, ".part01.rar") || strings.HasSuffix(name, ".rar") {
@@ -919,13 +952,12 @@ func (u *Unpackerr) deleteCachedSource(cachePath string, sourceGroups ...[]strin
 		u.Errorf("CloudDrive2 原包删除失败：未找到源文件组 %s", cleanPath)
 		return
 	}
-	for _, source := range sources {
-		if err := removeCloudDriveSource(source); err != nil {
-			u.Errorf("CloudDrive2 原包删除失败 %s: %v", source, err)
-		} else {
-			u.Printf("CloudDrive2 原包已删除：%s", source)
-		}
+	version := u.cd2CleanupVersion(cleanPath, sources)
+	if _, loaded := u.cleanupRunning.LoadOrStore(version.Key, struct{}{}); loaded {
+		return
 	}
+	defer u.cleanupRunning.Delete(version.Key)
+	u.deleteCD2Sources(version)
 }
 
 func removeCloudDriveSource(path string) error {

@@ -64,12 +64,14 @@ type Logs interface {
 
 // Folder is a "new" watched folder.
 type Folder struct {
-	updated  time.Time
-	status   ExtractStatus
-	config   *FolderConfig
-	files    []string
-	retries  uint
-	archives xtractr.ArchiveList
+	created      time.Time
+	updated      time.Time
+	status       ExtractStatus
+	config       *FolderConfig
+	files        []string
+	retries      uint
+	archives     xtractr.ArchiveList
+	cleanupFiles []string
 }
 
 type eventData struct {
@@ -375,6 +377,9 @@ func (f *Folders) Remove(folder string) {
 
 // extractTrackedItem starts an archive or folder's extraction after it hasn't been written to in a while.
 func (u *Unpackerr) extractTrackedItem(name string, folder *Folder, now time.Time) {
+	if u.isIgnoredPath(name) || u.taskCancelled(name) {
+		return
+	}
 	u.folders.Remove(name) // stop the fs watcher(s).
 	// update status.
 	u.folders.Folders[name].updated = now
@@ -468,6 +473,9 @@ func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
 	if _, cancelled := u.cancelled.Load(resp.X.Name); cancelled {
 		if resp.Done {
 			u.cleanupCancelledExtraction(resp)
+			delete(u.Map, resp.X.Name)
+			delete(u.folders.Folders, resp.X.Name)
+			u.updateCD2TransferForCachedPath(resp.X.Name, "已取消")
 		}
 		return
 	}
@@ -616,7 +624,7 @@ func (f *Folders) InjectFileEvent(name, operation string) {
 
 // processEvent is here to process the event in the `*Unpackerr` scope before sending it back to the `*Folders` scope.
 func (u *Unpackerr) processEvent(event *eventData, now time.Time) {
-	if u.isIgnoredPath(event.file) {
+	if u.isIgnoredPath(event.file) || u.taskCancelled(event.file) {
 		u.Debugf("已忽略压缩包，跳过重复发现：%s", event.file)
 		return
 	}
@@ -642,7 +650,7 @@ func (u *Unpackerr) processEvent(event *eventData, now time.Time) {
 			identityPath = filepath.Dir(event.file)
 		}
 		version, err := sourceVersion("local", identityPath)
-		if err == nil && u.wasProcessed(version) {
+		if err == nil && (u.wasProcessed(version) || u.hasFailedVersion(version)) {
 			u.Debugf("本地压缩包已处理，忽略重复事件: %s", event.file)
 			return
 		}
@@ -717,6 +725,7 @@ func (f *Folders) saveEvent(event *eventData, dirPath string, now time.Time) {
 	f.Printf("[目录任务] 发现新压缩包：%v（事件：%s）", dirPath, event.op)
 
 	f.Folders[dirPath] = &Folder{
+		created: now,
 		updated: now,
 		status:  WAITING,
 		config:  event.cnfg,
@@ -753,9 +762,14 @@ func (u *Unpackerr) checkFolderStats(now time.Time) {
 			// This empty block is to avoid deleting an item that needs more retries.
 		case EXTRACTFAILED == folder.status && u.MaxRetries > 0 && folder.retries >= u.MaxRetries:
 			// Retries exhausted — clean up to prevent the item from staying in the map forever.
-			u.updateQueueStatus(&newStatus{Name: name, Status: DELETED, Resp: nil}, now, true)
+			u.updateCD2TransferForCachedPath(name, "解压失败")
+			delete(u.Map, name)
 			delete(u.folders.Folders, name)
 			u.Printf("[目录任务] 重试次数已用完（%d/%d），停止处理：%s", folder.retries, u.MaxRetries, name)
+		case folder.status == DELETEFAILED:
+			// Cleanup failures require explicit retry; never re-enter extraction.
+		case folder.status == EXTRACTFAILED:
+			// Unlimited retries may still be waiting for their delay.
 		case folder.status > EXTRACTING && folder.config.DeleteAfter.Duration <= 0:
 			if folder.config.ArchivePath != "" || folder.config.DeleteOrig {
 				u.deleteAfterReached(name, now, folder)
@@ -776,7 +790,18 @@ func (u *Unpackerr) deleteAfterReached(name string, now time.Time, folder *Folde
 	if folder.config.ArchivePath != "" {
 		if err := archiveFolderSources(name, folder); err != nil {
 			folder.updated = now
-			u.Errorf("本地原包归档失败，将稍后重试：%s：%v", name, err)
+			folder.status = DELETEFAILED
+			if item := u.Map[name]; item != nil {
+				item.Status = DELETEFAILED
+			}
+			version, _ := sourceVersion("local", name)
+			if version.Key == "" {
+				version = ProcessedSource{Key: name, Source: "local", Path: name}
+			}
+			version.Stage, version.Error = "cleanup", err.Error()
+			version.Files = append([]string(nil), folder.cleanupFiles...)
+			u.markFailed(version)
+			u.Errorf("本地原包归档失败，等待手动重试：%s：%v", name, err)
 			return
 		}
 		u.Printf("本地原包已归档：%s -> %s", name, folder.config.ArchivePath)
@@ -792,29 +817,34 @@ func (u *Unpackerr) deleteAfterReached(name string, now time.Time, folder *Folde
 	}
 
 	if folder.config.DeleteOrig && !folder.config.MoveBack {
-		u.delChan <- &fileDeleteReq{Paths: []string{name}}
+		u.queueLocalSourceDelete(name, []string{name})
 		webhook = true
 	} else if folder.config.DeleteOrig && len(folder.archives) > 0 {
-		u.delChan <- &fileDeleteReq{Paths: folder.archives.List()}
+		u.queueLocalSourceDelete(name, folder.archives.List())
 		webhook = true
 	}
 
 	u.updateQueueStatus(&newStatus{Name: name, Status: DELETED, Resp: nil}, now, webhook)
+	folder.status = DELETED
 	// Folder reached delete delay (after extraction), nuke it.
 	delete(u.folders.Folders, name)
 }
 
 func archiveFolderSources(name string, folder *Folder) error {
-	files := folder.archives.List()
-	if len(files) == 0 {
-		if info, err := os.Stat(name); err == nil && !info.IsDir() {
-			files = []string{name}
+	if folder.cleanupFiles == nil {
+		folder.cleanupFiles = folder.archives.List()
+		if len(folder.cleanupFiles) == 0 {
+			if info, err := os.Stat(name); err == nil && !info.IsDir() {
+				folder.cleanupFiles = []string{name}
+			}
 		}
 	}
-	for _, source := range files {
+	for len(folder.cleanupFiles) > 0 {
+		source := folder.cleanupFiles[0]
 		if err := archiveSourceFile(source, folder.config.Path, folder.config.ArchivePath); err != nil {
 			return err
 		}
+		folder.cleanupFiles = folder.cleanupFiles[1:]
 	}
 	return nil
 }
@@ -867,14 +897,20 @@ func (u *Unpackerr) updateQueueStatus(data *newStatus, now time.Time, sendHook b
 		// This is a new Folder being queued for extraction.
 		// Arr apps do not land here. They create their own queued items in u.Map.
 		u.Map[data.Name] = &Extract{
-			Path:    data.Name,
-			App:     FolderString,
-			Status:  QUEUED,
-			Updated: now,
-			IDs:     map[string]any{"title": data.Name}, // required or webhook may break.
+			Path:      data.Name,
+			App:       FolderString,
+			Status:    data.Status,
+			Updated:   now,
+			StartedAt: now,
+			IDs:       map[string]any{"title": data.Name}, // required or webhook may break.
 		}
 
 		u.Map[data.Name].XProg = &ExtractProgress{Extract: u.Map[data.Name]}
+		if u.folders != nil {
+			if folder := u.folders.Folders[data.Name]; folder != nil && !folder.created.IsZero() {
+				u.Map[data.Name].StartedAt = folder.created
+			}
+		}
 		u.updateCD2TransferForCachedPath(data.Name, statusName(data.Status))
 
 		if sendHook {
@@ -898,7 +934,19 @@ func (u *Unpackerr) updateQueueStatus(data *newStatus, now time.Time, sendHook b
 	u.Map[data.Name].Status = data.Status
 	u.Map[data.Name].Updated = now
 	if data.Status == EXTRACTFAILED {
-		u.markFailed(ProcessedSource{Key: data.Name, Source: "local", Path: data.Name})
+		failed, err := sourceVersion("local", data.Name)
+		if err != nil {
+			failed = ProcessedSource{Key: data.Name, Source: "local", Path: data.Name}
+		}
+		if pending, ok := u.pendingCD2ForPath(data.Name); ok && pending.Version.Key != "" {
+			failed = pending.Version
+			failed.CachedPath = data.Name
+		}
+		failed.Stage = "extract"
+		if data.Resp != nil && data.Resp.Error != nil {
+			failed.Error = data.Resp.Error.Error()
+		}
+		u.markFailed(failed)
 	}
 
 	if sendHook {

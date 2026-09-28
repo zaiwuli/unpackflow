@@ -294,13 +294,14 @@ func (u *Unpackerr) poll115RecentOperations() {
 				continue
 			}
 			version := ProcessedSource{Key: n115FileKey(mapping.SourceCID, file), Source: "115", Path: file.Name, Size: file.Size, ModifiedNS: file.MTime}
-			if u.wasProcessed(version) {
+			if u.wasProcessed(version) || u.hasFailedVersion(version) || u.taskCancelled(version.Key) || u.hasPending115Task(version.Key) {
 				continue
 			}
 			if _, loaded := u.n115Running.LoadOrStore(version.Key, struct{}{}); loaded {
 				continue
 			}
-			u.update115Transfer(version.Key, file.Name, "等待 115 云解压", nil)
+			version.SourceCID, version.CloudFile = mapping.SourceCID, &file
+			u.update115Transfer(version.Key, file.Name, "等待 115 云解压", func(task *CD2Transfer) { task.Version = version })
 			go func(mapping N115Mapping, file n115File, version ProcessedSource) {
 				defer u.n115Running.Delete(version.Key)
 				u.n115Queue <- struct{}{}
@@ -592,6 +593,9 @@ func int115Value(value any) int64 {
 }
 
 func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, version ProcessedSource) {
+	version.SourceCID = mapping.SourceCID
+	version.CloudFile = &file
+	version.Stage = "cloud"
 	retries := u.CloudDrive2.N115RetryCount
 	if retries == 0 {
 		retries = 3
@@ -602,12 +606,13 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	}
 	var err error
 	for attempt := uint(1); attempt <= retries; attempt++ {
-		if u.taskSystemPaused.Load() {
+		if u.taskSystemPaused.Load() || u.isIgnoredPath(file.Name) || u.isIgnoredPath(version.Key) || u.taskCancelled(version.Key) {
 			u.update115Transfer(version.Key, file.Name, "已取消", func(task *CD2Transfer) { task.Error = "任务系统已暂停" })
 			return
 		}
 		u.update115Transfer(version.Key, file.Name, "115 云端解压中", func(task *CD2Transfer) {
 			task.Error = ""
+			task.Version = version
 		})
 		u.Systemf("115 云解压开始（第 %d/%d 次）：%s", attempt, retries, file.Name)
 		targetCID := mapping.SourceCID
@@ -615,10 +620,13 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 			targetCID = value
 		}
 		status, extractErr := u.n115SeparateExtract(file, targetCID)
+		if u.isIgnoredPath(file.Name) || u.isIgnoredPath(version.Key) || u.taskCancelled(version.Key) {
+			return
+		}
 		if extractErr == nil && status == "success" {
 			u.markProcessed(version)
 			u.cd2Tasks.Delete(version.Key)
-			u.handle115SuccessSource(mapping, file)
+			u.finish115Source(version, file)
 			u.notifyEvent(notifyComplete, "✅", "115 云解压完成", "115 云端", file.Name)
 			u.Printf("115 云解压完成：%s", file.Name)
 			return
@@ -634,9 +642,10 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 		}
 	}
 	u.Errorf("115 云解压最终失败（已重试 %d 次）：%s：%v", retries, file.Name, err)
+	version.Error = err.Error()
 	u.markFailed(version)
 	if n115ServiceFailure(err) {
-		u.update115Transfer(version.Key, file.Name, "115 服务异常，等待下次同步", func(task *CD2Transfer) { task.Error = err.Error() })
+		u.update115Transfer(version.Key, file.Name, "115 服务失败", func(task *CD2Transfer) { task.Error = err.Error() })
 		u.notifyEvent(notifyComplete, "❌", "115 服务异常", "115 云端", file.Name)
 		return
 	}
@@ -645,8 +654,20 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 		u.update115Transfer(version.Key, file.Name, "115 云解压失败", func(task *CD2Transfer) { task.Error = err.Error() })
 		return
 	}
+	u.move115FailedSource(mapping, file, version)
+}
+
+func (u *Unpackerr) move115FailedSource(mapping N115Mapping, file n115File, version ProcessedSource) {
+	if !mapping.fallbackEnabled() {
+		version.Stage, version.Error = "move", "当前配置未启用失败归档目录"
+		u.markFailed(version)
+		u.update115Transfer(version.Key, file.Name, "原包移动失败", func(task *CD2Transfer) { task.Error = version.Error })
+		return
+	}
 	u.update115Transfer(version.Key, file.Name, "正在移动到失败归档目录", nil)
 	if err := u.n115MoveToFallback(file.FID, mapping.FallbackCID); err != nil {
+		version.Stage, version.Error = "move", err.Error()
+		u.markFailed(version)
 		u.Errorf("115 失败文件移动到失败归档目录失败：%s：%v", file.Name, err)
 		u.update115Transfer(version.Key, file.Name, "移动到失败归档目录失败", func(task *CD2Transfer) { task.Error = err.Error() })
 		return
@@ -655,6 +676,7 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	// The file now lives in FallbackCID. Persist that identity before deciding
 	// whether to start a local copy, so a restart never loses the manual path.
 	u.save115DownloadTask(version.Key, "cloud_failure", !u.CloudDrive2.N115AutoFallback, mapping, file)
+	u.clearFailedHistory(version.Key)
 	if u.CloudDrive2.N115AutoFallback {
 		u.update115Transfer(version.Key, file.Name, "等待下载到本地解压", func(task *CD2Transfer) {
 			task.CanFallback = false
@@ -666,7 +688,7 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 		return
 	}
 	u.update115Transfer(version.Key, file.Name, "云解压失败，等待手动本地解压", func(task *CD2Transfer) {
-		task.Error = err.Error()
+		task.Error = version.Error
 		task.CanFallback = true
 	})
 }
@@ -676,36 +698,68 @@ func (u *Unpackerr) handle115SuccessSource(mapping N115Mapping, file n115File) {
 }
 
 func (u *Unpackerr) handle115SuccessFile(sourceCID, fid, fileName string) {
+	if err := u.process115SuccessFile(sourceCID, fid, fileName); err != nil {
+		u.Errorf("115 原包清理失败：%s：%v", fileName, err)
+	}
+}
+
+func (u *Unpackerr) finish115Source(version ProcessedSource, file n115File) {
+	var err error
+	if version.CleanupKind == "115_archive" {
+		if cid := strings.TrimSpace(u.CloudDrive2.N115ArchiveCID); cid != "" {
+			err = u.n115MoveToFallback(file.FID, cid)
+		} else {
+			err = fmt.Errorf("未填写归档 CID")
+		}
+	} else {
+		err = u.process115SuccessFile(version.SourceCID, file.FID, file.Name)
+	}
+	if err != nil {
+		u.Errorf("115 原包清理失败：%s：%v", file.Name, err)
+		version.Stage, version.Error = "cleanup", err.Error()
+		u.markFailed(version)
+		u.update115Transfer(version.Key, file.Name, "原包清理失败", func(task *CD2Transfer) { task.Error = err.Error() })
+		return
+	}
+	u.clearFailedHistory(version.Key)
+	u.cd2Tasks.Delete(version.Key)
+}
+
+func (u *Unpackerr) process115SuccessFile(sourceCID, fid, fileName string) error {
 	switch strings.ToLower(strings.TrimSpace(u.CloudDrive2.N115SuccessAction)) {
 	case "", "keep":
-		return
+		return nil
 	case "delete":
 		if err := u.n115DeleteFile(sourceCID, fid); err != nil {
-			u.Errorf("115 解压成功后删除原包失败：%s：%v", fileName, err)
+			return err
 		} else {
 			u.Printf("115 解压成功后已删除原包：%s", fileName)
 		}
 	case "archive":
 		archiveCID := strings.TrimSpace(u.CloudDrive2.N115ArchiveCID)
 		if archiveCID == "" {
-			u.Errorf("115 解压成功后归档原包失败：未填写归档 CID")
-			return
+			return fmt.Errorf("未填写归档 CID")
 		}
 		if err := u.n115MoveToFallback(fid, archiveCID); err != nil {
-			u.Errorf("115 解压成功后归档原包失败：%s：%v", fileName, err)
+			return err
 		} else {
 			u.Printf("115 解压成功后已归档原包：%s", fileName)
 		}
 	}
+	return nil
 }
 
 func (u *Unpackerr) handle115FallbackLocalSuccess(pending PendingCD2) {
+	version := ProcessedSource{Key: pending.N115TaskKey, Source: "115 本地下载", Path: pending.N115FileName, Size: pending.N115Size, ModifiedNS: pending.N115MTime,
+		SourceCID: pending.N115SourceCID, CloudFile: &n115File{FID: pending.N115FID, Name: pending.N115FileName, Size: pending.N115Size}}
 	if pending.N115TaskKey != "" {
-		u.markProcessed(ProcessedSource{Key: pending.N115TaskKey, Source: "115 本地下载", Path: pending.N115FileName, Size: pending.N115Size, ModifiedNS: pending.N115MTime})
+		u.markProcessed(version)
 	}
 	if pending.N115FailureCID != "" && pending.N115FID != "" {
 		if archiveCID := strings.TrimSpace(u.CloudDrive2.N115ArchiveCID); archiveCID != "" {
 			if err := u.n115MoveToFallback(pending.N115FID, archiveCID); err != nil {
+				version.Stage, version.CleanupKind, version.Error = "cleanup", "115_archive", err.Error()
+				u.markFailed(version)
 				u.Errorf("本地兜底解压成功后归档原包失败：%s：%v", pending.N115FileName, err)
 			} else {
 				u.Printf("本地兜底解压成功后已将原包移入归档目录：%s", pending.N115FileName)
@@ -1002,6 +1056,9 @@ func (u *Unpackerr) n115DeleteFile(sourceCID, fid string) error {
 }
 
 func (u *Unpackerr) refresh115Fallback(mapping N115Mapping, file n115File) {
+	if u.isIgnoredPath(file.Name) {
+		return
+	}
 	if file.FID == "" || file.Name == "" || !isCloudDriveArchiveEvent(file.Name) {
 		u.Errorf("115 本地下载任务无效，已跳过：文件名=%q，文件ID=%q", file.Name, file.FID)
 		return

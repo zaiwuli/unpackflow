@@ -159,8 +159,12 @@ func (u *Unpackerr) clearAllHistory() error {
 		return nil
 	}
 	u.state.mu.Lock()
-	u.state.Processed = make(map[string]ProcessedSource)
-	u.state.Failed = make(map[string]ProcessedSource)
+	for _, records := range []map[string]ProcessedSource{u.state.Processed, u.state.Failed, u.state.Ignored} {
+		for key, item := range records {
+			item.Hidden = true
+			records[key] = item
+		}
+	}
 	u.state.mu.Unlock()
 	return u.saveProcessingState()
 }

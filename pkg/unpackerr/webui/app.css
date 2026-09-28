@@ -26,6 +26,10 @@ button:disabled{cursor:not-allowed;opacity:.52}
 .task-name{max-width:100%;overflow-wrap:anywhere}
 .task-meta{min-width:0;flex-wrap:wrap;overflow-wrap:anywhere}
 .task-side{display:flex;align-items:center;justify-content:flex-end;gap:7px}
+.task-side{flex-wrap:wrap}
+.history-error{color:var(--red)}
+.task-content details{margin-top:8px;overflow-wrap:anywhere}
+.task-content summary{cursor:pointer;font-size:13px}
 .task-side button{margin-left:0!important;white-space:nowrap}
 .history-content strong,.history-content small{max-width:100%;overflow-wrap:anywhere}
 @media(max-width:700px){

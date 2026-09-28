@@ -11,7 +11,6 @@ import (
 	"image/color"
 	"image/png"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -62,6 +61,10 @@ type DashboardHistory struct {
 	CachedAt    string `json:"cached_at,omitempty"`
 	CompletedAt string `json:"completed_at"`
 	Ignored     bool   `json:"ignored,omitempty"`
+	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"`
+	Stage       string `json:"stage,omitempty"`
+	CanRetry    bool   `json:"can_retry"`
 }
 
 type historyAction struct {
@@ -93,6 +96,10 @@ type DashboardTask struct {
 	ETASeconds  int64  `json:"eta_seconds,omitempty"`
 	Error       string `json:"error,omitempty"`
 	CanFallback bool   `json:"can_fallback,omitempty"`
+	StartedAt   string `json:"started_at,omitempty"`
+	Path        string `json:"path,omitempty"`
+	CachedPath  string `json:"cached_path,omitempty"`
+	OutputPath  string `json:"output_path,omitempty"`
 }
 
 type DashboardFolder struct {
@@ -143,13 +150,25 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			source = "CloudDrive2"
 		}
 		task := DashboardTask{
-			Key:       name,
-			CancelKey: name,
-			Name:      name,
-			Source:    source,
-			Status:    statusName(item.Status),
-			Updated:   item.Updated.Format("2006-01-02 15:04:05"),
-			Retries:   item.Retries,
+			Key:        name,
+			CancelKey:  name,
+			Name:       filepath.Base(name),
+			Source:     source,
+			Status:     statusName(item.Status),
+			Updated:    item.Updated.Format("2006-01-02 15:04:05"),
+			Retries:    item.Retries,
+			StartedAt:  item.StartedAt.Format(time.RFC3339Nano),
+			Path:       name,
+			OutputPath: item.OutputPath,
+		}
+		if item.Status == EXTRACTFAILED && u.folders != nil {
+			if folder := u.folders.Folders[name]; folder != nil {
+				if folder.status <= EXTRACTING {
+					task.Status = statusName(folder.status)
+				} else if u.MaxRetries == 0 || folder.retries < u.MaxRetries {
+					task.Status = "解压失败，等待自动重试"
+				}
+			}
 		}
 		if item.XProg != nil {
 			if progress := item.XProg.String(); progress != "no progress yet" {
@@ -168,6 +187,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		}
 		if _, cancelled := u.cancelled.Load(name); cancelled {
 			task.Status = "已取消"
+			if item.Status == EXTRACTING || item.Status == QUEUED {
+				task.Status = "正在取消"
+			}
 		}
 		if transferKey, transfer, linked := u.cd2TransferForCachedPath(name); linked {
 			task.Key = transferKey
@@ -179,13 +201,40 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		}
 		mergeTask(task)
 	}
+	if u.folders != nil {
+		for name, folder := range u.folders.Folders {
+			if folder.status != WAITING || u.isIgnoredPath(name) || u.taskCancelled(name) {
+				continue
+			}
+			if item := u.Map[name]; item != nil && item.Status <= EXTRACTING {
+				continue
+			}
+			mergeTask(DashboardTask{Key: name, CancelKey: name, Name: filepath.Base(name), Path: name,
+				OutputPath: folder.config.ExtractPath, Source: "本地目录", Status: "等待稳定",
+				StartedAt: folder.created.Format(time.RFC3339Nano), Updated: formatDashboardTime(folder.updated), Retries: folder.retries})
+		}
+	}
 	for _, transfer := range snapshot.Transfers {
 		if u.isIgnoredPath(transfer.Path) {
 			continue
 		}
 		status := transfer.State
+		if status == "解压失败" && u.folders != nil {
+			if folder := u.folders.Folders[transfer.CachedPath]; folder != nil {
+				if folder.status <= EXTRACTING {
+					status = statusName(folder.status)
+				} else if u.MaxRetries == 0 || folder.retries < u.MaxRetries {
+					status = "解压失败，等待自动重试"
+				}
+			}
+		}
 		if _, cancelled := u.cancelled.Load(transfer.Key); cancelled {
 			status = "已取消"
+			_, copying := u.cd2Copy.Load(transfer.Key)
+			_, cloud := u.n115Running.Load(transfer.Key)
+			if copying || cloud {
+				status = "正在取消"
+			}
 		}
 		source := transfer.Source
 		if source == "" {
@@ -204,6 +253,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			ETASeconds:  transfer.ETA,
 			Error:       transfer.Error,
 			CanFallback: transfer.CanFallback,
+			StartedAt:   transfer.StartedAt.Format(time.RFC3339Nano),
+			Path:        transfer.Path,
+			CachedPath:  transfer.CachedPath,
 		}
 		if transfer.CanFallback {
 			task.FallbackKey = dashboardCanonicalTaskKey(transfer.Key, aliases)
@@ -211,13 +263,21 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 		mergeTask(task)
 	}
 	for _, task := range tasks {
-		snapshot.Tasks = append(snapshot.Tasks, task)
 		if dashboardTaskIsActive(task.Status) {
+			snapshot.Tasks = append(snapshot.Tasks, task)
 			snapshot.Totals.Active++
 		}
 	}
-	sort.Slice(snapshot.Tasks, func(i, j int) bool { return snapshot.Tasks[i].Updated > snapshot.Tasks[j].Updated })
+	sort.Slice(snapshot.Tasks, func(i, j int) bool {
+		if snapshot.Tasks[i].StartedAt != snapshot.Tasks[j].StartedAt {
+			return snapshot.Tasks[i].StartedAt < snapshot.Tasks[j].StartedAt
+		}
+		return snapshot.Tasks[i].Key < snapshot.Tasks[j].Key
+	})
 	for _, item := range u.processedHistory() {
+		if u.isIgnoredPath(item.Path) || u.hasFailedVersion(item) {
+			continue
+		}
 		source := "本地目录"
 		if item.Source == "cd2" {
 			source = "CloudDrive2"
@@ -228,22 +288,42 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			Key: item.Key, Path: item.Path, Source: source,
 			CachedAt:    formatDashboardTime(item.CachedAt),
 			CompletedAt: item.CompletedAt.Format("2006-01-02 15:04:05"),
+			Status:      "success",
 		})
 	}
 	for _, item := range u.failedHistory() {
-		snapshot.History = append(snapshot.History, DashboardHistory{Key: item.Key, Path: item.Path, Source: "解压失败", CachedAt: formatDashboardTime(item.CachedAt), CompletedAt: formatDashboardTime(item.CompletedAt)})
+		if u.hasPending115Task(item.Key) || u.historyRetryActive(item) || u.isIgnoredPath(item.Path) {
+			continue
+		}
+		status := "failed"
+		if item.Stage == "cancelled" {
+			status = "cancelled"
+		}
+		snapshot.History = append(snapshot.History, DashboardHistory{Key: item.Key, Path: item.Path, Source: item.Source, Status: status, Stage: item.Stage, Error: item.Error, CanRetry: true, CachedAt: formatDashboardTime(item.CachedAt), CompletedAt: formatDashboardTime(item.CompletedAt)})
 	}
 	if u.state != nil {
 		u.state.mu.RLock()
 		for _, item := range u.state.Ignored {
-			name := filepath.Base(item.Path)
+			if item.Hidden {
+				continue
+			}
+			name := filepath.Base(u.resolveIgnoredTaskLocked(item.Path).Path)
+			if strings.HasPrefix(name, "115|") || strings.HasPrefix(name, "115-download|") {
+				name = "已忽略的云端压缩包（原文件名未记录）"
+			}
 			if name == "." || name == "" {
 				name = item.Path
 			}
-			snapshot.History = append(snapshot.History, DashboardHistory{Key: item.Key, Path: name, Source: "已忽略压缩包", CompletedAt: formatDashboardTime(item.CompletedAt), Ignored: true})
+			snapshot.History = append(snapshot.History, DashboardHistory{Key: item.Key, Path: name, Source: "已忽略压缩包", Status: "ignored", CompletedAt: formatDashboardTime(item.CompletedAt), Ignored: true})
 		}
 		u.state.mu.RUnlock()
 	}
+	sort.Slice(snapshot.History, func(i, j int) bool {
+		if snapshot.History[i].CompletedAt != snapshot.History[j].CompletedAt {
+			return snapshot.History[i].CompletedAt > snapshot.History[j].CompletedAt
+		}
+		return snapshot.History[i].Key < snapshot.History[j].Key
+	})
 	for _, folder := range u.Folders {
 		tracked := 0
 		if u.folders != nil {
@@ -261,6 +341,9 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 }
 
 func dashboardTaskIsActive(status string) bool {
+	if strings.Contains(status, "等待") || strings.Contains(status, "重试中") || strings.Contains(status, "正在取消") {
+		return true
+	}
 	return !strings.Contains(status, "完成") && !strings.Contains(status, "失败") && !strings.Contains(status, "取消") && !strings.Contains(status, "无需")
 }
 
@@ -351,6 +434,12 @@ func mergeDashboardTask(current, incoming DashboardTask) DashboardTask {
 		result = incoming
 	}
 	result.Key = current.Key
+	if current.StartedAt != "" && (result.StartedAt == "" || current.StartedAt < result.StartedAt) {
+		result.StartedAt = current.StartedAt
+	}
+	if incoming.StartedAt != "" && (result.StartedAt == "" || incoming.StartedAt < result.StartedAt) {
+		result.StartedAt = incoming.StartedAt
+	}
 	if incoming.CancelKey != "" && (result.CancelKey == "" || dashboardTaskStage(incoming.Status) > dashboardTaskStage(current.Status)) {
 		result.CancelKey = incoming.CancelKey
 	}
@@ -396,9 +485,6 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 	if u.state != nil {
 		u.state.mu.RLock()
 		for _, item := range u.state.Fallback115 {
-			if u.isIgnoredPath(item.FileName) {
-				continue
-			}
 			if item.TaskKey == "" {
 				continue
 			}
@@ -426,12 +512,19 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 			seen[item.TaskKey] = struct{}{}
 		}
 		for _, item := range u.state.Pending {
+			terminal := false
+			for _, failed := range u.state.Failed {
+				if (failed.Key == item.Version.Key || failed.CachedPath == item.CachedPrimary && item.CachedPrimary != "") && !u.historyRetryActive(failed) {
+					terminal = true
+					break
+				}
+			}
+			if terminal {
+				continue
+			}
 			name := filepath.Base(item.Key)
 			if len(item.Files) > 0 {
 				name = filepath.Base(item.Files[0])
-			}
-			if u.isIgnoredPath(name) {
-				continue
 			}
 			key := item.Key
 			if key == "" {
@@ -449,11 +542,18 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 			} else if item.LastError != "" {
 				state = "复制失败，等待重试"
 			}
-			items = append(items, CD2Transfer{Key: key, Path: name, Source: "CD2 实时推送", State: state, UpdatedAt: item.NextAttempt, Error: item.LastError})
+			items = append(items, CD2Transfer{Key: key, Path: name, Source: "CD2 实时推送", State: state, StartedAt: item.CreatedAt, UpdatedAt: item.NextAttempt, Error: item.LastError})
 			seen[key] = struct{}{}
 		}
 		u.state.mu.RUnlock()
 	}
+	filtered := items[:0]
+	for _, item := range items {
+		if !u.isIgnoredPath(item.Path) && !u.isIgnoredPath(item.Key) {
+			filtered = append(filtered, item)
+		}
+	}
+	items = filtered
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 	return items
 }
@@ -754,12 +854,19 @@ func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ ht
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
 		return
 	}
+	u.submitHistoryAction(w, r, historyAction{Key: input.Key, Action: "approve", result: make(chan error, 1)})
+}
+
+func (u *Unpackerr) approve115Task(key string) error {
+	if u.taskSystemPaused.Load() {
+		return fmt.Errorf("请先恢复任务系统")
+	}
 	var pending Pending115
 	found := false
 	if u.state != nil {
 		u.state.mu.RLock()
 		for _, item := range u.state.Fallback115 {
-			if item.TaskKey == input.Key || item.Key == input.Key {
+			if item.TaskKey == key || item.Key == key {
 				pending, found = item, true
 				break
 			}
@@ -767,21 +874,25 @@ func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ ht
 		u.state.mu.RUnlock()
 	}
 	if !found {
-		http.Error(w, "未找到可本地解压的云端任务", http.StatusNotFound)
-		return
+		return fmt.Errorf("未找到可本地解压的云端任务")
+	}
+	if !pending.Approval {
+		return fmt.Errorf("任务已批准，请勿重复提交")
+	}
+	if u.isIgnoredPath(pending.FileName) || u.taskCancelled(pending.TaskKey) {
+		return fmt.Errorf("任务已忽略或取消")
 	}
 	// Persisted tasks may predate a folder mapping change. Never refresh the
 	// historical path; resolve the configured route by CID at approval time.
 	currentPath, configured := u.current115PendingPath(pending)
 	if !configured || currentPath == "" {
-		http.Error(w, "任务目录已从当前配置移除，请重新同步", http.StatusConflict)
-		return
+		return fmt.Errorf("任务目录已从当前配置移除，请重新同步")
 	}
 	pending.CD2Path = currentPath
-	u.update115Transfer(input.Key, pending.FileName, "正在批准本地下载", func(task *CD2Transfer) { task.CanFallback = false })
-	u.approvePending115Task(input.Key)
-	u.refresh115Fallback(N115Mapping{FallbackCID: pending.FallbackCID, CD2Path: pending.CD2Path}, n115File{FID: pending.FID, Name: pending.FileName})
-	u.writeJSON(w, map[string]any{"success": true, "message": "已刷新 CD2 指定路径，等待缓存"})
+	u.update115Transfer(pending.TaskKey, pending.FileName, "正在批准本地下载", func(task *CD2Transfer) { task.CanFallback = false })
+	u.approvePending115Task(pending.TaskKey)
+	go u.refresh115Fallback(N115Mapping{FallbackCID: pending.FallbackCID, CD2Path: pending.CD2Path}, n115File{FID: pending.FID, Name: pending.FileName})
+	return nil
 }
 
 func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -888,14 +999,31 @@ func (u *Unpackerr) historyAPI(w http.ResponseWriter, r *http.Request, _ httprou
 		return
 	}
 	action := historyAction{Key: input.Key, Action: input.Action, result: make(chan error, 1)}
+	u.submitHistoryAction(w, r, action)
+}
+
+func (u *Unpackerr) submitHistoryAction(w http.ResponseWriter, r *http.Request, action historyAction) {
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
 	select {
 	case u.historyActions <- action:
 	case <-r.Context().Done():
 		http.Error(w, "请求已取消", http.StatusRequestTimeout)
 		return
+	case <-timer.C:
+		http.Error(w, "任务系统暂时繁忙", http.StatusServiceUnavailable)
+		return
 	}
-	if err := <-action.result; err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	select {
+	case err := <-action.result:
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+	case <-r.Context().Done():
+		return
+	case <-timer.C:
+		http.Error(w, "操作仍在处理中，请刷新状态", http.StatusServiceUnavailable)
 		return
 	}
 	u.writeJSON(w, map[string]any{"success": true})
@@ -911,28 +1039,14 @@ func (u *Unpackerr) cancelTaskAPI(w http.ResponseWriter, r *http.Request, _ http
 		return
 	}
 	key := strings.TrimSpace(input.Key)
-	if input.Action == "ignore" || input.Action == "unignore" {
-		if err := u.setIgnoredPath(key, input.Action == "ignore"); err != nil {
-			http.Error(w, "保存忽略状态失败", http.StatusInternalServerError)
-			return
-		}
-		u.cancelled.Store(key, struct{}{})
-		u.writeJSON(w, map[string]any{"success": true})
+	if input.Action == "" {
+		input.Action = "cancel"
+	}
+	if input.Action != "cancel" && input.Action != "ignore" && input.Action != "unignore" {
+		http.Error(w, "不支持的任务操作", http.StatusBadRequest)
 		return
 	}
-	if cancel, ok := u.cd2Cancel.Load(key); ok {
-		cancel.(context.CancelFunc)()
-	}
-	u.cancelled.Store(key, struct{}{})
-	u.cd2Copy.Delete(key)
-	u.removePendingCD2("copy|" + filepath.Clean(key))
-	if transfer, ok := u.cd2Tasks.Load(key); ok {
-		if item, valid := transfer.(*CD2Transfer); valid && item != nil && item.CachedPath != "" {
-			_ = os.Remove(item.CachedPath)
-		}
-		u.updateCD2Transfer(key, key, "已取消", func(item *CD2Transfer) { item.Error = "用户取消" })
-	}
-	u.writeJSON(w, map[string]any{"success": true})
+	u.submitHistoryAction(w, r, historyAction{Key: key, Action: input.Action, result: make(chan error, 1)})
 }
 
 // downloadsPauseAPI controls CloudDrive2-to-local cache copies only.
@@ -1061,53 +1175,24 @@ func (u *Unpackerr) maintenanceAPI(w http.ResponseWriter, r *http.Request, _ htt
 		u.writeJSON(w, map[string]any{"success": true, "cleared": result.Cleared, "message": fmt.Sprintf("已清除 %d 个缓存项目", result.Cleared)})
 		return
 	}
-	u.Printf("已清除全部解压历史和防重复记录")
+	u.Printf("已清除历史展示，保留防重复和忽略规则")
 	u.writeJSON(w, map[string]any{"success": true, "message": "已清除全部历史记录"})
 }
 
 func (u *Unpackerr) handleHistoryAction(action historyAction) error {
-	item, ok := u.deleteProcessed(action.Key)
-	if !ok {
-		return fmt.Errorf("历史记录不存在")
+	if action.Action == "approve" {
+		return u.approve115Task(action.Key)
+	}
+	if action.Action == "cancel" || action.Action == "ignore" || action.Action == "unignore" {
+		return u.handleTaskMutation(action.Key, action.Action)
 	}
 	if action.Action == "delete" {
-		return nil
+		return u.hideHistory(action.Key)
 	}
-	if u.folders == nil {
-		u.restoreProcessed(item)
-		return fmt.Errorf("目录监控尚未启动")
+	if action.Action != "retry" {
+		return fmt.Errorf("不支持的历史操作")
 	}
-	if item.Source == "local" {
-		if _, err := os.Stat(item.Path); err != nil {
-			u.restoreProcessed(item)
-			return fmt.Errorf("源文件不存在，无法重试")
-		}
-		u.folders.InjectFileEvent(item.Path, "history retry")
-		return nil
-	}
-	if item.Source == "cd2" {
-		if _, err := os.Stat(item.Path); err == nil && dashboardPathPrefix(item.Path, u.CloudDrive2.CacheDir) {
-			u.cd2Cache.Store(filepath.Clean(item.Path), append([]string(nil), item.Files...))
-			u.savePendingCD2(PendingCD2{Key: filepath.Clean(item.Path), Files: append([]string(nil), item.Files...), CachedPrimary: item.Path, Version: item})
-			u.cd2Resume.Store(filepath.Clean(item.Path), struct{}{})
-			u.folders.InjectFileEvent(item.Path, "history retry cached")
-			return nil
-		}
-		files := append([]string(nil), item.Files...)
-		if len(files) == 0 {
-			files = []string{item.Path}
-		}
-		for _, file := range files {
-			if _, err := os.Stat(file); err != nil {
-				u.restoreProcessed(item)
-				return fmt.Errorf("CD2 源文件不存在，无法重试")
-			}
-		}
-		u.cacheCloudDrivePaths(files)
-		return nil
-	}
-	u.restoreProcessed(item)
-	return fmt.Errorf("不支持的任务来源")
+	return u.retryHistory(action.Key)
 }
 func (u *Unpackerr) writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

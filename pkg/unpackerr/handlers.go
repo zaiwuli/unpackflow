@@ -23,6 +23,7 @@ type Extract struct {
 	App         starr.App
 	URL         string
 	Updated     time.Time
+	StartedAt   time.Time
 	DeleteDelay time.Duration
 	DeleteOrig  bool
 	Status      ExtractStatus

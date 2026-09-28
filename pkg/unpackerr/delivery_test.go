@@ -789,13 +789,8 @@ func TestPersistentHistoryDeleteDoesNotRetryAndRetryDoes(t *testing.T) {
 	if err := u.handleHistoryAction(historyAction{Key: version.Key, Action: "retry"}); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case event := <-u.folders.Events:
-		if event.file != archive {
-			t.Fatalf("unexpected retry event: %+v", event)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("retry did not submit archive")
+	if folder := u.folders.Folders[archive]; folder == nil || folder.status != WAITING {
+		t.Fatal("retry did not queue archive on the owner loop")
 	}
 }
 

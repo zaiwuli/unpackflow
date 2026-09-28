@@ -88,12 +88,14 @@ type Unpackerr struct {
 	n115DateCache    n115DateFolderCache
 	cancelled        sync.Map // task path/key -> struct{} for user-cancelled work
 	nameMappers      sync.Map // task path/key -> *archiveNameMapper
+	cleanupRunning   sync.Map // history key -> struct{} while source cleanup is active
 	cd2Mu            sync.RWMutex
 	cd2Client        *clouddrive.Client
 }
 
 type fileDeleteReq struct {
 	Paths            []string
+	Version          *ProcessedSource
 	PurgeEmptyParent bool
 	// PurgeEmptyRoot, when set with PurgeEmptyParent, allows purging empty parent dirs
 	// up to and including this path (e.g. the Starr app download folder). Stops above this root.
@@ -270,6 +272,9 @@ func (u *Unpackerr) watchDeleteChannel() {
 
 		u.Debugf("正在删除文件：%s", strings.Join(fileList(input.Paths...), ", "))
 		u.DeleteFiles(input.Paths...)
+		if input.Version != nil {
+			u.finishLocalDelete(*input.Version, input.Paths)
+		}
 
 		if !input.PurgeEmptyParent {
 			continue
@@ -399,7 +404,6 @@ func (u *Unpackerr) cleanupCancelledExtraction(resp *xtractr.Response) {
 	if len(resp.NewFiles) > 0 {
 		u.Xtractr.DeleteFiles(resp.NewFiles...)
 	}
-	u.cancelled.Delete(resp.X.Name)
 }
 
 func (u *Unpackerr) writeNameManifest(task, output string) {
