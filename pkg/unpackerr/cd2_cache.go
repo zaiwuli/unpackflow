@@ -31,6 +31,9 @@ type CD2Transfer struct {
 	Error       string          `json:"error,omitempty"`
 	CanFallback bool            `json:"can_fallback,omitempty"`
 	Version     ProcessedSource `json:"-"`
+	OutputCID   string          `json:"output_cid,omitempty"`
+	OutputName  string          `json:"output_name,omitempty"`
+	Retries     uint            `json:"retries,omitempty"`
 }
 
 var (

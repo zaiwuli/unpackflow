@@ -30,6 +30,10 @@ button:disabled{cursor:not-allowed;opacity:.52}
 .history-error{color:var(--red)}
 .task-content details{margin-top:8px;overflow-wrap:anywhere}
 .task-content summary{cursor:pointer;font-size:13px}
+.task-details dl{display:grid;grid-template-columns:140px minmax(0,1fr);gap:8px 12px;margin:12px 0;font-size:13px;line-height:1.6}
+.task-details dt{margin:0;color:var(--muted)}
+.task-details dd{margin:0;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;user-select:text}
+@media(max-width:700px){.task-details dl{grid-template-columns:minmax(0,1fr);gap:3px}.task-details dd{margin-bottom:9px}}
 .task-side button{margin-left:0!important;white-space:nowrap}
 .history-content strong,.history-content small{max-width:100%;overflow-wrap:anywhere}
 @media(max-width:700px){

@@ -613,13 +613,19 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 		u.update115Transfer(version.Key, file.Name, "115 云端解压中", func(task *CD2Transfer) {
 			task.Error = ""
 			task.Version = version
+			task.Retries = attempt - 1
+			task.OutputCID, task.OutputName = "", ""
 		})
 		u.Systemf("115 云解压开始（第 %d/%d 次）：%s", attempt, retries, file.Name)
 		targetCID := mapping.SourceCID
 		if value := strings.TrimSpace(u.CloudDrive2.N115ExtractCIDs[mapping.SourceCID]); value != "" {
 			targetCID = value
 		}
-		status, extractErr := u.n115SeparateExtract(file, targetCID)
+		status, extractErr := u.n115SeparateExtract(file, targetCID, func(cid, name string) {
+			u.update115Transfer(version.Key, file.Name, "115 云端解压中", func(task *CD2Transfer) {
+				task.OutputCID, task.OutputName = cid, name
+			})
+		})
 		if extractErr == nil && status == "success" {
 			// Keep the shared queue slot during cooldown, including manual retries
 			// and tasks cancelled while their cloud request was in flight.
@@ -786,7 +792,7 @@ func (u *Unpackerr) update115Transfer(key, fileName, state string, update func(*
 	})
 }
 
-func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (status string, extractErr error) {
+func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string, onOutput ...func(string, string)) (status string, extractErr error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	info, err := u.n115Request(ctx, http.MethodGet, n115APIBase+"/files/extract_info", url.Values{
@@ -815,6 +821,11 @@ func (u *Unpackerr) n115SeparateExtract(file n115File, targetCID string) (status
 	outputCID, err := u.n115CreateFolder(ctx, targetCID, outputName)
 	if err != nil {
 		return "", err
+	}
+	for _, notify := range onOutput {
+		if notify != nil {
+			notify(outputCID, outputName)
+		}
 	}
 	defer func() {
 		if keep115ExtractOutput(status, extractErr) {

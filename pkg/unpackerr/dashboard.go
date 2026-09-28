@@ -81,25 +81,33 @@ type DashboardTotals struct {
 }
 
 type DashboardTask struct {
-	Key         string `json:"key"`
-	CancelKey   string `json:"cancel_key,omitempty"`
-	FallbackKey string `json:"fallback_key,omitempty"`
-	Name        string `json:"name"`
-	Source      string `json:"source"`
-	Status      string `json:"status"`
-	Updated     string `json:"updated"`
-	Retries     uint   `json:"retries"`
-	Progress    string `json:"progress,omitempty"`
-	Bytes       int64  `json:"bytes,omitempty"`
-	Total       int64  `json:"total,omitempty"`
-	Speed       int64  `json:"speed,omitempty"`
-	ETASeconds  int64  `json:"eta_seconds,omitempty"`
-	Error       string `json:"error,omitempty"`
-	CanFallback bool   `json:"can_fallback,omitempty"`
-	StartedAt   string `json:"started_at,omitempty"`
-	Path        string `json:"path,omitempty"`
-	CachedPath  string `json:"cached_path,omitempty"`
-	OutputPath  string `json:"output_path,omitempty"`
+	Key         string   `json:"key"`
+	CancelKey   string   `json:"cancel_key,omitempty"`
+	FallbackKey string   `json:"fallback_key,omitempty"`
+	Name        string   `json:"name"`
+	Source      string   `json:"source"`
+	Status      string   `json:"status"`
+	Updated     string   `json:"updated"`
+	Retries     uint     `json:"retries"`
+	Progress    string   `json:"progress,omitempty"`
+	Bytes       int64    `json:"bytes,omitempty"`
+	Total       int64    `json:"total,omitempty"`
+	Speed       int64    `json:"speed,omitempty"`
+	ETASeconds  int64    `json:"eta_seconds,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	CanFallback bool     `json:"can_fallback,omitempty"`
+	StartedAt   string   `json:"started_at,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	CachedPath  string   `json:"cached_path,omitempty"`
+	OutputPath  string   `json:"output_path,omitempty"`
+	SourceCID   string   `json:"source_cid,omitempty"`
+	SourceLabel string   `json:"source_label,omitempty"`
+	FileID      string   `json:"file_id,omitempty"`
+	TargetCID   string   `json:"target_cid,omitempty"`
+	OutputCID   string   `json:"output_cid,omitempty"`
+	OutputName  string   `json:"output_name,omitempty"`
+	Files       []string `json:"files,omitempty"`
+	NextAttempt string   `json:"next_attempt,omitempty"`
 }
 
 type DashboardFolder struct {
@@ -264,6 +272,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 	}
 	for _, task := range tasks {
 		if dashboardTaskIsActive(task.Status) {
+			u.fillDashboardTaskDetails(&task, aliases, snapshot.Transfers)
 			snapshot.Tasks = append(snapshot.Tasks, task)
 			snapshot.Totals.Active++
 		}
@@ -432,6 +441,22 @@ func mergeDashboardTask(current, incoming DashboardTask) DashboardTask {
 	result := current
 	if useIncoming {
 		result = incoming
+	}
+	other := incoming
+	if useIncoming {
+		other = current
+	}
+	if result.Path == "" {
+		result.Path = other.Path
+	}
+	if result.CachedPath == "" {
+		result.CachedPath = other.CachedPath
+	}
+	if result.OutputPath == "" {
+		result.OutputPath = other.OutputPath
+	}
+	if result.Error == "" {
+		result.Error = other.Error
 	}
 	result.Key = current.Key
 	if current.StartedAt != "" && (result.StartedAt == "" || current.StartedAt < result.StartedAt) {

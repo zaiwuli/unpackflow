@@ -17,6 +17,7 @@ let taskFilter = 'all';
 let historyFilter = 'all';
 let currentHistory = [];
 const pendingActions = new Set();
+const expandedTasks = new Set();
 
 function esc(value) {
   const element = document.createElement('div');
@@ -517,6 +518,26 @@ function fillForms(data) {
   $('copy-timeout').value = (data.settings && data.settings.copy_timeout) || '24h';
 }
 
+function renderTaskDetails(task) {
+  const row = (label, value) => '<dt>' + label + '</dt><dd>' + esc(value || '暂无记录') + '</dd>';
+  let rows = row('文件名称', task.name) + row('任务来源', task.source) + row('当前阶段', task.status);
+  rows += row(task.source_cid ? '原包名称或挂载路径' : '原包路径', task.path || task.name);
+  if (task.source_cid) {
+    rows += row('来源目录', task.source_label || '未设置备注') + row('来源目录 CID', task.source_cid) + row('文件 ID', task.file_id);
+  }
+  if (task.target_cid) rows += row('配置输出目录 CID', task.target_cid);
+  if (task.target_cid || task.output_cid) {
+    rows += row('实际输出目录', task.output_name || '尚未创建') + row('实际输出目录 CID', task.output_cid || '尚未创建');
+  }
+  if (task.cached_path || !task.target_cid) rows += row('缓存路径', task.cached_path || '尚未缓存或无需缓存') + row('本地输出路径', task.output_path);
+  if (task.files && task.files.length) rows += row('原包文件列表', task.files.join('\n'));
+  rows += row('开始时间', task.started_at && !task.started_at.startsWith('0001-') ? new Date(task.started_at).toLocaleString() : '') + row('更新时间', task.updated) + row('重试次数', String(task.retries || 0));
+  if (task.next_attempt) rows += row('下次重试时间', task.next_attempt);
+  if (task.error) rows += row('错误详情', task.error);
+  rows += row('任务标识', task.key);
+  return '<details class="task-details" data-detail-key="' + encodeURIComponent(task.key) + '"' + (expandedTasks.has(task.key) ? ' open' : '') + '><summary>详情</summary><dl>' + rows + '</dl></details>';
+}
+
 function renderTask(task) {
   const hasCopyProgress = Number(task.total) > 0;
   const percent = hasCopyProgress ? Math.min(100, Number(task.bytes || 0) * 100 / Number(task.total)) : 0;
@@ -534,7 +555,7 @@ function renderTask(task) {
     (detail ? '<div class="progress">' + esc(detail) + '</div>' : '') +
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
-    '<details><summary>详情</summary><div class="progress">来源路径：' + esc(task.path || task.name) + (task.cached_path ? '<br>缓存路径：' + esc(task.cached_path) : '') + (task.output_path ? '<br>输出路径：' + esc(task.output_path) : '') + '<br>重试次数：' + Number(task.retries || 0) + '</div></details>' +
+    renderTaskDetails(task) +
     '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button"' + disabled + '>批准下载</button>' : '') + (canIgnore ? '<button data-ignore-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>忽略</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>取消</button>' : '') + '</div></article>';
 }
 
@@ -605,6 +626,10 @@ async function runTaskAction(key, endpoint, action, button) {
 }
 
 function renderCurrentTasks() {
+  document.querySelectorAll('#tasks details[data-detail-key]').forEach(detail => {
+    const key = decodeURIComponent(detail.dataset.detailKey);
+    if (detail.open) expandedTasks.add(key); else expandedTasks.delete(key);
+  });
   const values = taskFilter === 'all' ? currentTasks : currentTasks.filter(task => taskGroup(task) === taskFilter);
   renderList($('tasks'), values, renderTask, zh.noTasks);
 }
