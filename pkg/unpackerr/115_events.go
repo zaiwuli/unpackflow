@@ -620,6 +620,14 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 			targetCID = value
 		}
 		status, extractErr := u.n115SeparateExtract(file, targetCID)
+		if extractErr == nil && status == "success" {
+			// Keep the shared queue slot during cooldown, including manual retries
+			// and tasks cancelled while their cloud request was in flight.
+			defer func() {
+				u.Printf("115 云解压任务间隔：等待 30 秒后放行下一个任务")
+				time.Sleep(30 * time.Second)
+			}()
+		}
 		if u.isIgnoredPath(file.Name) || u.isIgnoredPath(version.Key) || u.taskCancelled(version.Key) {
 			return
 		}
