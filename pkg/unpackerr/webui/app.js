@@ -195,6 +195,8 @@ async function selectNotificationProvider(provider) {
 function ensureLocalSettings() {
   if ($('local-source-action')) return;
 	$('cd2-refresh').textContent = '立即刷新';
+	const taskRefresh = $('refresh');
+	if (taskRefresh) taskRefresh.remove();
   const workers = $('workers').closest('.field');
   if (!workers) return;
 	const oldDeleteSource = $('delete-source');
@@ -686,7 +688,6 @@ document.querySelectorAll('.log-switch-button').forEach(button => button.addEven
   renderLogs();
 }));
 
-$('refresh').addEventListener('click', () => load(false));
 $('cd2-refresh').addEventListener('click', async () => {
   $('cd2-refresh').disabled = true;
   $('refresh-message').textContent = '正在刷新…';

@@ -256,6 +256,29 @@ func TestPending115FallbackSurvivesStateRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFallbackLocalSuccessUsesCloudSuccessAction(t *testing.T) {
+	u := New()
+	u.ConfigFile = filepath.Join(t.TempDir(), "unpackerr.conf")
+	if err := u.loadProcessingState(); err != nil {
+		t.Fatal(err)
+	}
+	u.CloudDrive2.N115SuccessAction = "archive"
+	u.savePending115Fallback(Pending115{Key: "fallback-key", TaskKey: "task-key", SourceCID: "source-cid", FallbackCID: "failure-cid", FID: "file-id", FileName: "test.7z"})
+
+	u.handle115FallbackLocalSuccess(PendingCD2{N115TaskKey: "task-key", N115SourceCID: "source-cid", N115FailureCID: "failure-cid", N115FID: "file-id", N115FileName: "test.7z"})
+
+	u.state.mu.RLock()
+	failed := u.state.Failed["task-key"]
+	_, pending := u.state.Fallback115["fallback-key"]
+	u.state.mu.RUnlock()
+	if failed.CleanupKind != "115_success" || failed.SourceCID != "failure-cid" || failed.Error == "" {
+		t.Fatalf("fallback cleanup did not use cloud success settings: %#v", failed)
+	}
+	if pending {
+		t.Fatal("completed local fallback must remove its pending download record")
+	}
+}
+
 func TestCurrent115PendingPathUsesLatestMapping(t *testing.T) {
 	u := New()
 	u.CloudDrive2.N115DownloadMappings = []string{"300 => /115open/绿联备份/下载 => auto"}

@@ -765,19 +765,15 @@ func (u *Unpackerr) process115SuccessFile(sourceCID, fid, fileName string) error
 
 func (u *Unpackerr) handle115FallbackLocalSuccess(pending PendingCD2) {
 	version := ProcessedSource{Key: pending.N115TaskKey, Source: "115 本地下载", Path: pending.N115FileName, Size: pending.N115Size, ModifiedNS: pending.N115MTime,
-		SourceCID: pending.N115SourceCID, CloudFile: &n115File{FID: pending.N115FID, Name: pending.N115FileName, Size: pending.N115Size}}
+		SourceCID: pending.N115FailureCID, CloudFile: &n115File{FID: pending.N115FID, Name: pending.N115FileName, Size: pending.N115Size}}
 	if pending.N115TaskKey != "" {
 		u.markProcessed(version)
 	}
 	if pending.N115FailureCID != "" && pending.N115FID != "" {
-		if archiveCID := strings.TrimSpace(u.CloudDrive2.N115ArchiveCID); archiveCID != "" {
-			if err := u.n115MoveToFallback(pending.N115FID, archiveCID); err != nil {
-				version.Stage, version.CleanupKind, version.Error = "cleanup", "115_archive", err.Error()
-				u.markFailed(version)
-				u.Errorf("本地兜底解压成功后归档原包失败：%s：%v", pending.N115FileName, err)
-			} else {
-				u.Printf("本地兜底解压成功后已将原包移入归档目录：%s", pending.N115FileName)
-			}
+		if err := u.process115SuccessFile(pending.N115FailureCID, pending.N115FID, pending.N115FileName); err != nil {
+			version.Stage, version.CleanupKind, version.Error = "cleanup", "115_success", err.Error()
+			u.markFailed(version)
+			u.Errorf("本地兜底解压成功后处理原包失败：%s：%v", pending.N115FileName, err)
 		}
 	}
 	u.removePending115FallbackForFile(pending.N115SourceCID, pending.N115FID)

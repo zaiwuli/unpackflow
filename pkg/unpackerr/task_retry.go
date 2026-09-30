@@ -270,6 +270,9 @@ func (u *Unpackerr) retry115History(item ProcessedSource) error {
 	for _, mapping := range parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings) {
 		configured = configured || mapping.CID == item.SourceCID
 	}
+	if item.Stage == "cleanup" {
+		configured = configured || strings.TrimSpace(u.CloudDrive2.N115FailureCID) == item.SourceCID
+	}
 	if !configured {
 		return fmt.Errorf("原来源目录已从当前配置移除")
 	}
