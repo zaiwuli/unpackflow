@@ -558,7 +558,7 @@ function renderTask(task) {
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
     renderTaskDetails(task) +
-    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button"' + disabled + '>批准下载</button>' : '') + (canIgnore ? '<button data-ignore-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>忽略</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>取消</button>' : '') + '</div></article>';
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_cloud_retry ? '<button data-cloud-retry-task="' + esc(task.fallback_key || task.key) + '" type="button"' + disabled + '>重试云解压</button>' : '') + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button"' + disabled + '>批准下载</button>' : '') + (canIgnore ? '<button data-ignore-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>忽略</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>取消</button>' : '') + '</div></article>';
 }
 
 function renderStatus(data) {
@@ -767,9 +767,9 @@ $('history').addEventListener('click', async event => {
 
 $('tasks').addEventListener('click', async event => {
   const data = event.target.dataset;
-  const key = data.ignoreTask || data.fallbackTask || data.cancelTask;
+  const key = data.ignoreTask || data.cloudRetryTask || data.fallbackTask || data.cancelTask;
   if (!key) return;
-  await runTaskAction(key, data.fallbackTask ? 'api/115/fallback' : 'api/tasks/cancel', data.ignoreTask ? 'ignore' : data.fallbackTask ? 'approve' : 'cancel', event.target);
+  await runTaskAction(key, data.cloudRetryTask || data.fallbackTask ? 'api/115/fallback' : 'api/tasks/cancel', data.ignoreTask ? 'ignore' : data.cloudRetryTask ? 'retry_cloud' : data.fallbackTask ? 'approve' : 'cancel', event.target);
 });
 
 $('notify-save').addEventListener('click', async () => {

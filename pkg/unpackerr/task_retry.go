@@ -25,6 +25,71 @@ func (u *Unpackerr) refreshRetry115File(item *ProcessedSource) error {
 	return fmt.Errorf("原目录中未找到可重试的云端文件")
 }
 
+func (u *Unpackerr) retryPending115Cloud(key string) error {
+	if u.taskSystemPaused.Load() {
+		return fmt.Errorf("请先恢复任务系统")
+	}
+	if !u.CloudDrive2.N115Enabled || strings.TrimSpace(u.CloudDrive2.N115Cookie) == "" {
+		return fmt.Errorf("请先启用并配置 115")
+	}
+	var pending Pending115
+	found := false
+	if u.state != nil {
+		u.state.mu.RLock()
+		for _, item := range u.state.Fallback115 {
+			if item.TaskKey == key || item.Key == key {
+				pending, found = item, true
+				break
+			}
+		}
+		u.state.mu.RUnlock()
+	}
+	if !found || pending.Kind != "cloud_failure" || !pending.Approval {
+		return fmt.Errorf("未找到可重试的云解压任务")
+	}
+	if strings.TrimSpace(pending.FallbackCID) == "" || strings.TrimSpace(pending.SourceCID) == "" {
+		return fmt.Errorf("任务缺少来源或失败归档目录信息")
+	}
+	if strings.TrimSpace(pending.FallbackCID) != strings.TrimSpace(u.CloudDrive2.N115FailureCID) {
+		return fmt.Errorf("失败归档目录已从当前配置移除")
+	}
+	if u.isIgnoredPath(pending.FileName) || u.taskCancelled(pending.TaskKey) {
+		return fmt.Errorf("任务已忽略或取消")
+	}
+	if _, loaded := u.n115Running.LoadOrStore(pending.TaskKey, struct{}{}); loaded {
+		return fmt.Errorf("任务已在处理中")
+	}
+	u.update115Transfer(pending.TaskKey, pending.FileName, "正在准备重新云解压", func(task *CD2Transfer) {
+		task.CanFallback = false
+		task.CanCloudRetry = false
+		task.Error = ""
+	})
+	go func() {
+		defer u.n115Running.Delete(pending.TaskKey)
+		u.n115Queue <- struct{}{}
+		defer func() { <-u.n115Queue }()
+		if u.taskSystemPaused.Load() || u.isIgnoredPath(pending.FileName) || u.taskCancelled(pending.TaskKey) {
+			u.update115Transfer(pending.TaskKey, pending.FileName, "重试已取消", nil)
+			return
+		}
+		item := ProcessedSource{Key: pending.TaskKey, Source: "115", Path: pending.FileName, Size: pending.Size, ModifiedNS: pending.MTime,
+			SourceCID: pending.FallbackCID, CloudFile: &n115File{FID: pending.FID, Name: pending.FileName, Size: pending.Size}}
+		if err := u.refreshRetry115File(&item); err != nil {
+			u.update115Transfer(pending.TaskKey, pending.FileName, "云解压重试准备失败", func(task *CD2Transfer) {
+				task.Error = err.Error()
+				task.CanFallback = true
+				task.CanCloudRetry = true
+			})
+			return
+		}
+		u.removePending115Task(pending.TaskKey)
+		mapping := N115Mapping{SourceCID: pending.SourceCID, FallbackCID: pending.FallbackCID, CD2Path: normalizeCloudDrivePath(u.CloudDrive2.N115FailureCD2Path),
+			RouteID: pending.RouteID, RouteLabel: pending.RouteLabel, Kind: "cloud_failure"}
+		u.run115CloudExtract(mapping, *item.CloudFile, item)
+	}()
+	return nil
+}
+
 func (u *Unpackerr) hideHistory(key string) error {
 	if u.state == nil {
 		return fmt.Errorf("历史记录不存在")

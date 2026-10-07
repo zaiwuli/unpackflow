@@ -380,6 +380,7 @@ func (u *Unpackerr) scan115FailureFolder() {
 			u.update115Transfer(key, file.Name, "云解压失败，等待批准本地下载", func(task *CD2Transfer) {
 				task.Source = "云解压失败转本地｜" + mapping.RouteLabel
 				task.CanFallback = true
+				task.CanCloudRetry = mapping.SourceCID != ""
 			})
 		} else {
 			u.update115Transfer(key, file.Name, "等待下载到本地解压", func(task *CD2Transfer) { task.Source = "云解压失败转本地｜" + mapping.RouteLabel })
@@ -615,6 +616,8 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 			task.Version = version
 			task.Retries = attempt - 1
 			task.OutputCID, task.OutputName = "", ""
+			task.CanFallback = false
+			task.CanCloudRetry = false
 		})
 		u.Systemf("115 云解压开始（第 %d/%d 次）：%s", attempt, retries, file.Name)
 		targetCID := mapping.SourceCID
@@ -679,12 +682,16 @@ func (u *Unpackerr) move115FailedSource(mapping N115Mapping, file n115File, vers
 		return
 	}
 	u.update115Transfer(version.Key, file.Name, "正在移动到失败归档目录", nil)
-	if err := u.n115MoveToFallback(file.FID, mapping.FallbackCID); err != nil {
-		version.Stage, version.Error = "move", err.Error()
-		u.markFailed(version)
-		u.Errorf("115 失败文件移动到失败归档目录失败：%s：%v", file.Name, err)
-		u.update115Transfer(version.Key, file.Name, "移动到失败归档目录失败", func(task *CD2Transfer) { task.Error = err.Error() })
-		return
+	if strings.TrimSpace(file.CID) == strings.TrimSpace(mapping.FallbackCID) {
+		u.Printf("115 云解压再次失败，原包已在失败归档目录：%s", file.Name)
+	} else {
+		if err := u.n115MoveToFallback(file.FID, mapping.FallbackCID); err != nil {
+			version.Stage, version.Error = "move", err.Error()
+			u.markFailed(version)
+			u.Errorf("115 失败文件移动到失败归档目录失败：%s：%v", file.Name, err)
+			u.update115Transfer(version.Key, file.Name, "移动到失败归档目录失败", func(task *CD2Transfer) { task.Error = err.Error() })
+			return
+		}
 	}
 	u.Printf("115 云解压失败，已移动到失败归档目录：%s", file.Name)
 	// The file now lives in FallbackCID. Persist that identity before deciding
@@ -704,6 +711,7 @@ func (u *Unpackerr) move115FailedSource(mapping N115Mapping, file n115File, vers
 	u.update115Transfer(version.Key, file.Name, "云解压失败，等待手动本地解压", func(task *CD2Transfer) {
 		task.Error = version.Error
 		task.CanFallback = true
+		task.CanCloudRetry = mapping.SourceCID != ""
 	})
 }
 

@@ -17,23 +17,24 @@ import (
 )
 
 type CD2Transfer struct {
-	Key         string          `json:"key"`
-	Path        string          `json:"path"`
-	Source      string          `json:"source,omitempty"`
-	CachedPath  string          `json:"cached_path,omitempty"`
-	State       string          `json:"state"`
-	Bytes       int64           `json:"bytes"`
-	Total       int64           `json:"total"`
-	StartedAt   time.Time       `json:"started_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
-	Speed       int64           `json:"speed"`
-	ETA         int64           `json:"eta_seconds"`
-	Error       string          `json:"error,omitempty"`
-	CanFallback bool            `json:"can_fallback,omitempty"`
-	Version     ProcessedSource `json:"-"`
-	OutputCID   string          `json:"output_cid,omitempty"`
-	OutputName  string          `json:"output_name,omitempty"`
-	Retries     uint            `json:"retries,omitempty"`
+	Key           string          `json:"key"`
+	Path          string          `json:"path"`
+	Source        string          `json:"source,omitempty"`
+	CachedPath    string          `json:"cached_path,omitempty"`
+	State         string          `json:"state"`
+	Bytes         int64           `json:"bytes"`
+	Total         int64           `json:"total"`
+	StartedAt     time.Time       `json:"started_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+	Speed         int64           `json:"speed"`
+	ETA           int64           `json:"eta_seconds"`
+	Error         string          `json:"error,omitempty"`
+	CanFallback   bool            `json:"can_fallback,omitempty"`
+	CanCloudRetry bool            `json:"can_cloud_retry,omitempty"`
+	Version       ProcessedSource `json:"-"`
+	OutputCID     string          `json:"output_cid,omitempty"`
+	OutputName    string          `json:"output_name,omitempty"`
+	Retries       uint            `json:"retries,omitempty"`
 }
 
 var (

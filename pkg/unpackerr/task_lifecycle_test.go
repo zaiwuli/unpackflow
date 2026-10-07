@@ -239,6 +239,20 @@ func TestDashboardSeparatesTerminalAndPendingFailures(t *testing.T) {
 	}
 }
 
+func TestDashboardRestoresCloudRetryForFailedArchive(t *testing.T) {
+	u := lifecycleTestApp(t)
+	u.state.Fallback115["pending"] = Pending115{Key: "pending", TaskKey: "cloud-failed", Kind: "cloud_failure", SourceCID: "source", FileName: "failed.7z", Approval: true}
+
+	transfers := u.dashboardTransfers()
+	if len(transfers) != 1 || !transfers[0].CanFallback || !transfers[0].CanCloudRetry {
+		t.Fatalf("cloud failure actions were not restored: %#v", transfers)
+	}
+	snapshot := u.dashboardSnapshot()
+	if len(snapshot.Tasks) != 1 || !snapshot.Tasks[0].CanFallback || !snapshot.Tasks[0].CanCloudRetry {
+		t.Fatalf("cloud retry action missing from dashboard: %#v", snapshot.Tasks)
+	}
+}
+
 func TestWaitingFailureIsActiveAndOrderingKeepsOriginalStart(t *testing.T) {
 	for _, status := range []string{"云解压失败，等待批准本地下载", "解压失败，等待自动重试", "正在取消"} {
 		if !dashboardTaskIsActive(status) {

@@ -81,33 +81,34 @@ type DashboardTotals struct {
 }
 
 type DashboardTask struct {
-	Key         string   `json:"key"`
-	CancelKey   string   `json:"cancel_key,omitempty"`
-	FallbackKey string   `json:"fallback_key,omitempty"`
-	Name        string   `json:"name"`
-	Source      string   `json:"source"`
-	Status      string   `json:"status"`
-	Updated     string   `json:"updated"`
-	Retries     uint     `json:"retries"`
-	Progress    string   `json:"progress,omitempty"`
-	Bytes       int64    `json:"bytes,omitempty"`
-	Total       int64    `json:"total,omitempty"`
-	Speed       int64    `json:"speed,omitempty"`
-	ETASeconds  int64    `json:"eta_seconds,omitempty"`
-	Error       string   `json:"error,omitempty"`
-	CanFallback bool     `json:"can_fallback,omitempty"`
-	StartedAt   string   `json:"started_at,omitempty"`
-	Path        string   `json:"path,omitempty"`
-	CachedPath  string   `json:"cached_path,omitempty"`
-	OutputPath  string   `json:"output_path,omitempty"`
-	SourceCID   string   `json:"source_cid,omitempty"`
-	SourceLabel string   `json:"source_label,omitempty"`
-	FileID      string   `json:"file_id,omitempty"`
-	TargetCID   string   `json:"target_cid,omitempty"`
-	OutputCID   string   `json:"output_cid,omitempty"`
-	OutputName  string   `json:"output_name,omitempty"`
-	Files       []string `json:"files,omitempty"`
-	NextAttempt string   `json:"next_attempt,omitempty"`
+	Key           string   `json:"key"`
+	CancelKey     string   `json:"cancel_key,omitempty"`
+	FallbackKey   string   `json:"fallback_key,omitempty"`
+	Name          string   `json:"name"`
+	Source        string   `json:"source"`
+	Status        string   `json:"status"`
+	Updated       string   `json:"updated"`
+	Retries       uint     `json:"retries"`
+	Progress      string   `json:"progress,omitempty"`
+	Bytes         int64    `json:"bytes,omitempty"`
+	Total         int64    `json:"total,omitempty"`
+	Speed         int64    `json:"speed,omitempty"`
+	ETASeconds    int64    `json:"eta_seconds,omitempty"`
+	Error         string   `json:"error,omitempty"`
+	CanFallback   bool     `json:"can_fallback,omitempty"`
+	CanCloudRetry bool     `json:"can_cloud_retry,omitempty"`
+	StartedAt     string   `json:"started_at,omitempty"`
+	Path          string   `json:"path,omitempty"`
+	CachedPath    string   `json:"cached_path,omitempty"`
+	OutputPath    string   `json:"output_path,omitempty"`
+	SourceCID     string   `json:"source_cid,omitempty"`
+	SourceLabel   string   `json:"source_label,omitempty"`
+	FileID        string   `json:"file_id,omitempty"`
+	TargetCID     string   `json:"target_cid,omitempty"`
+	OutputCID     string   `json:"output_cid,omitempty"`
+	OutputName    string   `json:"output_name,omitempty"`
+	Files         []string `json:"files,omitempty"`
+	NextAttempt   string   `json:"next_attempt,omitempty"`
 }
 
 type DashboardFolder struct {
@@ -249,21 +250,22 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			source = "CloudDrive2"
 		}
 		task := DashboardTask{
-			Key:         transfer.Key,
-			CancelKey:   transfer.Key,
-			Name:        filepath.Base(transfer.Path),
-			Source:      source,
-			Status:      status,
-			Updated:     transfer.UpdatedAt.Format("2006-01-02 15:04:05"),
-			Bytes:       transfer.Bytes,
-			Total:       transfer.Total,
-			Speed:       transfer.Speed,
-			ETASeconds:  transfer.ETA,
-			Error:       transfer.Error,
-			CanFallback: transfer.CanFallback,
-			StartedAt:   transfer.StartedAt.Format(time.RFC3339Nano),
-			Path:        transfer.Path,
-			CachedPath:  transfer.CachedPath,
+			Key:           transfer.Key,
+			CancelKey:     transfer.Key,
+			Name:          filepath.Base(transfer.Path),
+			Source:        source,
+			Status:        status,
+			Updated:       transfer.UpdatedAt.Format("2006-01-02 15:04:05"),
+			Bytes:         transfer.Bytes,
+			Total:         transfer.Total,
+			Speed:         transfer.Speed,
+			ETASeconds:    transfer.ETA,
+			Error:         transfer.Error,
+			CanFallback:   transfer.CanFallback,
+			CanCloudRetry: transfer.CanCloudRetry,
+			StartedAt:     transfer.StartedAt.Format(time.RFC3339Nano),
+			Path:          transfer.Path,
+			CachedPath:    transfer.CachedPath,
 		}
 		if transfer.CanFallback {
 			task.FallbackKey = dashboardCanonicalTaskKey(transfer.Key, aliases)
@@ -475,6 +477,7 @@ func mergeDashboardTask(current, incoming DashboardTask) DashboardTask {
 		result.FallbackKey = incoming.FallbackKey
 	}
 	result.CanFallback = current.CanFallback || incoming.CanFallback
+	result.CanCloudRetry = current.CanCloudRetry || incoming.CanCloudRetry
 	if strings.Contains(current.Source, "115") || strings.Contains(incoming.Source, "115") {
 		if strings.Contains(incoming.Source, "115") {
 			result.Source = incoming.Source
@@ -533,7 +536,7 @@ func (u *Unpackerr) dashboardTransfers() []CD2Transfer {
 					state = "云解压失败，等待批准本地下载"
 				}
 			}
-			items = append(items, CD2Transfer{Key: item.TaskKey, Path: item.FileName, Source: source, State: state, StartedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, CanFallback: item.Approval})
+			items = append(items, CD2Transfer{Key: item.TaskKey, Path: item.FileName, Source: source, State: state, StartedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, CanFallback: item.Approval, CanCloudRetry: item.Approval && item.Kind == "cloud_failure" && item.SourceCID != ""})
 			seen[item.TaskKey] = struct{}{}
 		}
 		for _, item := range u.state.Pending {
@@ -879,7 +882,15 @@ func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ ht
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
 		return
 	}
-	u.submitHistoryAction(w, r, historyAction{Key: input.Key, Action: "approve", result: make(chan error, 1)})
+	action := strings.ToLower(strings.TrimSpace(input.Action))
+	if action == "" {
+		action = "approve"
+	}
+	if action != "approve" && action != "retry_cloud" {
+		http.Error(w, "不支持的云端任务操作", http.StatusBadRequest)
+		return
+	}
+	u.submitHistoryAction(w, r, historyAction{Key: input.Key, Action: action, result: make(chan error, 1)})
 }
 
 func (u *Unpackerr) approve115Task(key string) error {
@@ -1207,6 +1218,9 @@ func (u *Unpackerr) maintenanceAPI(w http.ResponseWriter, r *http.Request, _ htt
 func (u *Unpackerr) handleHistoryAction(action historyAction) error {
 	if action.Action == "approve" {
 		return u.approve115Task(action.Key)
+	}
+	if action.Action == "retry_cloud" {
+		return u.retryPending115Cloud(action.Key)
 	}
 	if action.Action == "cancel" || action.Action == "ignore" || action.Action == "unignore" {
 		return u.handleTaskMutation(action.Key, action.Action)
