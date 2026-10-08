@@ -325,3 +325,23 @@ func TestIgnoreSurvivesRestartAndUnignoreDoesNotQueue(t *testing.T) {
 		t.Fatal("unignore must only release rule")
 	}
 }
+
+func TestResetProcessingHistoryAllowsArchiveAgain(t *testing.T) {
+	u := lifecycleTestApp(t)
+	item := ProcessedSource{Key: "archive.zip|10", Path: "archive.zip", Size: 10, Source: "local"}
+	u.markProcessed(item)
+	u.markFailed(ProcessedSource{Key: "failed.zip|20", Path: "failed.zip", Size: 20, Source: "local", Error: "failed"})
+	if err := u.setIgnoredPath("ignored.zip", true); err != nil {
+		t.Fatal(err)
+	}
+	u.cancelled.Store(item.Key, struct{}{})
+	u.taskSystemPaused.Store(true)
+
+	cleared, err := u.resetAllProcessingHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared != 3 || u.wasProcessed(item) || u.hasFailedVersion(ProcessedSource{Key: "failed.zip|20", Path: "failed.zip", Size: 20}) || u.isIgnoredPath("ignored.zip") || u.taskCancelled(item.Key) {
+		t.Fatalf("processing history was not reset: cleared=%d", cleared)
+	}
+}

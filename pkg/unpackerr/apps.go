@@ -119,6 +119,7 @@ type CloudDriveConfig struct {
 	N115AutoFallback     bool              `json:"115_auto_fallback" toml:"115_auto_fallback" xml:"115_auto_fallback" yaml:"115_auto_fallback"`
 	N115RetryCount       uint              `json:"115_retry_count" toml:"115_retry_count" xml:"115_retry_count" yaml:"115_retry_count"`
 	N115RetryDelay       cnfg.Duration     `json:"115_retry_delay" toml:"115_retry_delay" xml:"115_retry_delay" yaml:"115_retry_delay"`
+	N115TaskInterval     cnfg.Duration     `json:"115_task_interval" toml:"115_task_interval" xml:"115_task_interval" yaml:"115_task_interval"`
 }
 
 type FoldersConfig struct {

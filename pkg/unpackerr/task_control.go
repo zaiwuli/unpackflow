@@ -46,6 +46,12 @@ func (u *Unpackerr) handleTaskControlAction(action taskControlAction) taskContro
 			u.Items[index] = ""
 		}
 		return taskControlResult{}
+	case "reset_history":
+		if !u.taskSystemPaused.Load() {
+			return taskControlResult{Error: fmt.Errorf("请先在任务页停止并清空等待任务，避免重复提交正在运行的压缩包")}
+		}
+		cleared, err := u.resetAllProcessingHistory()
+		return taskControlResult{Cleared: cleared, Error: err}
 	default:
 		return taskControlResult{Error: fmt.Errorf("不支持的任务控制操作")}
 	}
@@ -167,4 +173,21 @@ func (u *Unpackerr) clearAllHistory() error {
 	}
 	u.state.mu.Unlock()
 	return u.saveProcessingState()
+}
+
+func (u *Unpackerr) resetAllProcessingHistory() (int, error) {
+	if u.state == nil {
+		return 0, nil
+	}
+	u.state.mu.Lock()
+	cleared := len(u.state.Processed) + len(u.state.Failed) + len(u.state.Ignored)
+	u.state.Processed = make(map[string]ProcessedSource)
+	u.state.Failed = make(map[string]ProcessedSource)
+	u.state.Ignored = make(map[string]ProcessedSource)
+	u.state.mu.Unlock()
+	u.cancelled.Range(func(key, _ any) bool { u.cancelled.Delete(key); return true })
+	if err := u.saveProcessingState(); err != nil {
+		return 0, err
+	}
+	return cleared, nil
 }

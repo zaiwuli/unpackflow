@@ -160,6 +160,7 @@ type UIOverrides struct {
 	N115AutoFallback    *bool              `json:"115_auto_fallback,omitempty"`
 	N115RetryCount      uint               `json:"115_retry_count,omitempty"`
 	N115RetryDelay      string             `json:"115_retry_delay,omitempty"`
+	N115TaskInterval    string             `json:"115_task_interval,omitempty"`
 	N115ExtractByDate   *bool              `json:"115_extract_by_date,omitempty"`
 	N115Sources         []N115SourceRule   `json:"115_sources"`
 	N115Failure         *N115FailureRule   `json:"115_failure"`
@@ -361,6 +362,11 @@ func (u *Unpackerr) loadUIStore() error {
 			u.CloudDrive2.N115RetryDelay.Duration = d
 		}
 	}
+	if store.Overrides.N115TaskInterval != "" {
+		if d, e := time.ParseDuration(store.Overrides.N115TaskInterval); e == nil && d >= 0 {
+			u.CloudDrive2.N115TaskInterval.Duration = d
+		}
+	}
 	if store.Overrides.N115ExtractByDate != nil {
 		u.CloudDrive2.N115ExtractByDate = *store.Overrides.N115ExtractByDate
 	}
@@ -547,6 +553,7 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115ScanFailure:     func() *bool { v := u.CloudDrive2.N115ScanFailure; return &v }(),
 		N115RetryCount:      u.CloudDrive2.N115RetryCount,
 		N115RetryDelay:      u.CloudDrive2.N115RetryDelay.Duration.String(),
+		N115TaskInterval:    u.CloudDrive2.N115TaskInterval.Duration.String(),
 		N115ExtractByDate:   func() *bool { v := u.CloudDrive2.N115ExtractByDate; return &v }(),
 	}
 	if folder := u.localFolder(); folder != nil {
@@ -669,6 +676,9 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	}
 	if overrides.N115RetryDelay != "" {
 		settings.N115RetryDelay = overrides.N115RetryDelay
+	}
+	if overrides.N115TaskInterval != "" {
+		settings.N115TaskInterval = overrides.N115TaskInterval
 	}
 	if overrides.N115ExtractByDate != nil {
 		settings.N115ExtractByDate = overrides.N115ExtractByDate
@@ -957,6 +967,11 @@ func (u *Unpackerr) applyCloudDriveUIOverrides(s UIOverrides) {
 	if s.N115RetryDelay != "" {
 		if d, err := time.ParseDuration(s.N115RetryDelay); err == nil {
 			u.CloudDrive2.N115RetryDelay.Duration = d
+		}
+	}
+	if s.N115TaskInterval != "" {
+		if d, err := time.ParseDuration(s.N115TaskInterval); err == nil && d >= 0 {
+			u.CloudDrive2.N115TaskInterval.Duration = d
 		}
 	}
 	if s.N115ExtractByDate != nil {

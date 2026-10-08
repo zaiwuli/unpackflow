@@ -997,6 +997,13 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 			return
 		}
 	}
+	if overrides.N115TaskInterval != "" {
+		duration, err := time.ParseDuration(overrides.N115TaskInterval)
+		if err != nil || duration < 0 {
+			http.Error(w, "115 云解压任务间隔格式无效，例如：0s、30s、1m", http.StatusBadRequest)
+			return
+		}
+	}
 	if err := validate115CloudSettings(overrides); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -1210,7 +1217,7 @@ func (u *Unpackerr) maintenanceAPI(w http.ResponseWriter, r *http.Request, _ htt
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
 		return
 	}
-	if input.Action != "clear_cache" && input.Action != "clear_history" {
+	if input.Action != "clear_cache" && input.Action != "clear_history" && input.Action != "reset_history" {
 		http.Error(w, "不支持的维护操作", http.StatusBadRequest)
 		return
 	}
@@ -1231,8 +1238,13 @@ func (u *Unpackerr) maintenanceAPI(w http.ResponseWriter, r *http.Request, _ htt
 		u.writeJSON(w, map[string]any{"success": true, "cleared": result.Cleared, "message": fmt.Sprintf("已清除 %d 个缓存项目", result.Cleared)})
 		return
 	}
+	if input.Action == "reset_history" {
+		u.Printf("已重置处理记录：%d 条，压缩包可重新识别", result.Cleared)
+		u.writeJSON(w, map[string]any{"success": true, "cleared": result.Cleared, "message": fmt.Sprintf("已重置 %d 条处理记录，可执行全链路刷新重新识别压缩包", result.Cleared)})
+		return
+	}
 	u.Printf("已清除历史展示，保留防重复和忽略规则")
-	u.writeJSON(w, map[string]any{"success": true, "message": "已清除全部历史记录"})
+	u.writeJSON(w, map[string]any{"success": true, "message": "已清空历史展示，防重复和忽略规则仍保留"})
 }
 
 func (u *Unpackerr) handleHistoryAction(action historyAction) error {

@@ -178,6 +178,7 @@ func New() *Unpackerr {
 				N115SuccessAction:    "keep",
 				N115RetryCount:       3,
 				N115RetryDelay:       cnfg.Duration{Duration: 2 * time.Minute},
+				N115TaskInterval:     cnfg.Duration{Duration: 30 * time.Second},
 			},
 		},
 		Logger: &Logger{

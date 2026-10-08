@@ -236,6 +236,7 @@ function ensureLocalSettings() {
     '<label class="check-row"><input id="115-auto-fallback" type="checkbox"> 最终失败后自动下载到本地解压</label><small style="color:var(--muted);font-size:12px">关闭后只移动到失败目录，并在任务页等待批准。</small>' +
     '<label class="check-row"><input id="115-scan-failure" type="checkbox"> 主动扫描失败目录</label><small style="color:var(--muted);font-size:12px">关闭后只处理刚刚云解压失败的文件。</small>' +
 		'<div class="field"><span>失败重试</span><div class="settings-pair"><input id="115-retry-count" type="number" min="1" max="10" placeholder="3"><input id="115-retry-delay" type="text" placeholder="2m"></div><small style="color:var(--muted);font-size:12px">尝试次数与两次尝试之间的等待时间。</small></div>' +
+		'<label class="field"><span>两个云解压任务之间的间隔</span><input id="115-task-interval" type="text" placeholder="30s"><small style="color:var(--muted);font-size:12px">默认 30s；填写 0s 表示上一个任务完成后立即放行下一个。</small></label>' +
 		'<h3>日常本地下载</h3><div class="field"><div id="115-downloads" class="mapping-list"></div><div class="form-actions"><button id="115-download-add" type="button">添加下载文件夹</button></div><small style="color:var(--muted);font-size:12px">手动将压缩包移入这些 115 文件夹后，工具刷新对应 CD2 路径；每行可选择自动下载或等待批准。</small></div>' +
 		'<h3>CD2 挂载路径映射</h3><div class="field"><div id="path-mappings" class="mapping-list"></div><div class="form-actions"><button id="path-mapping-add" type="button">添加路径映射</button></div></div>';
   workers.insertAdjacentElement('afterend', block);
@@ -267,7 +268,7 @@ function buildSettingsSections(localBlock, workers) {
   const local = document.createElement('section'); local.id = 'settings-local'; local.className = 'settings-section';
   const cloud = document.createElement('section'); cloud.id = 'settings-cloud'; cloud.className = 'settings-section';
   const maintenance = document.createElement('section'); maintenance.id = 'settings-maintenance'; maintenance.className = 'settings-section';
-  maintenance.innerHTML = '<div class="panel-heading"><div><h3>数据维护</h3><p>危险操作需要二次确认。清理缓存前必须先在任务页停止任务系统。</p></div></div><div class="form-actions"><button id="clear-all-cache" type="button">清除所有缓存</button><button id="clear-all-history" type="button">清除所有历史记录</button></div><p id="maintenance-message" class="form-message"></p>';
+  maintenance.innerHTML = '<div class="panel-heading"><div><h3>数据维护</h3><p>“清空历史展示”保留防重复保护；要让相同压缩包重新解压，请先停止任务系统，再使用“重置处理记录”。</p></div></div><div class="form-actions"><button id="clear-all-cache" type="button">清除所有缓存</button><button id="clear-all-history" type="button">清空历史展示</button><button id="reset-all-history" type="button">重置处理记录</button></div><p id="maintenance-message" class="form-message"></p>';
   heading.insertAdjacentElement('afterend', nav); nav.insertAdjacentElement('afterend', basic); basic.insertAdjacentElement('afterend', local); local.insertAdjacentElement('afterend', cloud); cloud.insertAdjacentElement('afterend', maintenance);
   basic.appendChild(workers);
   const all = Array.from(view.children);
@@ -298,11 +299,13 @@ function buildSettingsSections(localBlock, workers) {
   }));
   $('clear-all-cache').addEventListener('click', () => runMaintenance('clear_cache'));
   $('clear-all-history').addEventListener('click', () => runMaintenance('clear_history'));
+  $('reset-all-history').addEventListener('click', () => runMaintenance('reset_history'));
 }
 
 async function runMaintenance(action) {
   const cache = action === 'clear_cache';
-  const message = cache ? '将删除全部本地缓存，但不会删除解压输出或云端原包。任务系统必须已暂停。确定继续吗？' : '将清除历史展示，保留防重复和忽略规则，不删除实际文件。确定继续吗？';
+  const reset = action === 'reset_history';
+  const message = cache ? '将删除全部本地缓存，但不会删除解压输出或云端原包。任务系统必须已暂停。确定继续吗？' : reset ? '将永久删除成功、失败、忽略和取消的防重复记录，使相同压缩包可以重新提交。请确认任务系统已停止并清空等待任务。确定继续吗？' : '将清空历史展示，但保留防重复和忽略规则，不删除实际文件。确定继续吗？';
   if (!window.confirm(message)) return;
   $('maintenance-message').textContent = '正在处理…';
   try {
@@ -510,6 +513,7 @@ function fillForms(data) {
   $('115-extract-by-date').checked = !!(data.settings && data.settings['115_extract_by_date']);
 	$('115-retry-count').value = (data.settings && data.settings['115_retry_count']) || 3;
 	$('115-retry-delay').value = (data.settings && data.settings['115_retry_delay']) || '2m';
+	$('115-task-interval').value = (data.settings && data.settings['115_task_interval']) || '30s';
 	fillSourceRows((data.settings && data.settings['115_sources']) || (data.settings && data.settings['115_source_cids']) || [], cidRemarks);
 	fillDownloadRows((data.settings && data.settings['115_download_rules']) || (data.settings && data.settings['115_download_mappings']) || [], cidRemarks);
 	fillPathMappingRows((data.settings && data.settings.path_overrides) || []);
@@ -856,6 +860,7 @@ $('settings-save').addEventListener('click', async () => {
       '115_extract_by_date': $('115-extract-by-date').checked,
 		'115_retry_count': Number($('115-retry-count').value) || 3,
 		'115_retry_delay': $('115-retry-delay').value.trim(),
+		'115_task_interval': $('115-task-interval').value.trim(),
 		'115_sources': collectSourceRules(),
 		'115_download_rules': collectDownloadRules(),
 		'115_mappings': [],
