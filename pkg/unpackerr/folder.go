@@ -190,9 +190,14 @@ func (u *Unpackerr) PollFolders() {
 // External-only folders are CD2 cache folders and must only be submitted after
 // their copy operation has completed.
 func (u *Unpackerr) scanExistingFolderArchives() {
+	u.scanExistingFolderArchivesCount()
+}
+
+func (u *Unpackerr) scanExistingFolderArchivesCount() int {
 	if u.taskSystemPaused.Load() {
-		return
+		return 0
 	}
+	found := 0
 	for _, folder := range u.Folders {
 		if folder.ExternalOnly {
 			continue
@@ -220,12 +225,14 @@ func (u *Unpackerr) scanExistingFolderArchives() {
 				return nil
 			}
 			u.folders.InjectFileEvent(path, "startup scan")
+			found++
 			return nil
 		})
 		if err != nil {
 			u.Errorf("启动扫描失败：%s：%v", folder.Path, err)
 		}
 	}
+	return found
 }
 
 // checkFolders stats all configured folders and returns only "good" ones.

@@ -286,6 +286,17 @@ type n115ScanResult struct {
 }
 
 func (u *Unpackerr) poll115RecentOperations() (result n115ScanResult) {
+	return u.poll115ConfiguredFolders(true)
+}
+
+// poll115SourceFolders is the task-page manual action. It deliberately scans
+// only cloud-extraction sources; daily-download folders remain a separate
+// workflow and must not make a source refresh ambiguous.
+func (u *Unpackerr) poll115SourceFolders() n115ScanResult {
+	return u.poll115ConfiguredFolders(false)
+}
+
+func (u *Unpackerr) poll115ConfiguredFolders(includeDownloads bool) (result n115ScanResult) {
 	if u.taskSystemPaused.Load() {
 		result.Error = "任务系统已暂停"
 		return result
@@ -363,6 +374,10 @@ func (u *Unpackerr) poll115RecentOperations() (result n115ScanResult) {
 				u.run115CloudExtract(mapping, file, version)
 			}(mapping, file, version)
 		}
+	}
+	if !includeDownloads {
+		u.Systemf("115 云解压来源扫描结束：目录 %d，读取 %d 项，提交 %d，已处理 %d，处理中 %d，已忽略 %d，非压缩包 %d，待续扫 %d，失败 %d", result.Folders, result.Files, result.Queued, result.SkippedProcessed, result.SkippedPending, result.SkippedIgnored, result.SkippedInvalid, result.Partial, result.Errors)
+		return result
 	}
 	for _, mapping := range parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings) {
 		result.Folders++

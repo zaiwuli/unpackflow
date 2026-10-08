@@ -255,6 +255,15 @@ func cloudDriveManualWatchPaths(cfg CloudDriveConfig) []string {
 
 func cloudDriveConfiguredRefreshPaths(cfg CloudDriveConfig) []string {
 	values := append([]string(nil), cloudDriveManualWatchPaths(cfg)...)
+	// A path override maps a cloud mount root to a local path. Refreshing its
+	// cloud side makes source folders below that mapped root visible to CD2,
+	// even when an individual 115 source rule is configured by CID only.
+	for _, override := range cfg.PathOverrides {
+		parts := strings.SplitN(override, "=>", 2)
+		if len(parts) == 2 {
+			values = append(values, strings.TrimSpace(parts[0]))
+		}
+	}
 	for _, mapping := range parse115DownloadMappings(cfg.N115DownloadMappings) {
 		values = append(values, mapping.CD2Path)
 	}

@@ -262,6 +262,17 @@ func TestCloudDriveWatchPathsExcludeApprovalFolders(t *testing.T) {
 	}
 }
 
+func TestCloudDriveRefreshPathsIncludeMappedCloudRoots(t *testing.T) {
+	cfg := CloudDriveConfig{PathOverrides: []string{
+		"/115open => /volume1/CloudDrive/115open",
+		"/另一个挂载=>/volume1/CloudDrive/other",
+	}}
+	paths := cloudDriveConfiguredRefreshPaths(cfg)
+	if !cloudDrivePathMatches("/115open/来源A/archive.7z", paths) || !cloudDrivePathMatches("/另一个挂载/来源B/archive.7z", paths) {
+		t.Fatalf("mapped cloud roots were not refreshed: %#v", paths)
+	}
+}
+
 func TestValidate115CloudSettingsRejectsOverlappingRoles(t *testing.T) {
 	enabled := true
 	settings := UIOverrides{

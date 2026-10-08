@@ -194,7 +194,7 @@ async function selectNotificationProvider(provider) {
 
 function ensureLocalSettings() {
   if ($('local-source-action')) return;
-	$('cd2-refresh').textContent = '刷新 CD2';
+	$('cd2-refresh').textContent = '全链路刷新';
 	const taskRefresh = $('refresh');
 	if (taskRefresh) taskRefresh.remove();
   const workers = $('workers').closest('.field');
@@ -220,11 +220,12 @@ function ensureLocalSettings() {
     '<label class="check-row"><input id="cd2-fallback-enabled" type="checkbox"> 启用 CD2 定时扫描</label>' +
     '<label class="field"><span>CD2 定时扫描间隔</span><input id="cd2-fallback-interval" type="text" placeholder="30m"></label>' +
 		'<h3>115 云端工作流</h3>' +
-		'<label class="check-row"><input id="115-enabled" type="checkbox"> 启用 115 云端处理</label>' +
+		'<label class="check-row"><input id="115-enabled" type="checkbox"> 启用 115 云解压</label>' +
     '<label class="field"><span>115 Cookie</span><input id="115-cookie" type="text" autocomplete="off"></label>' +
     '<label class="field"><span>Cookie \u6765\u6e90\u5907\u6ce8</span><input id="115-cookie-remark" type="text" placeholder="\u4f8b\u5982\uff1a115 \u7f51\u9875\u5f00\u53d1\u8005\u5de5\u5177"></label>' +
-    '<label class="check-row"><input id="115-event-enabled" type="checkbox"> \u542f\u7528 115 \u4e91\u76ee\u5f55\u81ea\u52a8\u626b\u63cf</label>' +
-    '<label class="field"><span>\u76ee\u5f55\u626b\u63cf\u95f4\u9694\uff08\u6700\u5c11 30m\uff09</span><input id="115-event-interval" type="text" placeholder="30m"></label>' +
+    '<label class="check-row"><input id="115-event-enabled" type="checkbox"> 启用 115 云目录定时兜底扫描</label>' +
+    '<small style="color:var(--muted);font-size:12px">直接读取下方配置的云解压来源和日常下载文件夹，不使用 115 生活事件接口；服务启动时也会扫描一次。</small>' +
+    '<label class="field"><span>定时兜底扫描间隔（最少 30m）</span><input id="115-event-interval" type="text" placeholder="30m"><small style="color:var(--muted);font-size:12px">该间隔只控制后台兜底扫描，不影响任务页的“全链路刷新”。</small></label>' +
     '<div class="form-actions"><button id="115-sync" type="button">\u626b\u63cf 115 \u4e91\u76ee\u5f55</button></div><p id="115-sync-message" class="form-message"></p>' +
 		'<h3>云解压来源</h3><div class="field"><div id="115-sources" class="mapping-list"></div><div class="form-actions"><button id="115-source-add" type="button">添加来源文件夹</button></div></div>' +
     '<label class="check-row"><input id="115-extract-by-date" type="checkbox"> 按日期创建云解压目录</label><small style="color:var(--muted);font-size:12px">开启后先在目标目录创建 YYYY-MM-DD 日期文件夹，再按压缩包名称分别解压。</small>' +
@@ -730,13 +731,19 @@ document.querySelectorAll('.log-switch-button').forEach(button => button.addEven
 
 $('cd2-refresh').addEventListener('click', async () => {
   $('cd2-refresh').disabled = true;
-  $('refresh-message').textContent = '正在刷新…';
+  $('refresh-message').textContent = '正在扫描 115 来源、刷新 CD2 挂载并补扫本地目录…';
   try {
-    const response = await fetch('api/clouddrive2/refresh', {method: 'POST'});
-    const data = await response.json().catch(() => ({}));
-    $('refresh-message').textContent = response.ok ? (data.message || ('同步完成，发现 ' + (data.found || 0) + ' 个压缩文件')) : (data.error || '同步失败');
+    const response = await fetch('api/115/sync', {method: 'POST'});
+    const text = await response.text();
+    let data = {}; try { data = JSON.parse(text); } catch (_) {}
+    const scan = data.scan || {};
+    $('refresh-message').textContent = response.ok
+      ? ('刷新完成：115 来源 ' + (scan.folders || 0) + ' 个，读取 ' + (scan.files || 0) + '，提交 ' + (scan.queued || 0) +
+        '；CD2 目录 ' + (data.cd2_paths || 0) + ' 个，发现 ' + (data.cd2_found || 0) + '，失败 ' + (data.cd2_errors || 0) +
+        '；本地监控发现 ' + (data.local_found || 0) + ' 个')
+      : (text || '全链路刷新失败');
     load(false);
-  } catch (_) { $('refresh-message').textContent = '刷新失败'; }
+  } catch (_) { $('refresh-message').textContent = '全链路刷新失败'; }
   $('cd2-refresh').disabled = false;
 });
 function ensureTaskControls() {

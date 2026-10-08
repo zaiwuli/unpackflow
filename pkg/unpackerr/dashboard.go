@@ -848,16 +848,16 @@ func (u *Unpackerr) cd2RefreshAPI(w http.ResponseWriter, r *http.Request, _ http
 	}
 }
 
-func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	if !u.CloudDrive2.N115Enabled || strings.TrimSpace(u.CloudDrive2.N115Cookie) == "" {
 		http.Error(w, "请先启用 115 云解压并填写 Cookie", http.StatusBadRequest)
 		return
 	}
-	if len(n115SourceCIDs(u.CloudDrive2)) == 0 && len(parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings)) == 0 {
-		http.Error(w, "请至少配置一个云解压来源或本地下载文件夹", http.StatusBadRequest)
+	if len(n115SourceCIDs(u.CloudDrive2)) == 0 {
+		http.Error(w, "请至少配置一个云解压来源文件夹", http.StatusBadRequest)
 		return
 	}
-	result := u.poll115RecentOperations()
+	result := u.poll115SourceFolders()
 	if result.Busy {
 		http.Error(w, "115 云目录正在扫描，请稍后再试", http.StatusConflict)
 		return
@@ -866,8 +866,28 @@ func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, _ *http.Request, _ httpro
 		http.Error(w, result.Error, http.StatusConflict)
 		return
 	}
-	u.Printf("115 手动云目录扫描完成")
-	u.writeJSON(w, result)
+	cd2Paths, cd2Errors, cd2Found := 0, 0, 0
+	u.cd2Mu.RLock()
+	client := u.cd2Client
+	u.cd2Mu.RUnlock()
+	if u.CloudDrive2.Enabled && client != nil {
+		paths := cloudDriveConfiguredRefreshPaths(u.CloudDrive2)
+		cd2Paths = len(paths)
+		for _, refreshPath := range paths {
+			if err := client.ForceRefresh(r.Context(), refreshPath); err != nil {
+				cd2Errors++
+				u.Errorf("联合刷新 CD2 目录失败：%s：%v", refreshPath, err)
+			}
+		}
+		cd2Found = u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), u.CloudDrive2.PathOverrides)
+	}
+	localFound := u.scanExistingFolderArchivesCount()
+	u.Printf("手动全链路刷新完成：115 来源 %d 个，CD2 目录 %d 个，本地发现 %d 个", result.Folders, cd2Paths, localFound)
+	u.writeJSON(w, map[string]any{
+		"success": true, "scan": result,
+		"cd2_paths": cd2Paths, "cd2_errors": cd2Errors, "cd2_found": cd2Found,
+		"local_found": localFound,
+	})
 }
 
 func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
