@@ -925,7 +925,10 @@ func (u *Unpackerr) approve115Task(key string) error {
 		return fmt.Errorf("任务目录已从当前配置移除，请重新同步")
 	}
 	pending.CD2Path = currentPath
-	u.update115Transfer(pending.TaskKey, pending.FileName, "正在批准本地下载", func(task *CD2Transfer) { task.CanFallback = false })
+	u.update115Transfer(pending.TaskKey, pending.FileName, "正在批准本地下载", func(task *CD2Transfer) {
+		task.CanFallback = false
+		task.CanCloudRetry = false
+	})
 	u.approvePending115Task(pending.TaskKey)
 	go u.refresh115Fallback(N115Mapping{FallbackCID: pending.FallbackCID, CD2Path: pending.CD2Path}, n115File{FID: pending.FID, Name: pending.FileName})
 	return nil

@@ -772,6 +772,7 @@ func (u *Unpackerr) process115SuccessFile(sourceCID, fid, fileName string) error
 }
 
 func (u *Unpackerr) handle115FallbackLocalSuccess(pending PendingCD2) {
+	defer u.cd2Tasks.Delete(pending.N115TaskKey)
 	version := ProcessedSource{Key: pending.N115TaskKey, Source: "115 本地下载", Path: pending.N115FileName, Size: pending.N115Size, ModifiedNS: pending.N115MTime,
 		SourceCID: pending.N115FailureCID, CloudFile: &n115File{FID: pending.N115FID, Name: pending.N115FileName, Size: pending.N115Size}}
 	if pending.N115TaskKey != "" {

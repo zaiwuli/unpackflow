@@ -525,6 +525,7 @@ func (u *Unpackerr) folderXtractrCallback(resp *xtractr.Response) {
 			}
 			u.removePendingCD2(filepath.Clean(resp.X.Name))
 			u.cd2Resume.Delete(filepath.Clean(resp.X.Name))
+			u.clearCD2TransferForCachedPath(resp.X.Name)
 			go u.deleteCachedSource(resp.X.Name, cd2Sources)
 			if hasPending && pending.N115FID != "" && pending.N115SourceCID != "" {
 				go u.handle115FallbackLocalSuccess(pending)

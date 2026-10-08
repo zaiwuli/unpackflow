@@ -264,6 +264,7 @@ func TestFallbackLocalSuccessUsesCloudSuccessAction(t *testing.T) {
 	}
 	u.CloudDrive2.N115SuccessAction = "archive"
 	u.savePending115Fallback(Pending115{Key: "fallback-key", TaskKey: "task-key", SourceCID: "source-cid", FallbackCID: "failure-cid", FID: "file-id", FileName: "test.7z"})
+	u.update115Transfer("task-key", "test.7z", "正在批准本地下载", func(task *CD2Transfer) { task.CanFallback = true })
 
 	u.handle115FallbackLocalSuccess(PendingCD2{N115TaskKey: "task-key", N115SourceCID: "source-cid", N115FailureCID: "failure-cid", N115FID: "file-id", N115FileName: "test.7z"})
 
@@ -276,6 +277,37 @@ func TestFallbackLocalSuccessUsesCloudSuccessAction(t *testing.T) {
 	}
 	if pending {
 		t.Fatal("completed local fallback must remove its pending download record")
+	}
+	if _, visible := u.cd2Tasks.Load("task-key"); visible {
+		t.Fatal("completed local fallback left a stale current task")
+	}
+}
+
+func TestFallbackLocalSuccessMovesTaskToSuccessHistory(t *testing.T) {
+	u := New()
+	u.ConfigFile = filepath.Join(t.TempDir(), "unpackerr.conf")
+	if err := u.loadProcessingState(); err != nil {
+		t.Fatal(err)
+	}
+	u.CloudDrive2.N115SuccessAction = "keep"
+	u.savePending115Fallback(Pending115{Key: "fallback-key", TaskKey: "task-key", SourceCID: "failure-cid", FallbackCID: "failure-cid", FID: "file-id", FileName: "test.7z"})
+	u.update115Transfer("task-key", "test.7z", "正在批准本地下载", func(task *CD2Transfer) {
+		task.CanFallback = true
+		task.CanCloudRetry = true
+	})
+
+	u.handle115FallbackLocalSuccess(PendingCD2{N115TaskKey: "task-key", N115SourceCID: "failure-cid", N115FailureCID: "failure-cid", N115FID: "file-id", N115FileName: "test.7z"})
+
+	if _, visible := u.cd2Tasks.Load("task-key"); visible {
+		t.Fatal("successful fallback remained in current tasks")
+	}
+	u.state.mu.RLock()
+	processed := u.state.Processed["task-key"]
+	_, failed := u.state.Failed["task-key"]
+	_, pending := u.state.Fallback115["fallback-key"]
+	u.state.mu.RUnlock()
+	if processed.Key == "" || failed || pending {
+		t.Fatalf("fallback was not finalized as success: processed=%#v failed=%v pending=%v", processed, failed, pending)
 	}
 }
 
