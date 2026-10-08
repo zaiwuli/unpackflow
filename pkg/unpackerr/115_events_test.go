@@ -178,6 +178,47 @@ func TestN115ServiceFailureDoesNotArchiveFiles(t *testing.T) {
 	}
 }
 
+func TestScan115PagesContinuesPastFirstPage(t *testing.T) {
+	var offsets []int
+	files, next, complete, err := scan115Pages(context.Background(), 0, 3, func(_ context.Context, offset int) ([]n115File, error) {
+		offsets = append(offsets, offset)
+		count := n115ScanPageSize
+		if offset == n115ScanPageSize {
+			count = 2
+		}
+		page := make([]n115File, count)
+		for index := range page {
+			page[index].FID = string(rune(offset + index + 1))
+		}
+		return page, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete || next != 0 || len(files) != n115ScanPageSize+2 {
+		t.Fatalf("scan result: complete=%v next=%d files=%d", complete, next, len(files))
+	}
+	if len(offsets) != 2 || offsets[0] != 0 || offsets[1] != n115ScanPageSize {
+		t.Fatalf("offsets = %#v", offsets)
+	}
+}
+
+func TestScan115PagesReturnsContinuationWhenBudgetIsReached(t *testing.T) {
+	files, next, complete, err := scan115Pages(context.Background(), n115ScanPageSize, 2, func(_ context.Context, offset int) ([]n115File, error) {
+		page := make([]n115File, n115ScanPageSize)
+		for index := range page {
+			page[index].FID = string(rune(offset + index + 1))
+		}
+		return page, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if complete || next != 3*n115ScanPageSize || len(files) != 2*n115ScanPageSize {
+		t.Fatalf("scan result: complete=%v next=%d files=%d", complete, next, len(files))
+	}
+}
+
 func TestCloudDriveManualWatchPathsKeepsLegacyPath(t *testing.T) {
 	paths := cloudDriveManualWatchPaths(CloudDriveConfig{
 		WatchPath:        "/115open/日常下载",

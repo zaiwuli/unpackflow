@@ -19,8 +19,10 @@ import (
 )
 
 const (
-	n115APIBase   = "https://webapi.115.com"
-	n115FilesBase = "https://aps.115.com"
+	n115APIBase        = "https://webapi.115.com"
+	n115FilesBase      = "https://aps.115.com"
+	n115ScanPageSize   = 115
+	n115ScanPageBudget = 5
 )
 
 // N115Mapping maps a monitored 115 folder to its local-extraction fallback.
@@ -243,65 +245,113 @@ func (u *Unpackerr) start115Events() {
 		return
 	}
 	if len(n115SourceCIDs(cfg)) == 0 && len(parse115DownloadMappings(cfg.N115DownloadMappings)) == 0 {
-		u.Errorf("115 生活事件已启用，但尚未配置云解压来源或本地下载文件夹")
+		u.Errorf("115 云目录自动扫描已启用，但尚未配置云解压来源或本地下载文件夹")
 		return
 	}
 	interval := cfg.N115EventInterval.Duration
-	if interval <= 0 {
-		interval = 5 * time.Minute
+	if interval < 30*time.Minute {
+		interval = 30 * time.Minute
 	}
 	go func() {
 		u.poll115RecentOperations()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
+			u.n115ScanStateMu.RLock()
+			recent := time.Since(u.n115LastScan) < interval
+			u.n115ScanStateMu.RUnlock()
+			if recent {
+				continue
+			}
 			u.poll115RecentOperations()
 		}
 	}()
-	u.Printf("115 云解压监控已启用，间隔 %s", interval)
+	u.Printf("115 云目录兜底扫描已启用，间隔 %s", interval)
 }
 
-// Recent operations provides a cheap change signal. File metadata is always
-// read from the configured source folders, so unrelated 115 activity is never
-// submitted as a task.
-func (u *Unpackerr) poll115RecentOperations() {
+type n115ScanResult struct {
+	Folders          int    `json:"folders"`
+	Files            int    `json:"files"`
+	Queued           int    `json:"queued"`
+	SkippedProcessed int    `json:"skipped_processed"`
+	SkippedPending   int    `json:"skipped_pending"`
+	SkippedIgnored   int    `json:"skipped_ignored"`
+	SkippedInvalid   int    `json:"skipped_invalid"`
+	Partial          int    `json:"partial"`
+	Errors           int    `json:"errors"`
+	Busy             bool   `json:"busy,omitempty"`
+	Error             string `json:"error,omitempty"`
+	ScannedAt         string `json:"scanned_at,omitempty"`
+	Duration          int64  `json:"duration_ms,omitempty"`
+}
+
+func (u *Unpackerr) poll115RecentOperations() (result n115ScanResult) {
 	if u.taskSystemPaused.Load() {
-		return
+		result.Error = "任务系统已暂停"
+		return result
 	}
-	u.n115SyncMu.Lock()
+	if !u.n115SyncMu.TryLock() {
+		u.Systemf("115 云目录扫描已在进行，跳过重复请求")
+		result.Busy = true
+		return result
+	}
 	defer u.n115SyncMu.Unlock()
 	if err := u.validate115Cookie(); err != nil {
-		return
+		result.Error = err.Error()
+		return result
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	started := time.Now()
+	defer func() {
+		completed := time.Now()
+		result.ScannedAt = completed.Format(time.RFC3339)
+		result.Duration = completed.Sub(started).Milliseconds()
+		u.n115ScanStateMu.Lock()
+		u.n115LastScan = completed
+		u.n115LastResult = result
+		u.n115ScanStateMu.Unlock()
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	if _, err := u.n115Request(ctx, http.MethodGet, "https://life.115.com/api/1.0/web/1.0/life/recent_operations", nil); err != nil {
-		u.Debugf("115 最近操作同步失败，将继续检查指定目录：%v", err)
-	}
 	for _, sourceCID := range n115SourceCIDs(u.CloudDrive2) {
+		result.Folders++
 		mapping := n115FailureMapping(u.CloudDrive2, sourceCID)
 		mapping.RouteLabel = u.n115CIDRemark(mapping.FallbackCID, "云解压失败转本地")
-		files, err := u.n115ListFiles(ctx, sourceCID)
+		files, complete, err := u.n115ScanFiles(ctx, sourceCID)
 		if err != nil {
 			u.Errorf("115 读取目录 %s 失败：%v", sourceCID, err)
+			result.Errors++
 			continue
 		}
+		result.Files += len(files)
+		if !complete {
+			result.Partial++
+		}
+		u.Systemf("115 云解压来源扫描：CID %s，读取 %d 项，本轮%s", sourceCID, len(files), scanCompletionLabel(complete))
 		for _, file := range files {
 			if file.FID == "" || file.PickCode == "" || !isCloudDriveArchiveEvent(file.Name) {
+				result.SkippedInvalid++
 				continue
 			}
 			if u.isIgnoredPath(file.Name) {
+				result.SkippedIgnored++
 				continue
 			}
 			version := ProcessedSource{Key: n115FileKey(mapping.SourceCID, file), Source: "115", Path: file.Name, Size: file.Size, ModifiedNS: file.MTime}
-			if u.wasProcessed(version) || u.hasFailedVersion(version) || u.taskCancelled(version.Key) || u.hasPending115Task(version.Key) {
+			if u.wasProcessed(version) || u.hasFailedVersion(version) {
+				result.SkippedProcessed++
+				continue
+			}
+			if u.taskCancelled(version.Key) || u.hasPending115Task(version.Key) {
+				result.SkippedPending++
 				continue
 			}
 			if _, loaded := u.n115Running.LoadOrStore(version.Key, struct{}{}); loaded {
+				result.SkippedPending++
 				continue
 			}
 			version.SourceCID, version.CloudFile = mapping.SourceCID, &file
 			u.update115Transfer(version.Key, file.Name, "等待 115 云解压", func(task *CD2Transfer) { task.Version = version })
+			result.Queued++
 			go func(mapping N115Mapping, file n115File, version ProcessedSource) {
 				defer u.n115Running.Delete(version.Key)
 				u.n115Queue <- struct{}{}
@@ -315,30 +365,54 @@ func (u *Unpackerr) poll115RecentOperations() {
 		}
 	}
 	for _, mapping := range parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings) {
+		result.Folders++
 		mapping.Label = u.n115CIDRemark(mapping.CID, "115 日常下载")
-		files, err := u.n115ListFiles(ctx, mapping.CID)
+		files, complete, err := u.n115ScanFiles(ctx, mapping.CID)
 		if err != nil {
 			u.Errorf("115 读取本地下载目录 %s 失败：%v", mapping.CID, err)
+			result.Errors++
 			continue
 		}
+		result.Files += len(files)
+		if !complete {
+			result.Partial++
+		}
+		u.Systemf("115 本地下载目录扫描：CID %s，读取 %d 项，本轮%s", mapping.CID, len(files), scanCompletionLabel(complete))
 		for _, file := range files {
 			if file.FID == "" || !isCloudDriveArchiveEvent(file.Name) {
+				result.SkippedInvalid++
 				continue
 			}
 			if u.isIgnoredPath(file.Name) {
+				result.SkippedIgnored++
 				continue
 			}
 			version := ProcessedSource{Key: n115DownloadFileKey(mapping.CID, file), Source: "115 本地下载", Path: file.Name, Size: file.Size, ModifiedNS: file.MTime}
-			if u.wasProcessed(version) || u.hasPending115Task(version.Key) {
+			if u.wasProcessed(version) {
+				result.SkippedProcessed++
+				continue
+			}
+			if u.hasPending115Task(version.Key) {
+				result.SkippedPending++
 				continue
 			}
 			if _, loaded := u.n115Running.LoadOrStore(version.Key, struct{}{}); loaded {
+				result.SkippedPending++
 				continue
 			}
 			u.queue115LocalDownload(mapping, file, version)
+			result.Queued++
 			u.n115Running.Delete(version.Key)
 		}
 	}
+	u.Systemf("115 云目录扫描结束：目录 %d，读取 %d 项，提交 %d，已处理 %d，处理中 %d，已忽略 %d，非压缩包 %d，待续扫 %d，失败 %d", result.Folders, result.Files, result.Queued, result.SkippedProcessed, result.SkippedPending, result.SkippedIgnored, result.SkippedInvalid, result.Partial, result.Errors)
+	return result
+}
+
+func (u *Unpackerr) latest115ScanResult() n115ScanResult {
+	u.n115ScanStateMu.RLock()
+	defer u.n115ScanStateMu.RUnlock()
+	return u.n115LastResult
 }
 
 // scan115FailureFolder rebuilds tasks after stop-and-clear or a restart. The
@@ -531,10 +605,75 @@ func n115ResponseSummary(raw []byte) string {
 	return strconv.Quote(value)
 }
 
+func scanCompletionLabel(complete bool) string {
+	if complete {
+		return "已扫完"
+	}
+	return "达到请求预算，下轮续扫"
+}
+
+// n115ScanFiles is called under n115SyncMu. Each run uses a bounded number
+// of pages, so a large folder cannot monopolize the API or the scan cycle.
+func (u *Unpackerr) n115ScanFiles(ctx context.Context, cid string) ([]n115File, bool, error) {
+	if u.n115ScanOffsets == nil {
+		u.n115ScanOffsets = make(map[string]int)
+	}
+	start := u.n115ScanOffsets[cid]
+	files, next, complete, err := scan115Pages(ctx, start, n115ScanPageBudget, func(ctx context.Context, offset int) ([]n115File, error) {
+		return u.n115ListFilesAt(ctx, cid, offset)
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if complete {
+		delete(u.n115ScanOffsets, cid)
+	} else {
+		u.n115ScanOffsets[cid] = next
+	}
+	return files, complete, nil
+}
+
+func scan115Pages(ctx context.Context, start, budget int, fetch func(context.Context, int) ([]n115File, error)) ([]n115File, int, bool, error) {
+	if budget <= 0 {
+		return nil, start, false, fmt.Errorf("115 扫描页预算必须大于 0")
+	}
+	files := make([]n115File, 0)
+	seen := make(map[string]struct{})
+	for page := 0; page < budget; page++ {
+		offset := start + page*n115ScanPageSize
+		batch, err := fetch(ctx, offset)
+		if err != nil {
+			return nil, start, false, err
+		}
+		for _, file := range batch {
+			if _, exists := seen[file.FID]; file.FID != "" && exists {
+				continue
+			}
+			seen[file.FID] = struct{}{}
+			files = append(files, file)
+		}
+		if len(batch) < n115ScanPageSize {
+			return files, 0, true, nil
+		}
+		if page+1 < budget {
+			select {
+			case <-ctx.Done():
+				return nil, start, false, ctx.Err()
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+	}
+	return files, start + budget*n115ScanPageSize, false, nil
+}
+
 func (u *Unpackerr) n115ListFiles(ctx context.Context, cid string) ([]n115File, error) {
+	return u.n115ListFilesAt(ctx, cid, 0)
+}
+
+func (u *Unpackerr) n115ListFilesAt(ctx context.Context, cid string, offset int) ([]n115File, error) {
 	response, err := u.n115Request(ctx, http.MethodGet, n115FilesBase+"/natsort/files.php", url.Values{
-		"cid": {cid}, "aid": {"1"}, "o": {"user_ptime"}, "asc": {"0"}, "offset": {"0"},
-		"show_dir": {"1"}, "limit": {"115"}, "type": {"5"}, "natsort": {"1"}, "format": {"json"},
+		"cid": {cid}, "aid": {"1"}, "o": {"user_ptime"}, "asc": {"0"}, "offset": {strconv.Itoa(offset)},
+		"show_dir": {"1"}, "limit": {strconv.Itoa(n115ScanPageSize)}, "type": {"5"}, "natsort": {"1"}, "format": {"json"},
 	})
 	if err != nil {
 		return nil, err
@@ -608,7 +747,7 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	var err error
 	for attempt := uint(1); attempt <= retries; attempt++ {
 		if u.taskSystemPaused.Load() || u.isIgnoredPath(file.Name) || u.isIgnoredPath(version.Key) || u.taskCancelled(version.Key) {
-			u.update115Transfer(version.Key, file.Name, "已取消", func(task *CD2Transfer) { task.Error = "任务系统已暂停" })
+			u.finish115CancelledTask(version.Key, file.Name)
 			return
 		}
 		u.update115Transfer(version.Key, file.Name, "115 云端解压中", func(task *CD2Transfer) {
@@ -638,6 +777,7 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 			}()
 		}
 		if u.isIgnoredPath(file.Name) || u.isIgnoredPath(version.Key) || u.taskCancelled(version.Key) {
+			u.finish115CancelledTask(version.Key, file.Name)
 			return
 		}
 		if extractErr == nil && status == "success" {
@@ -662,23 +802,28 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	version.Error = err.Error()
 	u.markFailed(version)
 	if n115ServiceFailure(err) {
-		u.update115Transfer(version.Key, file.Name, "115 服务失败", func(task *CD2Transfer) { task.Error = err.Error() })
+		u.cd2Tasks.Delete(version.Key)
 		u.notifyEvent(notifyComplete, "❌", "115 服务异常", "115 云端", file.Name)
 		return
 	}
 	u.notifyEvent(notifyComplete, "❌", "115 云解压失败", "115 云端", file.Name)
 	if !mapping.fallbackEnabled() {
-		u.update115Transfer(version.Key, file.Name, "115 云解压失败", func(task *CD2Transfer) { task.Error = err.Error() })
+		u.cd2Tasks.Delete(version.Key)
 		return
 	}
 	u.move115FailedSource(mapping, file, version)
+}
+
+func (u *Unpackerr) finish115CancelledTask(key, fileName string) {
+	u.cd2Tasks.Delete(key)
+	u.Systemf("115 任务已结束取消流程：%s", fileName)
 }
 
 func (u *Unpackerr) move115FailedSource(mapping N115Mapping, file n115File, version ProcessedSource) {
 	if !mapping.fallbackEnabled() {
 		version.Stage, version.Error = "move", "当前配置未启用失败归档目录"
 		u.markFailed(version)
-		u.update115Transfer(version.Key, file.Name, "原包移动失败", func(task *CD2Transfer) { task.Error = version.Error })
+		u.cd2Tasks.Delete(version.Key)
 		return
 	}
 	u.update115Transfer(version.Key, file.Name, "正在移动到失败归档目录", nil)
@@ -689,7 +834,7 @@ func (u *Unpackerr) move115FailedSource(mapping N115Mapping, file n115File, vers
 			version.Stage, version.Error = "move", err.Error()
 			u.markFailed(version)
 			u.Errorf("115 失败文件移动到失败归档目录失败：%s：%v", file.Name, err)
-			u.update115Transfer(version.Key, file.Name, "移动到失败归档目录失败", func(task *CD2Transfer) { task.Error = err.Error() })
+			u.cd2Tasks.Delete(version.Key)
 			return
 		}
 	}
@@ -740,7 +885,7 @@ func (u *Unpackerr) finish115Source(version ProcessedSource, file n115File) {
 		u.Errorf("115 原包清理失败：%s：%v", file.Name, err)
 		version.Stage, version.Error = "cleanup", err.Error()
 		u.markFailed(version)
-		u.update115Transfer(version.Key, file.Name, "原包清理失败", func(task *CD2Transfer) { task.Error = err.Error() })
+		u.cd2Tasks.Delete(version.Key)
 		return
 	}
 	u.clearFailedHistory(version.Key)

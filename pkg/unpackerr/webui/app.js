@@ -194,7 +194,7 @@ async function selectNotificationProvider(provider) {
 
 function ensureLocalSettings() {
   if ($('local-source-action')) return;
-	$('cd2-refresh').textContent = '立即刷新';
+	$('cd2-refresh').textContent = '刷新 CD2';
 	const taskRefresh = $('refresh');
 	if (taskRefresh) taskRefresh.remove();
   const workers = $('workers').closest('.field');
@@ -219,13 +219,13 @@ function ensureLocalSettings() {
     '<h3>CD2 定时扫描</h3>' +
     '<label class="check-row"><input id="cd2-fallback-enabled" type="checkbox"> 启用 CD2 定时扫描</label>' +
     '<label class="field"><span>CD2 定时扫描间隔</span><input id="cd2-fallback-interval" type="text" placeholder="30m"></label>' +
-    '<h3>115 \u751f\u6d3b\u4e8b\u4ef6</h3>' +
-    '<label class="check-row"><input id="115-enabled" type="checkbox"> \u542f\u7528 115 \u4e8b\u4ef6\u76d1\u63a7</label>' +
+		'<h3>115 云端工作流</h3>' +
+		'<label class="check-row"><input id="115-enabled" type="checkbox"> 启用 115 云端处理</label>' +
     '<label class="field"><span>115 Cookie</span><input id="115-cookie" type="text" autocomplete="off"></label>' +
     '<label class="field"><span>Cookie \u6765\u6e90\u5907\u6ce8</span><input id="115-cookie-remark" type="text" placeholder="\u4f8b\u5982\uff1a115 \u7f51\u9875\u5f00\u53d1\u8005\u5de5\u5177"></label>' +
-    '<label class="check-row"><input id="115-event-enabled" type="checkbox"> \u542f\u7528\u6700\u8fd1\u64cd\u4f5c\u4e8b\u4ef6</label>' +
-    '<label class="field"><span>\u4e8b\u4ef6\u540c\u6b65\u95f4\u9694</span><input id="115-event-interval" type="text" placeholder="5m"></label>' +
-    '<div class="form-actions"><button id="115-sync" type="button">\u624b\u52a8\u540c\u6b65 115</button></div><p id="115-sync-message" class="form-message"></p>' +
+    '<label class="check-row"><input id="115-event-enabled" type="checkbox"> \u542f\u7528 115 \u4e91\u76ee\u5f55\u81ea\u52a8\u626b\u63cf</label>' +
+    '<label class="field"><span>\u76ee\u5f55\u626b\u63cf\u95f4\u9694\uff08\u6700\u5c11 30m\uff09</span><input id="115-event-interval" type="text" placeholder="30m"></label>' +
+    '<div class="form-actions"><button id="115-sync" type="button">\u626b\u63cf 115 \u4e91\u76ee\u5f55</button></div><p id="115-sync-message" class="form-message"></p>' +
 		'<h3>云解压来源</h3><div class="field"><div id="115-sources" class="mapping-list"></div><div class="form-actions"><button id="115-source-add" type="button">添加来源文件夹</button></div></div>' +
     '<label class="check-row"><input id="115-extract-by-date" type="checkbox"> 按日期创建云解压目录</label><small style="color:var(--muted);font-size:12px">开启后先在目标目录创建 YYYY-MM-DD 日期文件夹，再按压缩包名称分别解压。</small>' +
     '<label class="field"><span>云解压成功后的原包处理</span><select id="115-success-action"><option value="keep">保留原包</option><option value="delete">删除原包</option><option value="archive">移入成功归档目录</option></select></label>' +
@@ -261,7 +261,7 @@ function buildSettingsSections(localBlock, workers) {
   const heading = view.querySelector('.panel-heading');
   const nav = document.createElement('div');
   nav.id = 'settings-switch'; nav.className = 'settings-switch';
-  nav.innerHTML = '<button class="settings-switch-button active" data-settings-view="settings-basic" type="button">基础</button><button class="settings-switch-button" data-settings-view="settings-local" type="button">本地</button><button class="settings-switch-button" data-settings-view="settings-cloud" type="button">云端</button><button class="settings-switch-button" data-settings-view="settings-maintenance" type="button">数据维护</button>';
+  nav.innerHTML = '<button class="settings-switch-button active" data-settings-view="settings-basic" type="button">基础</button><button class="settings-switch-button" data-settings-view="settings-local" type="button">本地</button><button class="settings-switch-button" data-settings-view="settings-cloud" type="button">云端工作流</button><button class="settings-switch-button" data-settings-view="settings-maintenance" type="button">数据维护</button>';
   const basic = document.createElement('section'); basic.id = 'settings-basic'; basic.className = 'settings-section active-settings-section';
   const local = document.createElement('section'); local.id = 'settings-local'; local.className = 'settings-section';
   const cloud = document.createElement('section'); cloud.id = 'settings-cloud'; cloud.className = 'settings-section';
@@ -282,6 +282,7 @@ function buildSettingsSections(localBlock, workers) {
   if (splitAt >= 0) {
     const cloudPart = document.createElement('div');
     cloudPart.className = 'cloud-extra-settings';
+    cloudPart.insertAdjacentHTML('afterbegin', '<div class="panel-heading"><div><h3>云端处理流程</h3><p>按来源目录 → 云解压目标 → 成功原包处理 → 失败转本地 → 日常下载 → CD2 路径映射依次配置。</p></div></div>');
     localChildren.slice(splitAt).forEach(node => cloudPart.appendChild(node));
     cloud.appendChild(cloudPart);
   }
@@ -319,12 +320,22 @@ function update115ArchiveCIDVisibility() {
 async function sync115Now() {
   const button = $('115-sync');
   button.disabled = true;
-  $('115-sync-message').textContent = '\u6b63\u5728\u63d0\u4ea4\u540c\u6b65\u2026';
+  $('115-sync-message').textContent = '\u6b63\u5728\u626b\u63cf 115 \u4e91\u76ee\u5f55\u2026';
   try {
     const response = await fetch('api/115/sync', {method: 'POST'});
     const text = await response.text();
-    $('115-sync-message').textContent = response.ok ? '\u5df2\u5f00\u59cb\u540c\u6b65 115 \u6587\u4ef6\u5939' : (text || '\u540c\u6b65\u5931\u8d25');
-  } catch (_) { $('115-sync-message').textContent = '\u540c\u6b65\u5931\u8d25'; }
+    if (!response.ok) {
+      $('115-sync-message').textContent = text || '\u626b\u63cf\u5931\u8d25';
+    } else {
+      const result = JSON.parse(text || '{}');
+      $('115-sync-message').textContent = '\u626b\u63cf\u5b8c\u6210\uff1a\u76ee\u5f55 ' + (result.folders || 0) +
+        '\uff0c\u8bfb\u53d6 ' + (result.files || 0) + '\uff0c\u63d0\u4ea4 ' + (result.queued || 0) +
+        '\uff0c\u5df2\u5904\u7406 ' + (result.skipped_processed || 0) + '\uff0c\u5904\u7406\u4e2d ' + (result.skipped_pending || 0) +
+        '\uff0c\u5df2\u5ffd\u7565 ' + (result.skipped_ignored || 0) + '\uff0c\u975e\u538b\u7f29\u5305 ' + (result.skipped_invalid || 0) +
+        '\uff0c\u5f85\u7eed\u626b ' + (result.partial || 0) + '\uff0c\u5931\u8d25 ' + (result.errors || 0);
+      load(false);
+    }
+  } catch (_) { $('115-sync-message').textContent = '\u626b\u63cf\u5931\u8d25'; }
   button.disabled = false;
 }
 
@@ -483,7 +494,7 @@ function fillForms(data) {
   $('115-cookie').value = '';
   $('115-cookie').placeholder = (data.settings && data.settings['115_cookie']) || '已保存，留空表示不修改';
   $('115-cookie-remark').value = (data.settings && data.settings['115_cookie_remark']) || '';
-  $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '5m';
+  $('115-event-interval').value = (data.settings && data.settings['115_event_interval']) || '30m';
   $('115-success-action').value = (data.settings && data.settings['115_success_action']) || 'keep';
   const archiveRule = (data.settings && data.settings['115_archive']) || {};
   $('115-archive-cid').value = archiveRule.cid || (data.settings && data.settings['115_archive_cid']) || '';
@@ -522,7 +533,7 @@ function fillForms(data) {
 
 function renderTaskDetails(task) {
   const row = (label, value) => '<dt>' + label + '</dt><dd>' + esc(value || '暂无记录') + '</dd>';
-  let rows = row('文件名称', task.name) + row('任务来源', task.source) + row('当前阶段', task.status);
+  let rows = row('文件名称', task.name) + row('任务来源', task.source) + row('处理流程', taskTimeline(task)) + row('当前阶段', task.status);
   rows += row(task.source_cid ? '原包名称或挂载路径' : '原包路径', task.path || task.name);
   if (task.source_cid) {
     rows += row('来源目录', task.source_label || '未设置备注') + row('来源目录 CID', task.source_cid) + row('文件 ID', task.file_id);
@@ -538,6 +549,20 @@ function renderTaskDetails(task) {
   if (task.error) rows += row('错误详情', task.error);
   rows += row('任务标识', task.key);
   return '<details class="task-details" data-detail-key="' + encodeURIComponent(task.key) + '"' + (expandedTasks.has(task.key) ? ' open' : '') + '><summary>详情</summary><dl>' + rows + '</dl></details>';
+}
+
+function taskTimeline(task) {
+  const stages = ['发现'];
+  const source = task.source || '';
+  const status = task.status || '';
+  if (source.includes('115') || task.source_cid) stages.push('云目录扫描');
+  if (status.includes('云解压') || task.target_cid || task.output_cid) stages.push('云解压');
+  if (status.includes('批准') || status.includes('下载') || source.includes('转本地')) stages.push('本地兜底');
+  if (status.includes('复制') || task.cached_path) stages.push('缓存');
+  if (status.includes('解压') && !status.includes('云解压')) stages.push('本地解压');
+  if (status.includes('清理') || status.includes('归档') || status.includes('删除')) stages.push('原包处理');
+  stages.push(status.includes('失败') ? '失败' : status.includes('取消') ? '取消' : status.includes('完成') || status.includes('已解压') ? '完成' : '当前');
+  return stages.filter((stage, index) => index === 0 || stage !== stages[index - 1]).join(' → ');
 }
 
 function renderTask(task) {
@@ -578,6 +603,20 @@ function renderStatus(data) {
     $('task-system-state').textContent = taskSystemPaused ? '任务系统已暂停：不会发现或提交新任务，正在解压的任务会继续完成。' : '任务系统运行中';
     $('task-system-state').className = 'form-message ' + (taskSystemPaused ? 'paused-state' : 'running-state');
   }
+  if ($('115-scan-state')) {
+    const scan = (data.clouddrive2 && data.clouddrive2['115_scan']) || {};
+    if (scan.scanned_at) {
+      $('115-scan-state').textContent = '115 上次扫描：' + new Date(scan.scanned_at).toLocaleString() +
+        ' · 目录 ' + (scan.folders || 0) + ' · 读取 ' + (scan.files || 0) + ' · 提交 ' + (scan.queued || 0) +
+        ' · 已处理 ' + (scan.skipped_processed || 0) + ' · 处理中 ' + (scan.skipped_pending || 0) +
+        ' · 已忽略 ' + (scan.skipped_ignored || 0) + ' · 非压缩包 ' + (scan.skipped_invalid || 0) +
+        ' · 待续扫 ' + (scan.partial || 0) + ' · 失败 ' + (scan.errors || 0) + ' · ' + (scan.duration_ms || 0) + 'ms';
+      $('115-scan-state').className = 'form-message ' + (scan.errors ? 'paused-state' : 'running-state');
+    } else {
+      $('115-scan-state').textContent = '115 云目录尚未完成扫描';
+      $('115-scan-state').className = 'form-message';
+    }
+  }
   if ($('cd2-refresh')) $('cd2-refresh').disabled = taskSystemPaused;
   currentTasks = data.tasks || [];
   renderCurrentTasks();
@@ -604,7 +643,8 @@ function renderHistory() {
   renderList($('history'), values, item => {
     const disabled = pendingActions.has(item.key) ? ' disabled' : '';
     const button = (action, label) => '<button data-history-action="' + action + '" data-history-key="' + esc(item.key) + '" type="button"' + disabled + '>' + label + '</button>';
-    return '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + ' · ' + (labels[item.status] || '已完成') + ' · ' + esc(item.completed_at) + '</small>' + (item.error ? '<small class="history-error">' + esc(item.error) + '</small>' : '') + '</div><div class="history-actions">' + (item.ignored ? button('unignore', '取消忽略') : (item.can_retry ? button('retry', item.stage === 'cleanup' ? '重试清理' : item.stage === 'move' ? '重试移动' : '重试') + button('ignore', '忽略') : '')) + button('delete', '删除记录') + '</div></div>';
+    const flow = item.status === 'success' ? '发现 → 处理 → 完成' : item.status === 'cancelled' ? '发现 → 处理 → 取消' : item.status === 'ignored' ? '发现 → 忽略' : '发现 → ' + (item.stage === 'cleanup' ? '原包处理' : item.stage === 'move' ? '云端移动' : '解压') + ' → 失败';
+    return '<div class="compact-item history-item"><div class="history-content"><strong title="' + esc(item.path) + '">' + esc(item.path) + '</strong><small>' + esc(item.source) + ' · ' + (labels[item.status] || '已完成') + ' · ' + esc(item.completed_at) + '</small><small>流程：' + esc(flow) + '</small>' + (item.error ? '<small class="history-error">' + esc(item.error) + '</small>' : '') + '</div><div class="history-actions">' + (item.ignored ? button('unignore', '取消忽略') : (item.can_retry ? button('retry', item.stage === 'cleanup' ? '重试清理' : item.stage === 'move' ? '重试移动' : '重试') + button('ignore', '忽略') : '')) + button('delete', '删除记录') + '</div></div>';
   }, zh.noHistory);
 }
 
@@ -708,6 +748,9 @@ function ensureTaskControls() {
   const state = document.createElement('p');
   state.id = 'task-system-state'; state.className = 'form-message';
   actions.parentElement.insertAdjacentElement('afterend', state);
+  const scanState = document.createElement('p');
+  scanState.id = '115-scan-state'; scanState.className = 'form-message';
+  state.insertAdjacentElement('afterend', scanState);
   const filters = document.createElement('div');
   filters.id = 'task-filters'; filters.className = 'task-switch';
   filters.innerHTML = '<button class="task-filter active" data-task-filter="all" type="button">全部</button><button class="task-filter" data-task-filter="active" type="button">进行中</button><button class="task-filter" data-task-filter="waiting" type="button">等待中</button>';
@@ -730,7 +773,7 @@ function ensureTaskControls() {
     renderHistory();
   });
   control.addEventListener('click', async () => {
-    if (!taskSystemPaused && !window.confirm('将暂停本地监听、CD2 推送与扫描、115 生活事件，并清除等待、复制、重试和待批准任务及未完成缓存。正在解压和已经开始的 115 云解压不会停止，云端原包不会删除。确定继续吗？')) return;
+    if (!taskSystemPaused && !window.confirm('将暂停本地监听、CD2 推送与扫描、115 云目录扫描，并清除等待、复制、重试和待批准任务及未完成缓存。正在解压和已经开始的 115 云解压不会停止，云端原包不会删除。确定继续吗？')) return;
     control.disabled = true;
     const action = taskSystemPaused ? 'resume' : 'stop_clear';
     $('refresh-message').textContent = taskSystemPaused ? '正在恢复任务系统…' : '正在停止并清理等待任务…';
@@ -823,7 +866,8 @@ $('settings-save').addEventListener('click', async () => {
       response = await fetch('api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body), signal: controller.signal});
     } finally { clearTimeout(timer); }
     const text = await response.text();
-    $('settings-message').textContent = response.ok ? zh.restart : (text || zh.saveFailed);
+    let result = {}; try { result = JSON.parse(text); } catch (_) {}
+    $('settings-message').textContent = response.ok ? (result.message || zh.restart) : (text || zh.saveFailed);
   } catch (error) {
     $('settings-message').textContent = error && error.name === 'AbortError' ? '保存超时：请查看容器日志' : '保存失败：请刷新页面后重试';
   } finally {

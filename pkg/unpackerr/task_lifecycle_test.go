@@ -269,6 +269,37 @@ func TestWaitingFailureIsActiveAndOrderingKeepsOriginalStart(t *testing.T) {
 	}
 }
 
+func TestFinish115CancelledTaskRemovesCurrentTask(t *testing.T) {
+	u := lifecycleTestApp(t)
+	u.update115Transfer("cancelled", "cancelled.7z", "正在取消", nil)
+	u.n115Running.Store("cancelled", struct{}{})
+
+	u.finish115CancelledTask("cancelled", "cancelled.7z")
+
+	if _, exists := u.cd2Tasks.Load("cancelled"); exists {
+		t.Fatal("cancelled 115 task remained visible after its operation returned")
+	}
+	if tasks := u.dashboardSnapshot().Tasks; len(tasks) != 0 {
+		t.Fatalf("cancelled 115 task remained in current tasks: %#v", tasks)
+	}
+}
+
+func TestTerminal115FailureLivesOnlyInHistory(t *testing.T) {
+	u := lifecycleTestApp(t)
+	version := ProcessedSource{Key: "terminal", Path: "terminal.7z", Source: "115", Stage: "cloud", Error: "service unavailable"}
+	u.update115Transfer(version.Key, version.Path, "115 服务失败", nil)
+	u.markFailed(version)
+	u.cd2Tasks.Delete(version.Key)
+
+	snapshot := u.dashboardSnapshot()
+	if len(snapshot.Tasks) != 0 || snapshot.Totals.Active != 0 {
+		t.Fatalf("terminal failure remained active: %#v", snapshot.Tasks)
+	}
+	if len(snapshot.History) != 1 || snapshot.History[0].Key != version.Key || snapshot.History[0].Status != "failed" {
+		t.Fatalf("terminal failure missing from history: %#v", snapshot.History)
+	}
+}
+
 func TestIgnoreSurvivesRestartAndUnignoreDoesNotQueue(t *testing.T) {
 	u := lifecycleTestApp(t)
 	key := "115|source|file|9"

@@ -69,7 +69,7 @@ func (u *Unpackerr) retryPending115Cloud(key string) error {
 		u.n115Queue <- struct{}{}
 		defer func() { <-u.n115Queue }()
 		if u.taskSystemPaused.Load() || u.isIgnoredPath(pending.FileName) || u.taskCancelled(pending.TaskKey) {
-			u.update115Transfer(pending.TaskKey, pending.FileName, "重试已取消", nil)
+			u.finish115CancelledTask(pending.TaskKey, pending.FileName)
 			return
 		}
 		item := ProcessedSource{Key: pending.TaskKey, Source: "115", Path: pending.FileName, Size: pending.Size, ModifiedNS: pending.MTime,
@@ -351,7 +351,7 @@ func (u *Unpackerr) retry115History(item ProcessedSource) error {
 		u.n115Queue <- struct{}{}
 		defer func() { <-u.n115Queue }()
 		if u.taskSystemPaused.Load() || u.isIgnoredPath(item.Path) || u.taskCancelled(item.Key) {
-			u.update115Transfer(item.Key, item.Path, "重试已取消", nil)
+			u.finish115CancelledTask(item.Key, item.Path)
 			return
 		}
 		mapping := n115FailureMapping(u.CloudDrive2, item.SourceCID)

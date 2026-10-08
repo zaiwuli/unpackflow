@@ -118,8 +118,9 @@ type DashboardFolder struct {
 }
 
 type DashboardCloudDrive struct {
-	Enabled bool   `json:"enabled"`
-	URL     string `json:"url,omitempty"`
+	Enabled  bool           `json:"enabled"`
+	URL      string         `json:"url,omitempty"`
+	N115Scan n115ScanResult `json:"115_scan"`
 }
 
 func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
@@ -133,7 +134,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			Retries:  u.Retries,
 			Workers:  u.Parallel,
 		},
-		CloudDrive:   DashboardCloudDrive{Enabled: u.CloudDrive2.Enabled, URL: u.CloudDrive2.URL},
+		CloudDrive:   DashboardCloudDrive{Enabled: u.CloudDrive2.Enabled, URL: u.CloudDrive2.URL, N115Scan: u.latest115ScanResult()},
 		Passwords:    sortedPasswords(u.uiPasswords()),
 		Notification: u.notificationSettings(),
 		Settings:     u.uiSettings(),
@@ -828,16 +829,6 @@ func (u *Unpackerr) notificationTestAPI(w http.ResponseWriter, _ *http.Request, 
 }
 
 func (u *Unpackerr) cd2RefreshAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	// A manual cloud sync is deliberately ordered: first inspect the 115 source
-	// folders, then ask CloudDrive2 to refresh the mounted fallback path. This
-	// makes the button useful even when CD2 has not yet surfaced a new file.
-	messages := make([]string, 0, 2)
-	if u.CloudDrive2.N115Enabled && strings.TrimSpace(u.CloudDrive2.N115Cookie) != "" && (len(n115SourceCIDs(u.CloudDrive2)) > 0 || len(parse115DownloadMappings(u.CloudDrive2.N115DownloadMappings)) > 0) {
-		u.poll115RecentOperations()
-		messages = append(messages, "已同步 115 生活记录")
-	} else {
-		messages = append(messages, "115 未配置，已跳过")
-	}
 	u.cd2Mu.RLock()
 	client := u.cd2Client
 	u.cd2Mu.RUnlock()
@@ -851,12 +842,10 @@ func (u *Unpackerr) cd2RefreshAPI(w http.ResponseWriter, r *http.Request, _ http
 			}
 		}
 		found = u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), u.CloudDrive2.PathOverrides)
-		messages = append(messages, fmt.Sprintf("已刷新 CD2 配置目录，发现 %d 个压缩文件，失败 %d 个目录", found, refreshErrors))
+		u.writeJSON(w, map[string]any{"success": true, "found": found, "message": fmt.Sprintf("已刷新 CD2 配置目录，发现 %d 个压缩文件，失败 %d 个目录", found, refreshErrors)})
 	} else {
-		messages = append(messages, "CD2 未连接，已跳过")
+		u.writeJSON(w, map[string]any{"success": false, "found": 0, "message": "CD2 未连接，已跳过"})
 	}
-	u.Printf("手动云端同步完成：%s", strings.Join(messages, "；"))
-	u.writeJSON(w, map[string]any{"success": true, "found": found, "message": strings.Join(messages, "；")})
 }
 
 func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
@@ -868,9 +857,17 @@ func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, _ *http.Request, _ httpro
 		http.Error(w, "请至少配置一个云解压来源或本地下载文件夹", http.StatusBadRequest)
 		return
 	}
-	u.poll115RecentOperations()
-	u.Printf("115 手动同步完成")
-	u.writeJSON(w, map[string]any{"success": true})
+	result := u.poll115RecentOperations()
+	if result.Busy {
+		http.Error(w, "115 云目录正在扫描，请稍后再试", http.StatusConflict)
+		return
+	}
+	if result.Error != "" {
+		http.Error(w, result.Error, http.StatusConflict)
+		return
+	}
+	u.Printf("115 手动云目录扫描完成")
+	u.writeJSON(w, result)
 }
 
 func (u *Unpackerr) n115FallbackAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -989,7 +986,7 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 	if overrides.N115Enabled != nil && *overrides.N115Enabled && overrides.N115EventEnabled != nil && *overrides.N115EventEnabled && overrides.N115EventInterval != "" {
 		duration, err := time.ParseDuration(overrides.N115EventInterval)
 		if err != nil || duration <= 0 {
-			http.Error(w, "115 事件间隔格式无效，例如：5m", http.StatusBadRequest)
+			http.Error(w, "115 云目录扫描间隔格式无效，例如：30m", http.StatusBadRequest)
 			return
 		}
 	}
@@ -1025,7 +1022,7 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 		http.Error(w, "保存设置失败："+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	u.writeJSON(w, map[string]any{"success": true, "restart_required": true, "paths_applied": true})
+	u.writeJSON(w, map[string]any{"success": true, "restart_required": true, "paths_applied": true, "message": "已保存：目录规则和 115 行为已立即应用；连接地址、令牌和并发数将在重启后生效"})
 }
 
 func (u *Unpackerr) historyAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {

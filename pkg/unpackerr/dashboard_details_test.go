@@ -51,3 +51,15 @@ func TestDashboardMergePreservesPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardSnapshotIncludesLatest115Scan(t *testing.T) {
+	u := New()
+	u.n115ScanStateMu.Lock()
+	u.n115LastResult = n115ScanResult{Folders: 2, Files: 240, Queued: 3, SkippedProcessed: 4, SkippedPending: 5, SkippedIgnored: 6, SkippedInvalid: 7, Partial: 1, ScannedAt: "2026-10-08T12:00:00+08:00", Duration: 1250}
+	u.n115ScanStateMu.Unlock()
+
+	scan := u.dashboardSnapshot().CloudDrive.N115Scan
+	if scan.Folders != 2 || scan.Files != 240 || scan.Queued != 3 || scan.SkippedProcessed != 4 || scan.SkippedPending != 5 || scan.SkippedIgnored != 6 || scan.SkippedInvalid != 7 || scan.Partial != 1 || scan.ScannedAt == "" || scan.Duration != 1250 {
+		t.Fatalf("unexpected 115 scan snapshot: %#v", scan)
+	}
+}
