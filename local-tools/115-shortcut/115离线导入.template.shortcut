@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>WFWorkflowClientRelease</key><string>4.0</string>
+  <key>WFWorkflowClientVersion</key><string>2600</string>
+  <key>WFWorkflowMinimumClientVersion</key><integer>900</integer>
+  <key>WFWorkflowMinimumClientVersionString</key><string>900</string>
+  <key>WFWorkflowImportQuestions</key><array/>
+  <key>WFWorkflowTypes</key><array><string>NCWidget</string><string>ActionExtension</string></array>
+  <key>WFWorkflowInputContentItemClasses</key>
+  <array><string>WFStringContentItem</string><string>WFURLContentItem</string><string>WFTextContentItem</string></array>
+  <key>WFWorkflowIcon</key>
+  <dict><key>WFWorkflowIconGlyphNumber</key><integer>59771</integer><key>WFWorkflowIconStartColor</key><integer>4282601983</integer></dict>
+  <key>WFWorkflowActions</key>
+  <array>
+    <dict>
+      <key>WFWorkflowActionIdentifier</key><string>is.workflow.actions.ask</string>
+      <key>WFWorkflowActionParameters</key>
+      <dict>
+        <key>WFAskActionPrompt</key><string>粘贴 ED2K、磁力或下载链接（支持多行）</string>
+        <key>WFInputType</key><string>Text</string>
+        <key>WFAllowsMultilineText</key><true/>
+        <key>UUID</key><string>61D1B739-40FD-4A94-9F05-A8EDFA6034D1</string>
+      </dict>
+    </dict>
+    <dict>
+      <key>WFWorkflowActionIdentifier</key><string>is.workflow.actions.downloadurl</string>
+      <key>WFWorkflowActionParameters</key>
+      <dict>
+        <key>WFHTTPMethod</key><string>POST</string>
+        <key>WFHTTPBodyType</key><string>JSON</string>
+        <key>WFURL</key><string>__UNPACKFLOW_URL__</string>
+        <key>WFHTTPHeaders</key>
+        <dict><key>Authorization</key><string>Bearer __UNPACKFLOW_TOKEN__</string></dict>
+        <key>WFJSONValues</key>
+        <dict>
+          <key>Value</key>
+          <dict>
+            <key>WFDictionaryFieldValueItems</key>
+            <array>
+              <dict>
+                <key>WFItemType</key><integer>0</integer>
+                <key>WFKey</key><dict><key>Value</key><string>text</string><key>WFSerializationType</key><string>WFTextTokenString</string></dict>
+                <key>WFValue</key>
+                <dict>
+                  <key>Value</key><dict><key>OutputUUID</key><string>61D1B739-40FD-4A94-9F05-A8EDFA6034D1</string><key>Type</key><string>ActionOutput</string></dict>
+                  <key>WFSerializationType</key><string>WFTextTokenAttachment</string>
+                </dict>
+              </dict>
+              <dict>
+                <key>WFItemType</key><integer>4</integer>
+                <key>WFKey</key><dict><key>Value</key><string>auto_extract</string><key>WFSerializationType</key><string>WFTextTokenString</string></dict>
+                <key>WFValue</key><true/>
+              </dict>
+            </array>
+          </dict>
+          <key>WFSerializationType</key><string>WFDictionaryFieldValue</string>
+        </dict>
+        <key>UUID</key><string>D46DF8EB-71DF-42A8-A043-54EA8EAF2D6E</string>
+      </dict>
+    </dict>
+    <dict>
+      <key>WFWorkflowActionIdentifier</key><string>is.workflow.actions.showresult</string>
+      <key>WFWorkflowActionParameters</key>
+      <dict><key>Text</key><string>已提交到 115 离线任务</string></dict>
+    </dict>
+  </array>
+</dict>
+</plist>
