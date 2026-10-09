@@ -240,7 +240,7 @@ function ensureLocalSettings() {
 		'<label class="field"><span>两个云解压任务之间的间隔</span><input id="115-task-interval" type="text" placeholder="30s"><small style="color:var(--muted);font-size:12px">默认 30s；填写 0s 表示上一个任务完成后立即放行下一个。</small></label>' +
 		'<h3>115 离线下载</h3>' +
 		'<label class="field"><span>离线保存目录 CID</span><input id="115-offline-cid" type="text" placeholder="指定父目录，提交时自动创建 YYYY-MM-DD 子文件夹"><small style="color:var(--muted);font-size:12px">每次导入都会保存到当天日期子文件夹，再在离线完成后自动查找压缩包。</small></label>' +
-		'<label class="field"><span>离线状态兜底复查间隔</span><input id="115-offline-fallback" type="text" placeholder="60m"><small style="color:var(--muted);font-size:12px">前三次按 1m、3m、5m 查询；之后按此间隔复查未完成任务，0s 关闭定时兜底。</small></label>' +
+		'<label class="field"><span>离线状态兜底复查间隔</span><input id="115-offline-fallback" type="text" placeholder="60m"><small style="color:var(--muted);font-size:12px">前三次按 15s、3m、5m 查询；之后按此间隔复查未完成任务，0s 关闭定时兜底。</small></label>' +
 		'<div class="field"><span>iPhone 快捷指令导入令牌</span><div class="settings-pair"><input id="115-offline-token" type="text" autocomplete="off" placeholder="用于快捷指令调用，不是115 Cookie"><button id="115-offline-token-generate" type="button">生成令牌</button></div><small style="color:var(--muted);font-size:12px">快捷指令只保存此令牌；115 Cookie 始终留在服务器。</small></div>' +
 		'<h3>日常本地下载</h3><div class="field"><div id="115-downloads" class="mapping-list"></div><div class="form-actions"><button id="115-download-add" type="button">添加下载文件夹</button></div><small style="color:var(--muted);font-size:12px">手动将压缩包移入这些 115 文件夹后，工具刷新对应 CD2 路径；每行可选择自动下载或等待批准。</small></div>' +
 		'<h3>CD2 挂载路径映射</h3><div class="field"><div id="path-mappings" class="mapping-list"></div><div class="form-actions"><button id="path-mapping-add" type="button">添加路径映射</button></div></div>';
@@ -348,7 +348,7 @@ function buildCloudWorkflowTabs(cloud) {
   ['115-offline-cid','115-offline-fallback','115-offline-token','115-downloads'].forEach(id => move(id, 'cloud-download'));
   const shortcut = document.createElement('section');
   shortcut.className = 'shortcut-card';
-  shortcut.innerHTML = '<div class="panel-heading"><div><h3>iPhone 快捷指令</h3><p>支持分享选中文本、TXT文件或直接读取剪贴板。</p></div></div><code id="offline-shortcut-url"></code><ol><li>快捷指令接收文本、URL和文件。</li><li>文件输入使用“获取文件内容”；没有输入时读取剪贴板。</li><li>使用“获取 URL 内容”发送 POST JSON。</li><li>请求头填写 Authorization: Bearer 你的离线导入令牌。</li></ol><div class="form-actions"><button id="offline-copy-url" type="button">复制接口地址</button><a id="offline-shortcut-download" class="button-link" href="api/115/offline/shortcut" download>下载快捷指令配置</a></div>';
+  shortcut.innerHTML = '<div class="panel-heading"><div><h3>iPhone 快捷指令手动配置</h3><p>快捷指令只使用下方接口和独立令牌，不保存115 Cookie。</p></div></div><code id="offline-shortcut-url"></code><ol><li>新建快捷指令，并在“详细信息”中开启“在共享表单中显示”，接收文本、URL和文件。</li><li>添加“如果”判断：共享输入为空时使用“获取剪贴板”；输入为文件时使用“获取文件的文本”。</li><li>添加“获取 URL 内容”，URL 使用上方地址，请求方法选择 POST，请求正文选择 JSON。</li><li>JSON 增加 text＝前一步的文本、auto_extract＝true。</li><li>请求头增加 Authorization，值为 Bearer 加一个空格，再加上方生成并保存的离线导入令牌。</li><li>最后添加“显示结果”，即可从 Safari、文件或其他 App 的分享菜单导入。</li></ol><div class="form-actions"><button id="offline-copy-url" type="button">复制接口地址</button></div>';
   groups['cloud-download'].appendChild(shortcut);
   const shortcutURL = new URL('api/115/offline/import', window.location.href).href;
   $('offline-shortcut-url').textContent = shortcutURL;
@@ -1052,7 +1052,7 @@ async function submitOfflineImport() {
   try {
     const response = await fetch('api/115/offline/import', {method:'POST', body:form});
     const raw = await response.text(); let data = {}; try { data = JSON.parse(raw); } catch (_) {}
-    $('offline-message').textContent = response.ok ? ('已创建批次，识别 ' + data.recognized + ' 条，新增 ' + data.submitted + ' 条；首次查询将在60秒后进行。') : raw;
+    $('offline-message').textContent = response.ok ? ('已创建批次，识别 ' + data.recognized + ' 条，新增 ' + data.submitted + ' 条；首次查询将在15秒后进行。') : raw;
     if (response.ok) { $('offline-text').value = ''; $('offline-file').value = ''; await loadOfflineBatches(); }
   } catch (_) { $('offline-message').textContent = '导入失败，请检查网络和服务日志'; }
   button.disabled = false;

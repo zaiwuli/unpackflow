@@ -1,6 +1,7 @@
 package unpackerr
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -567,7 +568,15 @@ func (u *Unpackerr) n115Request(ctx context.Context, method, endpoint string, fo
 	}
 	var response map[string]any
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return nil, fmt.Errorf("响应不是 JSON：%w", err)
+		// Some legacy 115 endpoints prepend callback or assignment text before
+		// the JSON object. Parse from the first object marker while still
+		// rejecting HTML login pages and other non-JSON responses.
+		if start := bytes.IndexByte(raw, '{'); start >= 0 {
+			if retryErr := json.Unmarshal(raw[start:], &response); retryErr == nil {
+				return response, nil
+			}
+		}
+		return nil, fmt.Errorf("响应不是 JSON：%w（%s）", err, n115ResponseSummary(raw))
 	}
 	if state, exists := response["state"].(bool); exists && !state {
 		return nil, &n115APIError{Detail: n115ResponseSummary(raw)}

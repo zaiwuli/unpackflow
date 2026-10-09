@@ -25,6 +25,7 @@ import (
 )
 
 const n115OfflineBase = "https://115.com/web/lixian/"
+const n115OfflineSpace = "https://115.com/"
 
 var offlineLinkPattern = regexp.MustCompile(`(?i)(?:ed2k://\|file\|.*?\|/|magnet:\?[^\s]+|(?:https?|ftp)://[^\s]+)`)
 
@@ -305,7 +306,7 @@ func (u *Unpackerr) n115OfflineImportAPI(w http.ResponseWriter, r *http.Request,
 		http.Error(w, "识别到的链接都已导入过", http.StatusConflict)
 		return
 	}
-	batch.NextCheck = time.Now().Add(time.Minute)
+	batch.NextCheck = time.Now().Add(15 * time.Second)
 	u.offlineMu.Lock()
 	u.offlineStore.Batches[batch.ID] = batch
 	err = u.save115OfflineStoreLocked()
@@ -325,19 +326,6 @@ func (u *Unpackerr) n115OfflineImportAuthorized(r *http.Request) bool {
 	provided := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if provided == "" { provided = strings.TrimSpace(r.Header.Get("X-UnpackFlow-Token")) }
 	return expected != "" && len(expected) == len(provided) && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
-}
-
-func (u *Unpackerr) n115OfflineShortcutAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	w.Header().Set("Content-Disposition", `attachment; filename="unpackflow-shortcut.json"`)
-	scheme := "http"
-	if value := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); value != "" { scheme = value }
-	endpoint := scheme + "://" + r.Host + strings.TrimSuffix(u.Webserver.URLBase, "/") + "/api/115/offline/import"
-	u.writeJSON(w, map[string]any{
-		"name": "导入到 UnpackFlow", "endpoint": endpoint, "method": "POST",
-		"headers": map[string]string{"Content-Type": "application/json", "Authorization": "Bearer <设置中的离线导入令牌>"},
-		"body": map[string]any{"text": "<快捷指令输入；为空时读取剪贴板>", "auto_extract": true},
-		"steps": []string{"接收分享表单中的文本、URL和文件", "没有分享输入时获取剪贴板", "TXT文件先读取文本", "获取URL内容：POST JSON", "显示接口返回结果"},
-	})
 }
 
 func readOfflineImport(r *http.Request) (string, bool, error) {
@@ -401,7 +389,7 @@ func (u *Unpackerr) offlineIdentities() map[string]struct{} {
 }
 
 func (u *Unpackerr) n115SubmitOfflineBatch(ctx context.Context, links []string, targetCID string) (map[string]string, error) {
-	space, err := u.n115Request(ctx, http.MethodGet, n115OfflineBase, url.Values{"ct": {"lixian"}, "ac": {"space"}})
+	space, err := u.n115Request(ctx, http.MethodGet, n115OfflineSpace, url.Values{"ct": {"offline"}, "ac": {"space"}, "_": {fmt.Sprint(time.Now().UnixMilli())}})
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +402,11 @@ func (u *Unpackerr) n115SubmitOfflineBatch(ctx context.Context, links []string, 
 	if sign == "" || sign == "<nil>" || timestamp == "" || timestamp == "<nil>" {
 		return nil, fmt.Errorf("115未返回离线签名")
 	}
-	form := url.Values{"wp_path_id": {targetCID}, "sign": {sign}, "time": {timestamp}}
+	uid := n115CookieUID(u.CloudDrive2.N115Cookie)
+	if uid == "" {
+		return nil, fmt.Errorf("115 Cookie 中缺少 UID")
+	}
+	form := url.Values{"wp_path_id": {targetCID}, "savepath": {""}, "uid": {uid}, "sign": {sign}, "time": {timestamp}}
 	for index, link := range links {
 		form.Set(fmt.Sprintf("url[%d]", index), link)
 	}
@@ -501,9 +493,18 @@ func (u *Unpackerr) refresh115OfflineBatch(id string) {
 type offlineRemoteStatus struct{ Status, Error string }
 
 func (u *Unpackerr) n115OfflineStatuses(ctx context.Context) (map[string]offlineRemoteStatus, error) {
+	space, err := u.n115Request(ctx, http.MethodGet, n115OfflineSpace, url.Values{"ct": {"offline"}, "ac": {"space"}, "_": {fmt.Sprint(time.Now().UnixMilli())}})
+	if err != nil { return nil, err }
+	sign, timestamp := fmt.Sprint(space["sign"]), fmt.Sprint(space["time"])
+	if data, ok := space["data"].(map[string]any); ok {
+		if sign == "" || sign == "<nil>" { sign = fmt.Sprint(data["sign"]) }
+		if timestamp == "" || timestamp == "<nil>" { timestamp = fmt.Sprint(data["time"]) }
+	}
+	uid := n115CookieUID(u.CloudDrive2.N115Cookie)
+	if uid == "" || sign == "" || sign == "<nil>" { return nil, fmt.Errorf("无法取得115离线查询凭据") }
 	all := make(map[string]offlineRemoteStatus)
 	for page := 1; page <= 10; page++ {
-		response, err := u.n115Request(ctx, http.MethodGet, n115OfflineBase, url.Values{"ct": {"lixian"}, "ac": {"task_lists"}, "page": {fmt.Sprint(page)}})
+		response, err := u.n115Request(ctx, http.MethodPost, n115OfflineBase+"?ct=lixian&ac=task_lists", url.Values{"page": {fmt.Sprint(page)}, "uid": {uid}, "sign": {sign}, "time": {timestamp}})
 		if err != nil { return nil, err }
 		pageStatuses := offlineStatuses(response)
 		for key, value := range pageStatuses { all[key] = value }
@@ -514,6 +515,15 @@ func (u *Unpackerr) n115OfflineStatuses(ctx context.Context) (map[string]offline
 		if len(pageStatuses) == 0 || (pageCount > 0 && page >= pageCount) || (pageCount == 0 && len(pageStatuses) < 30) { break }
 	}
 	return all, nil
+}
+
+func n115CookieUID(cookie string) string {
+	for _, field := range strings.Split(cookie, ";") {
+		parts := strings.SplitN(strings.TrimSpace(field), "=", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "UID") { continue }
+		return strings.SplitN(parts[1], "_", 2)[0]
+	}
+	return ""
 }
 
 func offlineStatuses(response map[string]any) map[string]offlineRemoteStatus {
