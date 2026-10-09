@@ -321,6 +321,14 @@ function buildSettingsSections(localBlock, workers) {
 
 function buildCloudWorkflowTabs(cloud) {
   if ($('cloud-workflow-switch')) return;
+  // The legacy page groups the CD2 status under a "CloudDrive2 直连"
+  // heading. Keep the live status node, but discard that old heading before
+  // distributing fields into the new CD2 / 云解压 / 云下载 tabs.
+  const legacyCD2Heading = $('cd2-status') && $('cd2-status').closest('.panel-heading');
+  if (legacyCD2Heading) {
+    const status = $('cd2-status');
+    legacyCD2Heading.replaceWith(status);
+  }
   const nav = document.createElement('div');
   nav.id = 'cloud-workflow-switch'; nav.className = 'settings-switch cloud-workflow-switch';
   nav.innerHTML = '<button class="settings-switch-button active" data-cloud-view="cloud-cd2" type="button">CD2</button><button class="settings-switch-button" data-cloud-view="cloud-extract" type="button">云解压</button><button class="settings-switch-button" data-cloud-view="cloud-download" type="button">云下载</button>';
@@ -353,6 +361,10 @@ function buildCloudWorkflowTabs(cloud) {
   const shortcutURL = new URL('api/115/offline/import', window.location.href).href;
   $('offline-shortcut-url').textContent = shortcutURL;
   $('offline-copy-url').addEventListener('click', async () => { await navigator.clipboard.writeText(shortcutURL); $('settings-message').textContent = '快捷指令接口地址已复制'; });
+  // Remove the obsolete export control when a browser restores an older DOM
+  // from cache. Shortcut setup is documentation-only now.
+  const obsoleteShortcutDownload = $('offline-shortcut-download');
+  if (obsoleteShortcutDownload) obsoleteShortcutDownload.remove();
   Array.from(cloud.querySelectorAll(':scope > h3, .cloud-extra-settings > h3')).forEach(node => node.remove());
   Array.from(cloud.querySelectorAll('.cloud-extra-settings > .panel-heading')).forEach(node => {
     if (node.textContent.includes('CloudDrive2') || node.textContent.includes('云端处理流程')) node.remove();
