@@ -236,6 +236,7 @@ func Start() error {
 	unpackerr.Xtractr = xtractr.NewQueue(&xtractr.Config{
 		Parallel: int(unpackerr.Parallel),
 		Suffix:   suffix,
+		TryNames: true,
 		Logger:   unpackerr.Logger,
 		FileMode: os.FileMode(fileMode),
 		DirMode:  os.FileMode(dirMode),

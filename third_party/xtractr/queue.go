@@ -504,8 +504,8 @@ func (x *Xtractr) getTempFolderFinalName(resp *Response) string {
 
 	_, err = os.Stat(newName)
 	if x.config.TryNames && err == nil {
-		for i := range tryNames {
-			loopName := newName + fmt.Sprint(".", i)
+		for i := 1; i <= tryNames; i++ {
+			loopName := newName + fmt.Sprintf("(%d)", i)
 
 			_, err = os.Stat(loopName)
 			if err != nil {
