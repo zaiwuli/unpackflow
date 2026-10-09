@@ -90,6 +90,9 @@ type Unpackerr struct {
 	n115LastResult   n115ScanResult        // latest completed cloud-directory scan summary
 	n115DateCacheMu  sync.Mutex           // serializes date-folder CID cache reads and writes
 	n115DateCache    n115DateFolderCache
+	offlineMu        sync.RWMutex
+	offlineStore     n115OfflineStore
+	offlineRunning   atomic.Bool
 	cancelled        sync.Map // task path/key -> struct{} for user-cancelled work
 	nameMappers      sync.Map // task path/key -> *archiveNameMapper
 	cleanupRunning   sync.Map // history key -> struct{} while source cleanup is active
@@ -179,6 +182,7 @@ func New() *Unpackerr {
 				N115RetryCount:       3,
 				N115RetryDelay:       cnfg.Duration{Duration: 2 * time.Minute},
 				N115TaskInterval:     cnfg.Duration{Duration: 30 * time.Second},
+				N115OfflineFallback:  cnfg.Duration{Duration: time.Hour},
 			},
 		},
 		Logger: &Logger{
@@ -445,6 +449,7 @@ func (u *Unpackerr) Run() {
 	u.PollFolders() // This initializes channel(s) used below.
 	u.startCloudDriveMonitor()
 	u.start115Events()
+	u.start115OfflineMonitor()
 	u.retrieveAppQueues(now) // Get in-app queues on startup.
 
 	// This is the "main go routine" in start.go.

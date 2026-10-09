@@ -16,6 +16,8 @@ let currentTasks = [];
 let taskFilter = 'all';
 let historyFilter = 'all';
 let currentHistory = [];
+let currentOfflineBatches = [];
+let offlineRecordFilter = 'all';
 const pendingActions = new Set();
 const expandedTasks = new Set();
 
@@ -33,8 +35,7 @@ function ensureBrandIcon() {
   if (document.querySelector('.brand-icon')) return;
   const title = document.querySelector('.topbar > div:first-child');
   if (!title) return;
-  const text = document.createElement('div');
-  while (title.firstChild) text.appendChild(title.firstChild);
+  title.replaceChildren();
   const icon = document.createElement('img');
   icon.className = 'brand-icon';
   icon.src = 'icon.svg';
@@ -42,8 +43,8 @@ function ensureBrandIcon() {
   icon.width = 46;
   icon.height = 46;
   icon.style.cssText = 'display:block;flex:0 0 auto;border-radius:11px;box-shadow:0 8px 20px #10182824';
-  title.style.cssText = 'display:flex;align-items:center;gap:12px';
-  title.append(icon, text);
+  title.className = 'brand-only';
+  title.append(icon);
   const favicon = document.createElement('link');
   favicon.rel = 'icon';
   favicon.href = 'icon.svg';
@@ -237,6 +238,10 @@ function ensureLocalSettings() {
     '<label class="check-row"><input id="115-scan-failure" type="checkbox"> 主动扫描失败目录</label><small style="color:var(--muted);font-size:12px">关闭后只处理刚刚云解压失败的文件。</small>' +
 		'<div class="field"><span>失败重试</span><div class="settings-pair"><input id="115-retry-count" type="number" min="1" max="10" placeholder="3"><input id="115-retry-delay" type="text" placeholder="2m"></div><small style="color:var(--muted);font-size:12px">尝试次数与两次尝试之间的等待时间。</small></div>' +
 		'<label class="field"><span>两个云解压任务之间的间隔</span><input id="115-task-interval" type="text" placeholder="30s"><small style="color:var(--muted);font-size:12px">默认 30s；填写 0s 表示上一个任务完成后立即放行下一个。</small></label>' +
+		'<h3>115 离线下载</h3>' +
+		'<label class="field"><span>离线保存目录 CID</span><input id="115-offline-cid" type="text" placeholder="指定父目录，提交时自动创建 YYYY-MM-DD 子文件夹"><small style="color:var(--muted);font-size:12px">每次导入都会保存到当天日期子文件夹，再在离线完成后自动查找压缩包。</small></label>' +
+		'<label class="field"><span>离线状态兜底复查间隔</span><input id="115-offline-fallback" type="text" placeholder="60m"><small style="color:var(--muted);font-size:12px">前三次按 1m、3m、5m 查询；之后按此间隔复查未完成任务，0s 关闭定时兜底。</small></label>' +
+		'<div class="field"><span>iPhone 快捷指令导入令牌</span><div class="settings-pair"><input id="115-offline-token" type="text" autocomplete="off" placeholder="用于快捷指令调用，不是115 Cookie"><button id="115-offline-token-generate" type="button">生成令牌</button></div><small style="color:var(--muted);font-size:12px">快捷指令只保存此令牌；115 Cookie 始终留在服务器。</small></div>' +
 		'<h3>日常本地下载</h3><div class="field"><div id="115-downloads" class="mapping-list"></div><div class="form-actions"><button id="115-download-add" type="button">添加下载文件夹</button></div><small style="color:var(--muted);font-size:12px">手动将压缩包移入这些 115 文件夹后，工具刷新对应 CD2 路径；每行可选择自动下载或等待批准。</small></div>' +
 		'<h3>CD2 挂载路径映射</h3><div class="field"><div id="path-mappings" class="mapping-list"></div><div class="form-actions"><button id="path-mapping-add" type="button">添加路径映射</button></div></div>';
   workers.insertAdjacentElement('afterend', block);
@@ -252,6 +257,10 @@ function ensureLocalSettings() {
 	$('115-source-add').addEventListener('click', () => addSourceRow());
 	$('115-download-add').addEventListener('click', () => addDownloadRow());
 	$('path-mapping-add').addEventListener('click', () => addPathMappingRow());
+	$('115-offline-token-generate').addEventListener('click', () => {
+		const bytes = new Uint8Array(24); crypto.getRandomValues(bytes);
+		$('115-offline-token').value = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+	});
 	$('115-success-action').addEventListener('change', update115ArchiveCIDVisibility);
 	$('115-sync').addEventListener('click', sync115Now);
 	buildSettingsSections(block, workers);
@@ -263,19 +272,26 @@ function buildSettingsSections(localBlock, workers) {
   const heading = view.querySelector('.panel-heading');
   const nav = document.createElement('div');
   nav.id = 'settings-switch'; nav.className = 'settings-switch';
-  nav.innerHTML = '<button class="settings-switch-button active" data-settings-view="settings-basic" type="button">基础</button><button class="settings-switch-button" data-settings-view="settings-local" type="button">本地</button><button class="settings-switch-button" data-settings-view="settings-cloud" type="button">云端工作流</button><button class="settings-switch-button" data-settings-view="settings-maintenance" type="button">数据维护</button>';
+  nav.innerHTML = '<button class="settings-switch-button active" data-settings-view="settings-basic" type="button">基础</button><button class="settings-switch-button" data-settings-view="settings-local" type="button">本地</button><button class="settings-switch-button" data-settings-view="settings-cloud" type="button">云端工作流</button><button class="settings-switch-button" data-settings-view="settings-notify" type="button">通知</button><button class="settings-switch-button" data-settings-view="settings-logs" type="button">日志</button><button class="settings-switch-button" data-settings-view="settings-maintenance" type="button">数据维护</button>';
   const basic = document.createElement('section'); basic.id = 'settings-basic'; basic.className = 'settings-section active-settings-section';
   const local = document.createElement('section'); local.id = 'settings-local'; local.className = 'settings-section';
   const cloud = document.createElement('section'); cloud.id = 'settings-cloud'; cloud.className = 'settings-section';
   const maintenance = document.createElement('section'); maintenance.id = 'settings-maintenance'; maintenance.className = 'settings-section';
+  const notify = document.createElement('section'); notify.id = 'settings-notify'; notify.className = 'settings-section';
+  const logs = document.createElement('section'); logs.id = 'settings-logs'; logs.className = 'settings-section';
   maintenance.innerHTML = '<div class="panel-heading"><div><h3>数据维护</h3><p>“清空历史展示”保留防重复保护；要让相同压缩包重新解压，请先停止任务系统，再使用“重置处理记录”。</p></div></div><div class="form-actions"><button id="clear-all-cache" type="button">清除所有缓存</button><button id="clear-all-history" type="button">清空历史展示</button><button id="reset-all-history" type="button">重置处理记录</button></div><p id="maintenance-message" class="form-message"></p>';
-  heading.insertAdjacentElement('afterend', nav); nav.insertAdjacentElement('afterend', basic); basic.insertAdjacentElement('afterend', local); local.insertAdjacentElement('afterend', cloud); cloud.insertAdjacentElement('afterend', maintenance);
+  heading.insertAdjacentElement('afterend', nav); nav.insertAdjacentElement('afterend', basic); basic.insertAdjacentElement('afterend', local); local.insertAdjacentElement('afterend', cloud); cloud.insertAdjacentElement('afterend', notify); notify.insertAdjacentElement('afterend', logs); logs.insertAdjacentElement('afterend', maintenance);
+  const notifyView = $('notify-view');
+  const logsView = $('logs-view');
+  if (notifyView) { while (notifyView.firstChild) notify.appendChild(notifyView.firstChild); notifyView.remove(); }
+  if (logsView) { while (logsView.firstChild) logs.appendChild(logsView.firstChild); logsView.remove(); }
+  document.querySelectorAll('[data-view="notify-view"],[data-view="logs-view"]').forEach(button => button.remove());
   basic.appendChild(workers);
   const all = Array.from(view.children);
   const save = $('settings-save').closest('.form-actions');
   const message = $('settings-message');
   for (const node of all) {
-    if (node === heading || node === nav || node === basic || node === local || node === cloud || node === maintenance || node === save || node === message || node === localBlock) continue;
+    if (node === heading || node === nav || node === basic || node === local || node === cloud || node === notify || node === logs || node === maintenance || node === save || node === message || node === localBlock) continue;
     cloud.appendChild(node);
   }
   const localChildren = Array.from(localBlock.children);
@@ -292,6 +308,7 @@ function buildSettingsSections(localBlock, workers) {
   // 基础 / 本地 tabs have no visible save action after the settings are split.
   cloud.insertAdjacentElement('afterend', save);
   save.insertAdjacentElement('afterend', message);
+  buildCloudWorkflowTabs(cloud);
   nav.querySelectorAll('.settings-switch-button').forEach(button => button.addEventListener('click', () => {
     nav.querySelectorAll('.settings-switch-button').forEach(item => item.classList.remove('active'));
     view.querySelectorAll('.settings-section').forEach(item => item.classList.remove('active-settings-section'));
@@ -300,6 +317,50 @@ function buildSettingsSections(localBlock, workers) {
   $('clear-all-cache').addEventListener('click', () => runMaintenance('clear_cache'));
   $('clear-all-history').addEventListener('click', () => runMaintenance('clear_history'));
   $('reset-all-history').addEventListener('click', () => runMaintenance('reset_history'));
+}
+
+function buildCloudWorkflowTabs(cloud) {
+  if ($('cloud-workflow-switch')) return;
+  const nav = document.createElement('div');
+  nav.id = 'cloud-workflow-switch'; nav.className = 'settings-switch cloud-workflow-switch';
+  nav.innerHTML = '<button class="settings-switch-button active" data-cloud-view="cloud-cd2" type="button">CD2</button><button class="settings-switch-button" data-cloud-view="cloud-extract" type="button">云解压</button><button class="settings-switch-button" data-cloud-view="cloud-download" type="button">云下载</button>';
+  const definitions = [
+    ['cloud-cd2', 'CD2 连接与本地挂载', '配置连接、缓存、定时扫描及云路径到本地路径的映射。'],
+    ['cloud-extract', '115 云解压', '配置云解压来源、目标、成功处理和失败转本地流程。'],
+    ['cloud-download', '115 云下载', '配置离线下载保存目录、状态兜底及日常本地下载目录。'],
+  ];
+  const groups = {};
+  definitions.forEach(([id, title, description], index) => {
+    const section = document.createElement('section');
+    section.id = id; section.className = 'cloud-workflow-section' + (index === 0 ? ' active-cloud-workflow-section' : '');
+    section.innerHTML = '<div class="panel-heading"><div><h3>' + title + '</h3><p>' + description + '</p></div></div>';
+    groups[id] = section;
+  });
+  cloud.prepend(nav, ...definitions.map(item => groups[item[0]]));
+  const move = (id, target) => {
+    const element = $(id); if (!element) return;
+    const root = element.closest('.field,.check-row,.form-actions') || element;
+    const help = root.nextElementSibling && root.nextElementSibling.tagName === 'SMALL' ? root.nextElementSibling : null;
+    groups[target].appendChild(root); if (help) groups[target].appendChild(help);
+  };
+  ['cd2-status','cd2-enabled','cd2-url','cd2-token','refresh-interval','cache-dir','cache-extract-path','keep-cache','cache-delete-delay','copy-timeout','cd2-fallback-enabled','cd2-fallback-interval','path-mappings'].forEach(id => move(id, 'cloud-cd2'));
+  ['115-enabled','115-cookie','115-cookie-remark','115-event-enabled','115-event-interval','115-sync','115-sources','115-extract-by-date','115-success-action','115-archive-cid','115-failure-cid','115-failure-path','115-auto-fallback','115-scan-failure','115-retry-count','115-task-interval'].forEach(id => move(id, 'cloud-extract'));
+  ['115-offline-cid','115-offline-fallback','115-offline-token','115-downloads'].forEach(id => move(id, 'cloud-download'));
+  const shortcut = document.createElement('section');
+  shortcut.className = 'shortcut-card';
+  shortcut.innerHTML = '<div class="panel-heading"><div><h3>iPhone 快捷指令</h3><p>支持分享选中文本、TXT文件或直接读取剪贴板。</p></div></div><code id="offline-shortcut-url"></code><ol><li>快捷指令接收文本、URL和文件。</li><li>文件输入使用“获取文件内容”；没有输入时读取剪贴板。</li><li>使用“获取 URL 内容”发送 POST JSON。</li><li>请求头填写 Authorization: Bearer 你的离线导入令牌。</li></ol><div class="form-actions"><button id="offline-copy-url" type="button">复制接口地址</button><a id="offline-shortcut-download" class="button-link" href="api/115/offline/shortcut" download>下载快捷指令配置</a></div>';
+  groups['cloud-download'].appendChild(shortcut);
+  const shortcutURL = new URL('api/115/offline/import', window.location.href).href;
+  $('offline-shortcut-url').textContent = shortcutURL;
+  $('offline-copy-url').addEventListener('click', async () => { await navigator.clipboard.writeText(shortcutURL); $('settings-message').textContent = '快捷指令接口地址已复制'; });
+  Array.from(cloud.querySelectorAll(':scope > h3, .cloud-extra-settings > h3')).forEach(node => node.remove());
+  Array.from(cloud.querySelectorAll('.cloud-extra-settings > .panel-heading')).forEach(node => {
+    if (node.textContent.includes('CloudDrive2') || node.textContent.includes('云端处理流程')) node.remove();
+  });
+  nav.querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
+    nav.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+    Object.values(groups).forEach(section => section.classList.toggle('active-cloud-workflow-section', section.id === button.dataset.cloudView));
+  }));
 }
 
 async function runMaintenance(action) {
@@ -514,6 +575,10 @@ function fillForms(data) {
 	$('115-retry-count').value = (data.settings && data.settings['115_retry_count']) || 3;
 	$('115-retry-delay').value = (data.settings && data.settings['115_retry_delay']) || '2m';
 	$('115-task-interval').value = (data.settings && data.settings['115_task_interval']) || '30s';
+	$('115-offline-cid').value = (data.settings && data.settings['115_offline_cid']) || '';
+	$('115-offline-fallback').value = (data.settings && data.settings['115_offline_fallback']) || '60m';
+	$('115-offline-token').value = '';
+	$('115-offline-token').placeholder = (data.settings && data.settings['115_offline_token']) ? '已保存，留空表示不修改' : '用于快捷指令调用，不是115 Cookie';
 	fillSourceRows((data.settings && data.settings['115_sources']) || (data.settings && data.settings['115_source_cids']) || [], cidRemarks);
 	fillDownloadRows((data.settings && data.settings['115_download_rules']) || (data.settings && data.settings['115_download_mappings']) || [], cidRemarks);
 	fillPathMappingRows((data.settings && data.settings.path_overrides) || []);
@@ -628,6 +693,7 @@ function renderStatus(data) {
   renderList($('folders'), data.folders, folder => '<div class="compact-item">' + esc(folder.path) + '<small>' + esc(folder.extract_path || '\u539f\u76ee\u5f55\u8f93\u51fa') + ' · ' + folder.tracked + '</small></div>', zh.noFolders);
   currentHistory = data.history || [];
   renderHistory();
+  loadOfflineBatches(true);
   latestLogs = data.logs || [];
   renderLogs();
   $('transfers').innerHTML = '';
@@ -679,6 +745,24 @@ function renderCurrentTasks() {
   });
   const values = taskFilter === 'all' ? currentTasks : currentTasks.filter(task => taskGroup(task) === taskFilter);
   renderList($('tasks'), values, renderTask, zh.noTasks);
+}
+
+function renderOfflineTaskRecords() {
+  const container = $('task-offline-records');
+  if (!container) return;
+  const labels = {submitting:'提交中', submitted:'等待离线', downloading:'离线下载中', success:'离线成功', failed:'离线失败', submit_failed:'提交失败', unknown:'等待兜底复查'};
+  const rows = [];
+  currentOfflineBatches.forEach(batch => (batch.tasks || []).forEach(task => rows.push({batch, task})));
+  const filtered = rows.filter(row => {
+    if (offlineRecordFilter === 'all') return true;
+    if (offlineRecordFilter === 'success') return row.task.status === 'success';
+    if (offlineRecordFilter === 'failed') return row.task.status === 'failed' || row.task.status === 'submit_failed';
+    return ['submitting','submitted','downloading','unknown'].includes(row.task.status);
+  });
+  renderList(container, filtered, row => {
+    const task = row.task, batch = row.batch;
+    return '<article class="task offline-record-card"><div class="task-content"><div class="task-name" title="' + esc(task.name) + '">' + esc(task.name) + '</div><div class="task-meta"><span class="offline-source-mark">115离线</span> · ' + esc(task.kind.toUpperCase()) + ' · ' + esc(batch.target_name) + '</div><div class="progress">' + esc(task.error || task.info_hash || '等待115返回任务信息') + '</div><details class="task-details"><summary>查看详情</summary><dl><dt>导入时间</dt><dd>' + esc(new Date(task.created_at).toLocaleString()) + '</dd><dt>目标目录 CID</dt><dd>' + esc(batch.target_cid) + '</dd><dt>查询次数</dt><dd>' + esc(batch.check_count) + '</dd><dt>下次复查</dt><dd>' + esc(batch.next_check ? new Date(batch.next_check).toLocaleString() : '无需自动复查') + '</dd></dl></details></div><div class="task-side"><span class="badge offline-badge">' + esc(labels[task.status] || task.status) + '</span></div></article>';
+  }, '暂无离线记录');
 }
 
 function renderLogs() {
@@ -753,8 +837,11 @@ $('cd2-refresh').addEventListener('click', async () => {
 function ensureTaskControls() {
   if ($('task-system-control')) return;
   const actions = $('cd2-refresh').parentElement;
+  actions.classList.add('task-primary-actions');
   const control = document.createElement('button');
   control.id = 'task-system-control'; control.type = 'button';
+  control.textContent = '停止并清空等待任务';
+  control.className = 'danger-button';
   actions.appendChild(control);
   const state = document.createElement('p');
   state.id = 'task-system-state'; state.className = 'form-message';
@@ -782,6 +869,26 @@ function ensureTaskControls() {
     historyFilter = event.target.dataset.historyFilter;
     historyFilters.querySelectorAll('button').forEach(button => button.classList.toggle('active', button === event.target));
     renderHistory();
+  });
+  const switcher = document.querySelector('.task-heading .task-switch');
+  const offlineTab = document.createElement('button');
+  offlineTab.className = 'task-switch-button'; offlineTab.type = 'button'; offlineTab.dataset.taskView = 'task-offline-panel'; offlineTab.textContent = '离线记录';
+  switcher.appendChild(offlineTab);
+  const offlinePanel = document.createElement('div');
+  offlinePanel.id = 'task-offline-panel'; offlinePanel.className = 'task-subview';
+  offlinePanel.innerHTML = '<div id="offline-record-filters" class="task-switch"><button class="task-filter active" data-offline-filter="all" type="button">全部</button><button class="task-filter" data-offline-filter="active" type="button">进行中</button><button class="task-filter" data-offline-filter="success" type="button">成功</button><button class="task-filter" data-offline-filter="failed" type="button">失败</button></div><div id="task-offline-records" class="task-list"></div>';
+  $('task-history-panel').insertAdjacentElement('afterend', offlinePanel);
+  $('offline-record-filters').addEventListener('click', event => {
+    if (!event.target.dataset.offlineFilter) return;
+    offlineRecordFilter = event.target.dataset.offlineFilter;
+    $('offline-record-filters').querySelectorAll('button').forEach(button => button.classList.toggle('active', button === event.target));
+    renderOfflineTaskRecords();
+  });
+  offlineTab.addEventListener('click', () => loadOfflineBatches(true));
+  offlineTab.addEventListener('click', () => {
+    document.querySelectorAll('.task-switch-button').forEach(item => item.classList.remove('active'));
+    document.querySelectorAll('.task-subview').forEach(item => item.classList.remove('active-task-subview'));
+    offlineTab.classList.add('active'); offlinePanel.classList.add('active-task-subview');
   });
   control.addEventListener('click', async () => {
     if (!taskSystemPaused && !window.confirm('将暂停本地监听、CD2 推送与扫描、115 云目录扫描，并清除等待、复制、重试和待批准任务及未完成缓存。正在解压和已经开始的 115 云解压不会停止，云端原包不会删除。确定继续吗？')) return;
@@ -861,6 +968,9 @@ $('settings-save').addEventListener('click', async () => {
 		'115_retry_count': Number($('115-retry-count').value) || 3,
 		'115_retry_delay': $('115-retry-delay').value.trim(),
 		'115_task_interval': $('115-task-interval').value.trim(),
+		'115_offline_cid': $('115-offline-cid').value.trim(),
+		'115_offline_fallback': $('115-offline-fallback').value.trim(),
+		'115_offline_token': $('115-offline-token').value.trim(),
 		'115_sources': collectSourceRules(),
 		'115_download_rules': collectDownloadRules(),
 		'115_mappings': [],
@@ -888,5 +998,83 @@ $('settings-save').addEventListener('click', async () => {
 });
 
 ensureBrandIcon();
+ensureLocalSettings();
+ensureOfflineUI();
 load(true);
 setInterval(() => load(false), 5000);
+
+function ensureOfflineUI() {
+  if ($('offline-view')) return;
+  const passwordTab = document.querySelector('[data-view="password-view"]');
+  const button = document.createElement('button');
+  button.className = 'tab'; button.dataset.view = 'offline-view'; button.type = 'button'; button.textContent = '115 离线';
+  passwordTab.parentElement.insertBefore(button, passwordTab);
+  const panel = document.createElement('section');
+  panel.id = 'offline-view'; panel.className = 'view panel';
+  panel.innerHTML = '<div class="panel-heading offline-page-heading"><div><h2>115 离线</h2><p>批量导入 ED2K、磁力或 TXT，离线完成后可自动接入现有云解压流程。</p></div><div class="form-actions"><button id="offline-refresh" type="button">立即复查</button><button id="offline-clear" type="button">清空记录</button></div></div>' +
+    '<label class="field"><span>链接内容</span><textarea id="offline-text" rows="9" placeholder="粘贴多条 ed2k:// 或 magnet:? 链接"></textarea></label>' +
+    '<label class="field"><span>TXT 文件</span><input id="offline-file" type="file" accept=".txt,text/plain"></label>' +
+    '<label class="check-row"><input id="offline-auto-extract" type="checkbox" checked> 离线完成后自动提交115云解压</label>' +
+    '<p id="offline-preview" class="form-message">等待输入</p><div class="form-actions"><button id="offline-submit" type="button">导入离线任务</button></div><p id="offline-message" class="form-message"></p>';
+  $('tasks-view').insertAdjacentElement('afterend', panel);
+  const style = document.createElement('style');
+  style.textContent = '#offline-view textarea{width:100%;box-sizing:border-box;border:1px solid #d8dce5;border-radius:10px;padding:12px;font:inherit;resize:vertical}.offline-page-heading .form-actions{margin-top:0}.offline-batch{border:1px solid #e4e7ec;border-radius:12px;padding:12px;margin-top:10px}.offline-batch summary{cursor:pointer;font-weight:700}.offline-task{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:8px 0;border-top:1px solid #eee}.offline-task small{display:block;color:var(--muted)}@media(max-width:680px){.offline-page-heading{align-items:flex-start;gap:12px}.offline-page-heading .form-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.offline-page-heading .form-actions button{width:100%}.offline-task{grid-template-columns:1fr}}';
+  document.head.appendChild(style);
+  button.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(item => item.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(item => item.classList.remove('active-view'));
+    button.classList.add('active');
+    panel.classList.add('active-view');
+    loadOfflineBatches();
+  });
+  $('offline-text').addEventListener('input', updateOfflinePreview);
+  $('offline-file').addEventListener('change', updateOfflinePreview);
+  $('offline-submit').addEventListener('click', submitOfflineImport);
+  $('offline-refresh').addEventListener('click', async () => { await fetch('api/115/offline/refresh', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); await loadOfflineBatches(); });
+  $('offline-clear').addEventListener('click', clearOfflineRecords);
+}
+
+function offlineLinkCount(text) {
+  return (text.match(/(?:ed2k:\/\/\|file\|.*?\|\/|magnet:\?[^\s]+|(?:https?|ftp):\/\/[^\s]+)/gi) || []).length;
+}
+
+async function updateOfflinePreview() {
+  let text = $('offline-text').value;
+  const file = $('offline-file').files[0];
+  if (file) text += '\n' + await file.text().catch(() => '');
+  $('offline-preview').textContent = '当前识别约 ' + offlineLinkCount(text) + ' 条链接；提交时后端会按哈希再次去重。';
+}
+
+async function submitOfflineImport() {
+  const button = $('offline-submit'); button.disabled = true; $('offline-message').textContent = '正在导入并提交到115…';
+  const form = new FormData(); form.append('text', $('offline-text').value); form.append('auto_extract', $('offline-auto-extract').checked ? 'true' : 'false');
+  const file = $('offline-file').files[0]; if (file) form.append('file', file);
+  try {
+    const response = await fetch('api/115/offline/import', {method:'POST', body:form});
+    const raw = await response.text(); let data = {}; try { data = JSON.parse(raw); } catch (_) {}
+    $('offline-message').textContent = response.ok ? ('已创建批次，识别 ' + data.recognized + ' 条，新增 ' + data.submitted + ' 条；首次查询将在60秒后进行。') : raw;
+    if (response.ok) { $('offline-text').value = ''; $('offline-file').value = ''; await loadOfflineBatches(); }
+  } catch (_) { $('offline-message').textContent = '导入失败，请检查网络和服务日志'; }
+  button.disabled = false;
+}
+
+async function loadOfflineBatches(silent) {
+  try {
+    const response = await fetch('api/115/offline', {cache:'no-store'}); const data = await response.json();
+    const batches = data.batches || [];
+    currentOfflineBatches = batches;
+    renderOfflineTaskRecords();
+    if ($('offline-batches')) $('offline-batches').innerHTML = batches.length ? batches.map(batch => {
+      const counts = {}; (batch.tasks || []).forEach(task => counts[task.status] = (counts[task.status] || 0) + 1);
+      const next = batch.next_check ? new Date(batch.next_check).toLocaleString() : '无需复查';
+      return '<details class="offline-batch"><summary>' + esc(batch.target_name) + ' · ' + batch.tasks.length + '条 · 成功' + (counts.success || 0) + ' · 进行中' + ((counts.submitted || 0)+(counts.downloading || 0)+(counts.unknown || 0)) + ' · 失败' + ((counts.failed || 0)+(counts.submit_failed || 0)) + '</summary><p class="form-message">已查询 ' + batch.check_count + ' 次，下次：' + esc(next) + '</p>' + batch.tasks.map(task => '<div class="offline-task"><div>' + esc(task.name) + '<small>' + esc(task.kind.toUpperCase()) + ' · ' + esc(task.error || task.info_hash || '') + '</small></div><strong>' + esc(task.status) + '</strong></div>').join('') + '</details>';
+    }).join('') : '<p class="empty">暂无离线记录</p>';
+  } catch (_) { if (!silent && $('offline-batches')) $('offline-batches').innerHTML = '<p class="empty">读取离线记录失败</p>'; }
+}
+
+async function clearOfflineRecords() {
+  if (!window.confirm('只清除 UnpackFlow 本地离线记录，不删除115中的任务或文件。清除后相同链接可重新导入。确定继续吗？')) return;
+  const response = await fetch('api/115/offline/clear', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:'all'})});
+  $('offline-message').textContent = response.ok ? '离线记录已清空' : '清空失败';
+  await loadOfflineBatches();
+}

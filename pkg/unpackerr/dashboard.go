@@ -1004,6 +1004,13 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 			return
 		}
 	}
+	if overrides.N115OfflineFallback != "" {
+		duration, err := time.ParseDuration(overrides.N115OfflineFallback)
+		if err != nil || duration < 0 {
+			http.Error(w, "115 离线兜底间隔格式无效，例如：0s、60m", http.StatusBadRequest)
+			return
+		}
+	}
 	if err := validate115CloudSettings(overrides); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

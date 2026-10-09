@@ -72,6 +72,9 @@ func (u *Unpackerr) unmarshalConfig() (uint64, uint64, string, error) {
 	if err := u.loadProcessingState(); err != nil {
 		return 0, 0, msg, err
 	}
+	if err := u.load115OfflineStore(); err != nil {
+		return 0, 0, msg, err
+	}
 
 	fileMode, dirMode := u.validateConfig()
 
