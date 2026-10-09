@@ -30,11 +30,23 @@ const (
 // The two-part legacy format (source CID => CD2 path) remains accepted.
 type N115Mapping struct {
 	SourceCID   string
+	// RuleCID identifies the configured monitored folder whose routing rules
+	// apply. It differs from SourceCID for offline files stored in dated child
+	// folders: cleanup must use the real child CID, while extraction inherits
+	// the parent monitor folder's destination.
+	RuleCID     string
 	FallbackCID string
 	CD2Path     string
 	RouteID     string
 	RouteLabel  string
 	Kind        string
+}
+
+func (m N115Mapping) ruleCID() string {
+	if value := strings.TrimSpace(m.RuleCID); value != "" {
+		return value
+	}
+	return strings.TrimSpace(m.SourceCID)
 }
 
 type N115DownloadMapping struct {
@@ -177,6 +189,14 @@ func n115FailureMapping(cfg CloudDriveConfig, sourceCID string) N115Mapping {
 	return N115Mapping{SourceCID: sourceCID, FallbackCID: strings.TrimSpace(cfg.N115FailureCID), CD2Path: strings.TrimSpace(cfg.N115FailureCD2Path), RouteID: "cloud-failure", Kind: "cloud_failure"}
 }
 
+func n115OfflineMapping(cfg CloudDriveConfig, sourceCID string) N115Mapping {
+	mapping := n115FailureMapping(cfg, sourceCID)
+	mapping.RuleCID = strings.TrimSpace(cfg.N115OfflineCID)
+	mapping.RouteID = "offline:" + mapping.RuleCID
+	mapping.Kind = "offline"
+	return mapping
+}
+
 func validate115CloudSettings(settings UIOverrides) error {
 	if settings.N115Enabled == nil || !*settings.N115Enabled {
 		return nil
@@ -185,6 +205,19 @@ func validate115CloudSettings(settings UIOverrides) error {
 	downloads := parse115DownloadMappings(settings.N115Downloads)
 	failureCID := strings.TrimSpace(settings.N115FailureCID)
 	failurePath := strings.TrimSpace(settings.N115FailureCD2Path)
+	offlineCID := strings.TrimSpace(settings.N115OfflineCID)
+	if offlineCID != "" {
+		matched := false
+		for _, sourceCID := range sources {
+			if sourceCID == offlineCID {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("离线保存目录 CID 必须同时配置为云解压来源，才能共用同一套路由规则")
+		}
+	}
 	if len(sources) > 0 && (failureCID == "" || failurePath == "") {
 		return fmt.Errorf("配置云解压来源后，必须填写失败归档 CID 和对应 CD2 路径")
 	}
@@ -783,8 +816,9 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 			task.CanCloudRetry = false
 		})
 		u.Systemf("115 云解压开始（第 %d/%d 次）：%s", attempt, retries, file.Name)
-		targetCID := mapping.SourceCID
-		if value := strings.TrimSpace(u.CloudDrive2.N115ExtractCIDs[mapping.SourceCID]); value != "" {
+		ruleCID := mapping.ruleCID()
+		targetCID := ruleCID
+		if value := strings.TrimSpace(u.CloudDrive2.N115ExtractCIDs[ruleCID]); value != "" {
 			targetCID = value
 		}
 		status, extractErr := u.n115SeparateExtract(file, targetCID, func(cid, name string) {

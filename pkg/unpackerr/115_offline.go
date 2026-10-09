@@ -602,7 +602,7 @@ func (u *Unpackerr) trigger115OfflineExtraction(batchID string) {
 			defer u.n115Running.Delete(version.Key)
 			u.n115Queue <- struct{}{}
 			defer func() { <-u.n115Queue }()
-			u.run115CloudExtract(n115FailureMapping(u.CloudDrive2, version.SourceCID), file, version)
+			u.run115CloudExtract(n115OfflineMapping(u.CloudDrive2, version.SourceCID), file, version)
 		}(file, version)
 	}
 	if queued > 0 {
