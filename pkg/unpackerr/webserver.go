@@ -108,6 +108,7 @@ func (u *Unpackerr) webRoutes() {
 	u.Webserver.router.GET(path.Join(u.Webserver.URLBase, "/api/115/offline"), u.n115OfflineListAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/115/offline/import"), u.n115OfflineImportAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/115/offline/refresh"), u.n115OfflineRefreshAPI)
+	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/115/offline/retry"), u.n115OfflineRetryAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/115/offline/clear"), u.n115OfflineClearAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/115/fallback"), u.n115FallbackAPI)
 	u.Webserver.router.POST(path.Join(u.Webserver.URLBase, "/api/settings"), u.settingsAPI)

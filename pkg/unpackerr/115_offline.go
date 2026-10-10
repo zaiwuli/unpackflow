@@ -56,6 +56,8 @@ type n115OfflineTask struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	ExtractedAt time.Time `json:"extracted_at,omitempty"`
+	RetryCount  int       `json:"retry_count,omitempty"`
+	NotifiedStatus string `json:"notified_status,omitempty"`
 }
 
 func parseOfflineLinks(text string) []string {
@@ -298,10 +300,19 @@ func (u *Unpackerr) n115OfflineImportAPI(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	if len(batch.Tasks) == 0 {
-		http.Error(w, "识别到的链接都已导入过", http.StatusConflict)
+		u.Systemf("115离线导入：本次导入 0 条，重复跳过 %d 条", len(links))
+		u.notifyOfflineSummary(batch.ID, 0, len(links), 0)
+		u.writeJSON(w, map[string]any{"success": true, "message": "本次导入 0 条"})
 		return
 	}
-	batch.NextCheck = time.Now().Add(15 * time.Second)
+	submitted, failed := 0, 0
+	for _, task := range batch.Tasks {
+		if task.Status == "submitted" { submitted++ }
+		if task.Status == "submit_failed" { failed++ }
+	}
+	if submitted > 0 {
+		batch.NextCheck = time.Now().Add(15 * time.Second)
+	}
 	u.offlineMu.Lock()
 	u.offlineStore.Batches[batch.ID] = batch
 	err = u.save115OfflineStoreLocked()
@@ -310,7 +321,18 @@ func (u *Unpackerr) n115OfflineImportAPI(w http.ResponseWriter, r *http.Request,
 		http.Error(w, "保存离线记录失败："+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	u.writeJSON(w, map[string]any{"success": true, "batch": batch, "recognized": len(links), "submitted": len(batch.Tasks)})
+	duplicates := len(links) - len(unique)
+	u.Systemf("115离线导入 %s：提交 %d 条，重复 %d 条，失败 %d 条", batch.ID, submitted, duplicates, failed)
+	u.notifyOfflineSummary(batch.ID, submitted, duplicates, failed)
+	u.writeJSON(w, map[string]any{"success": true, "message": fmt.Sprintf("本次导入 %d 条", submitted)})
+}
+
+func (u *Unpackerr) notifyOfflineSummary(id string, submitted, duplicates, failed int) {
+	settings := u.notificationSettings()
+	if !settings.Enabled || settings.URL == "" || !notificationStageEnabled(settings, notifyOffline) {
+		return
+	}
+	u.sendNotification(settings, "📥", "115 离线导入", "115离线", fmt.Sprintf("批次 %s：提交 %d，重复 %d，失败 %d", id, submitted, duplicates, failed))
 }
 
 func readOfflineImport(r *http.Request) (string, bool, error) {
@@ -426,6 +448,68 @@ func (u *Unpackerr) n115OfflineRefreshAPI(w http.ResponseWriter, r *http.Request
 	u.n115OfflineListAPI(w, r, nil)
 }
 
+func (u *Unpackerr) n115OfflineRetryAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	var input struct {
+		BatchID string `json:"batch_id"`
+		TaskID  string `json:"task_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.BatchID == "" || input.TaskID == "" {
+		http.Error(w, "缺少批次或任务 ID", http.StatusBadRequest)
+		return
+	}
+	u.offlineMu.Lock()
+	batch := u.offlineStore.Batches[input.BatchID]
+	var task *n115OfflineTask
+	if batch != nil {
+		for _, item := range batch.Tasks {
+			if item.ID == input.TaskID { task = item; break }
+		}
+	}
+	if task == nil || (task.Status != "failed" && task.Status != "submit_failed") {
+		u.offlineMu.Unlock()
+		http.Error(w, "只能重试失败的离线任务", http.StatusConflict)
+		return
+	}
+	previous := task.Status
+	task.Status = "submitting"
+	task.UpdatedAt = time.Now()
+	link, targetCID := task.Link, batch.TargetCID
+	u.offlineMu.Unlock()
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	result, retryErr := u.n115SubmitOfflineBatch(ctx, []string{link}, targetCID)
+	hash := result[offlineLinkIdentity(link)]
+	u.offlineMu.Lock()
+	if u.offlineStore.Batches[input.BatchID] != batch {
+		u.offlineMu.Unlock()
+		http.Error(w, "离线记录已清空", http.StatusConflict)
+		return
+	}
+	task.RetryCount++
+	task.UpdatedAt = time.Now()
+	if retryErr != nil {
+		task.Status, task.Error = previous, retryErr.Error()
+	} else {
+		task.Status, task.Error, task.InfoHash = "submitted", "", hash
+		task.NotifiedStatus = ""
+		batch.NextCheck = time.Now().Add(15 * time.Second)
+	}
+	saveErr := u.save115OfflineStoreLocked()
+	u.offlineMu.Unlock()
+	if saveErr != nil {
+		http.Error(w, saveErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	if retryErr != nil {
+		u.Errorf("115离线重试失败：%s：%v", task.Name, retryErr)
+		http.Error(w, retryErr.Error(), http.StatusBadGateway)
+		return
+	}
+	u.Systemf("115离线重试已提交：%s", task.Name)
+	u.notifyOfflineSummary(input.BatchID, 1, 0, 0)
+	u.writeJSON(w, map[string]any{"success": true, "message": "已重新提交"})
+}
+
 func (u *Unpackerr) refresh115OfflineBatch(id string) {
 	u.offlineMu.RLock()
 	batch := u.offlineStore.Batches[id]
@@ -457,7 +541,20 @@ func (u *Unpackerr) refresh115OfflineBatch(id string) {
 			if !exists || task.InfoHash == "" {
 				continue
 			}
+			before := task.Status
 			task.Status, task.Error, task.UpdatedAt = status.Status, status.Error, now
+			if before != task.Status && (task.Status == "success" || task.Status == "failed") {
+				u.Systemf("115离线%s：%s %s", map[bool]string{true:"完成", false:"失败"}[task.Status == "success"], task.Name, task.Error)
+				settings := u.notificationSettings()
+				if task.NotifiedStatus != task.Status && settings.Enabled && settings.URL != "" && notificationStageEnabled(settings, notifyOffline) {
+					icon, title := "✅", "115 离线成功"
+					if task.Status == "failed" { icon, title = "❌", "115 离线失败" }
+					detail := task.Name
+					if task.Status == "failed" && task.Error != "" { detail += "：" + task.Error }
+					u.sendNotification(settings, icon, title, "115离线", detail)
+					task.NotifiedStatus = task.Status
+				}
+			}
 		}
 	}
 	switch batch.CheckCount {

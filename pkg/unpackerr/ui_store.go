@@ -66,6 +66,7 @@ type UINotificationEvents struct {
 	Extract   bool `json:"extract"`
 	Complete  bool `json:"complete"`
 	Cleanup   bool `json:"cleanup"`
+	Offline   *bool `json:"offline,omitempty"`
 }
 
 type notificationStage string
@@ -76,10 +77,12 @@ const (
 	notifyExtract   notificationStage = "extract"
 	notifyComplete  notificationStage = "complete"
 	notifyCleanup   notificationStage = "cleanup"
+	notifyOffline   notificationStage = "offline"
 )
 
 func defaultNotificationEvents() *UINotificationEvents {
-	return &UINotificationEvents{Discovery: true, Cache: true, Extract: true, Complete: true, Cleanup: true}
+	enabled := true
+	return &UINotificationEvents{Discovery: true, Cache: true, Extract: true, Complete: true, Cleanup: true, Offline: &enabled}
 }
 
 func normalizeNotification(settings UINotification) UINotification {
@@ -1313,6 +1316,8 @@ func notificationStageEnabled(settings UINotification, stage notificationStage) 
 		return events.Complete
 	case notifyCleanup:
 		return events.Cleanup
+	case notifyOffline:
+		return events.Offline == nil || *events.Offline
 	default:
 		return false
 	}
@@ -1330,6 +1335,8 @@ func notificationStageName(stage notificationStage) string {
 		return "完成"
 	case notifyCleanup:
 		return "清理"
+	case notifyOffline:
+		return "离线"
 	default:
 		return "未知"
 	}

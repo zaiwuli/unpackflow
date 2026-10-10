@@ -1,6 +1,37 @@
 package unpackerr
 
-import "testing"
+import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"testing"
+)
+
+func TestOfflineRetryRejectsNonFailedTask(t *testing.T) {
+	u := New()
+	u.ConfigFile = filepath.Join(t.TempDir(), "unpackerr.conf")
+	if err := u.load115OfflineStore(); err != nil { t.Fatal(err) }
+	u.offlineStore.Batches["batch"] = &n115OfflineBatch{ID: "batch", Tasks: []*n115OfflineTask{{ID: "task", Status: "success"}}}
+	request := httptest.NewRequest(http.MethodPost, "/api/115/offline/retry", bytes.NewBufferString(`{"batch_id":"batch","task_id":"task"}`))
+	recorder := httptest.NewRecorder()
+	u.n115OfflineRetryAPI(recorder, request, nil)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected conflict for successful task, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestLegacyNotificationEnablesOfflineByDefault(t *testing.T) {
+	settings := UINotification{Events: &UINotificationEvents{Complete: true}}
+	if !notificationStageEnabled(settings, notifyOffline) {
+		t.Fatal("legacy notification configuration disabled offline notifications")
+	}
+	disabled := false
+	settings.Events.Offline = &disabled
+	if notificationStageEnabled(settings, notifyOffline) {
+		t.Fatal("explicitly disabled offline notification was ignored")
+	}
+}
 
 func TestOfflineMappingUsesParentRuleAndActualSource(t *testing.T) {
 	cfg := CloudDriveConfig{N115OfflineCID: "monitor-parent", N115FailureCID: "failed", N115FailureCD2Path: "/failed"}
