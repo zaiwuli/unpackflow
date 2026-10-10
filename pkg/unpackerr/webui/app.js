@@ -61,7 +61,8 @@ function ensureNotificationOptions() {
     '<label class="check-row"><input id="notify-extract" type="checkbox"> 开始解压</label>' +
     '<label class="check-row"><input id="notify-complete" type="checkbox"> 完成结果（成功或失败）</label>' +
     '<label class="check-row"><input id="notify-cleanup" type="checkbox"> 清理完成</label>' +
-    '<label class="check-row"><input id="notify-offline" type="checkbox"> 115 离线导入与结果</label>';
+    '<label class="check-row"><input id="notify-offline" type="checkbox"> 115 离线与 TXT 导入</label>' +
+    '<label class="check-row"><input id="notify-cloud-115" type="checkbox"> 115 云解压接管与结果</label>';
   $('notify-url').closest('.field').insertAdjacentElement('afterend', options);
   const style = document.createElement('style');
   style.textContent = '.active-provider{background:#e9efff;color:var(--brand);border-color:var(--brand);font-weight:700}';
@@ -150,7 +151,8 @@ function ensureNotificationOptions() {
     '<label class="check-row"><input id="notify-extract" type="checkbox"> 开始解压</label>' +
     '<label class="check-row"><input id="notify-complete" type="checkbox"> 完成结果（成功或失败）</label>' +
     '<label class="check-row"><input id="notify-cleanup" type="checkbox"> 清理完成</label>' +
-    '<label class="check-row"><input id="notify-offline" type="checkbox"> 115 离线导入与结果</label>' +
+    '<label class="check-row"><input id="notify-offline" type="checkbox"> 115 离线与 TXT 导入</label>' +
+    '<label class="check-row"><input id="notify-cloud-115" type="checkbox"> 115 云解压接管与结果</label>' +
     '<h3>通知方式</h3>' +
     '<div class="form-actions" style="margin-top:8px"><button id="notify-mp" type="button">MP 模板通知</button><button id="notify-ms" type="button">MS 模板通知</button></div>' +
     '<label class="field" id="notify-api-key-row"><span>MS 密钥</span><input id="notify-api-key" type="text" autocomplete="off" placeholder="输入 MS 的 apiKey"></label>';
@@ -182,6 +184,7 @@ async function saveNotificationSettings() {
       complete: $('notify-complete').checked,
       cleanup: $('notify-cleanup').checked,
       offline: $('notify-offline').checked,
+      cloud_115: $('notify-cloud-115').checked,
     },
   })});
   $('notify-message').textContent = response.ok ? zh.saved : zh.saveFailed;
@@ -244,6 +247,9 @@ function ensureLocalSettings() {
 		'<h3>115 离线下载</h3>' +
 		'<label class="field"><span>115 离线文件保存位置 CID</span><input id="115-offline-cid" type="text" placeholder="填写云解压来源中的一个 CID"><small style="color:var(--muted);font-size:12px">这是115存放下载文件的父目录，不是解压目标。压缩包沿用上方云解压配置的目标、归档和失败规则。</small></label>' +
 		'<label class="field"><span>离线状态兜底复查间隔</span><input id="115-offline-fallback" type="text" placeholder="60m"><small style="color:var(--muted);font-size:12px">前三次按 15s、3m、5m 查询；之后按此间隔复查未完成任务，0s 关闭定时兜底。</small></label>' +
+		'<label class="field"><span>TXT 磁链文件夹（自动生成）</span><input id="115-txt-folder" type="text" readonly placeholder="保存设置并重启后自动生成"></label>' +
+		'<label class="field"><span>TXT 兜底扫描间隔</span><input id="115-txt-scan-interval" type="text" placeholder="5m"><small style="color:var(--muted);font-size:12px">实时监听始终开启；0s 只关闭定时兜底扫描。</small></label>' +
+		'<div class="form-actions"><button id="115-txt-scan" type="button">立即扫描 TXT</button></div><p id="115-txt-scan-message" class="form-message"></p>' +
 		'<h3>日常本地下载</h3><div class="field"><div id="115-downloads" class="mapping-list"></div><div class="form-actions"><button id="115-download-add" type="button">添加下载文件夹</button></div><small style="color:var(--muted);font-size:12px">手动将压缩包移入这些 115 文件夹后，工具刷新对应 CD2 路径；每行可选择自动下载或等待批准。</small></div>' +
 		'<h3>CD2 挂载路径映射</h3><div class="field"><div id="path-mappings" class="mapping-list"></div><div class="form-actions"><button id="path-mapping-add" type="button">添加路径映射</button></div></div>';
   workers.insertAdjacentElement('afterend', block);
@@ -261,6 +267,7 @@ function ensureLocalSettings() {
 	$('path-mapping-add').addEventListener('click', () => addPathMappingRow());
 	$('115-success-action').addEventListener('change', update115ArchiveCIDVisibility);
 	$('115-sync').addEventListener('click', sync115Now);
+	$('115-txt-scan').addEventListener('click', scanOfflineTXTNow);
 	buildSettingsSections(block, workers);
 }
 
@@ -351,7 +358,7 @@ function buildCloudWorkflowTabs(cloud) {
   };
   ['cd2-status','cd2-enabled','cd2-url','cd2-token','refresh-interval','cache-dir','cache-extract-path','keep-cache','cache-delete-delay','copy-timeout','cd2-fallback-enabled','cd2-fallback-interval','path-mappings'].forEach(id => move(id, 'cloud-cd2'));
   ['115-enabled','115-cookie','115-cookie-remark','115-event-enabled','115-event-interval','115-sync','115-sources','115-extract-by-date','115-success-action','115-archive-cid','115-failure-cid','115-failure-path','115-auto-fallback','115-scan-failure','115-retry-count','115-task-interval'].forEach(id => move(id, 'cloud-extract'));
-  ['115-offline-cid','115-offline-fallback','115-downloads'].forEach(id => move(id, 'cloud-download'));
+  ['115-offline-cid','115-offline-fallback','115-txt-folder','115-txt-scan-interval','115-txt-scan','115-txt-scan-message','115-downloads'].forEach(id => move(id, 'cloud-download'));
   const shortcut = document.createElement('section');
   shortcut.className = 'shortcut-card';
   shortcut.innerHTML = '<code id="offline-shortcut-url"></code>';
@@ -555,6 +562,7 @@ function fillForms(data) {
   $('notify-complete').checked = !!notifyEvents.complete;
   $('notify-cleanup').checked = !!notifyEvents.cleanup;
   $('notify-offline').checked = notifyEvents.offline !== false;
+  $('notify-cloud-115').checked = notifyEvents.cloud_115 !== false;
   renderNotificationTemplates(data.notification);
   updateNotificationAddressLabel();
   $('workers').value = data.totals.workers || 1;
@@ -587,6 +595,8 @@ function fillForms(data) {
 	$('115-task-interval').value = (data.settings && data.settings['115_task_interval']) || '30s';
 	$('115-offline-cid').value = (data.settings && data.settings['115_offline_cid']) || '';
 	$('115-offline-fallback').value = (data.settings && data.settings['115_offline_fallback']) || '60m';
+	$('115-txt-folder').value = (data.settings && data.settings['115_txt_folder']) || '';
+	$('115-txt-scan-interval').value = (data.settings && data.settings['115_txt_scan_interval']) || '5m';
 	fillSourceRows((data.settings && data.settings['115_sources']) || (data.settings && data.settings['115_source_cids']) || [], cidRemarks);
 	fillDownloadRows((data.settings && data.settings['115_download_rules']) || (data.settings && data.settings['115_download_mappings']) || [], cidRemarks);
 	fillPathMappingRows((data.settings && data.settings.path_overrides) || []);
@@ -884,7 +894,7 @@ function ensureTaskControls() {
   switcher.appendChild(offlineTab);
   const offlinePanel = document.createElement('div');
   offlinePanel.id = 'task-offline-panel'; offlinePanel.className = 'task-subview';
-  offlinePanel.innerHTML = '<div id="offline-record-filters" class="task-switch"><button class="task-filter active" data-offline-filter="all" type="button">全部</button><button class="task-filter" data-offline-filter="active" type="button">进行中</button><button class="task-filter" data-offline-filter="success" type="button">成功</button><button class="task-filter" data-offline-filter="failed" type="button">失败</button></div><div id="task-offline-records" class="task-list"></div>';
+  offlinePanel.innerHTML = '<div class="offline-record-toolbar"><div id="offline-record-filters" class="task-switch"><button class="task-filter active" data-offline-filter="all" type="button">全部</button><button class="task-filter" data-offline-filter="active" type="button">进行中</button><button class="task-filter" data-offline-filter="success" type="button">成功</button><button class="task-filter" data-offline-filter="failed" type="button">失败</button></div><button id="offline-retry-all-records" type="button">一键重试全部失败</button></div><div id="task-offline-records" class="task-list"></div>';
   $('task-history-panel').insertAdjacentElement('afterend', offlinePanel);
   $('offline-record-filters').addEventListener('click', event => {
     if (!event.target.dataset.offlineFilter) return;
@@ -893,6 +903,7 @@ function ensureTaskControls() {
     renderOfflineTaskRecords();
   });
   offlineTab.addEventListener('click', () => loadOfflineBatches(true));
+  $('offline-retry-all-records').addEventListener('click', retryAllOfflineTasks);
   offlineTab.addEventListener('click', () => {
     document.querySelectorAll('.task-switch-button').forEach(item => item.classList.remove('active'));
     document.querySelectorAll('.task-subview').forEach(item => item.classList.remove('active-task-subview'));
@@ -978,6 +989,7 @@ $('settings-save').addEventListener('click', async () => {
 		'115_task_interval': $('115-task-interval').value.trim(),
 		'115_offline_cid': $('115-offline-cid').value.trim(),
 		'115_offline_fallback': $('115-offline-fallback').value.trim(),
+		'115_txt_scan_interval': $('115-txt-scan-interval').value.trim(),
 		'115_sources': collectSourceRules(),
 		'115_download_rules': collectDownloadRules(),
 		'115_mappings': [],
@@ -1018,7 +1030,7 @@ function ensureOfflineUI() {
   passwordTab.parentElement.insertBefore(button, passwordTab);
   const panel = document.createElement('section');
   panel.id = 'offline-view'; panel.className = 'view panel';
-  panel.innerHTML = '<div class="panel-heading offline-page-heading"><div><h2>115 离线</h2><p>批量导入 ED2K、磁力或 TXT，离线完成后可自动接入现有云解压流程。</p></div><div class="form-actions"><button id="offline-refresh" type="button">立即复查</button><button id="offline-clear" type="button">清空记录</button></div></div>' +
+  panel.innerHTML = '<div class="panel-heading offline-page-heading"><div><h2>115 离线</h2><p>批量导入 ED2K、磁力或 TXT，离线完成后压缩包直接交给现有云解压流程。</p></div><div class="form-actions"><button id="offline-refresh" type="button">立即复查</button><button id="offline-retry-all" type="button">一键重试失败</button><button id="offline-clear" type="button">清空记录</button></div></div>' +
     '<label class="field"><span>链接内容</span><textarea id="offline-text" rows="9" placeholder="粘贴多条 ed2k:// 或 magnet:? 链接"></textarea></label>' +
     '<label class="field"><span>TXT 文件</span><input id="offline-file" type="file" accept=".txt,text/plain"></label>' +
     '<label class="check-row"><input id="offline-auto-extract" type="checkbox" checked> 离线完成后自动提交115云解压</label>' +
@@ -1039,6 +1051,7 @@ function ensureOfflineUI() {
   $('offline-submit').addEventListener('click', submitOfflineImport);
   $('task-offline-records').addEventListener('click', retryOfflineTask);
   $('offline-refresh').addEventListener('click', async () => { await fetch('api/115/offline/refresh', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); await loadOfflineBatches(); });
+  $('offline-retry-all').addEventListener('click', retryAllOfflineTasks);
   $('offline-clear').addEventListener('click', clearOfflineRecords);
 }
 
@@ -1064,6 +1077,22 @@ async function retryOfflineTask(event) {
     $('offline-message').textContent = '重试失败，请检查网络和服务日志';
     button.disabled = false;
   }
+}
+
+async function retryAllOfflineTasks() {
+  if (!window.confirm('只会重试“离线失败”和“提交失败”的任务，确定继续吗？')) return;
+  const response = await fetch('api/115/offline/retry-all', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  const raw = await response.text(); let data = {}; try { data = JSON.parse(raw); } catch (_) {}
+  if ($('offline-message')) $('offline-message').textContent = data.message || raw;
+  await loadOfflineBatches();
+}
+
+async function scanOfflineTXTNow() {
+  const message = $('115-txt-scan-message');
+  message.textContent = '正在扫描…';
+  const response = await fetch('api/115/offline/scan-txt', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  const raw = await response.text(); let data = {}; try { data = JSON.parse(raw); } catch (_) {}
+  message.textContent = response.ok ? data.message : raw;
 }
 
 async function updateOfflinePreview() {

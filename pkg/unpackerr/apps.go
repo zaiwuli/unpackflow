@@ -122,6 +122,7 @@ type CloudDriveConfig struct {
 	N115TaskInterval     cnfg.Duration     `json:"115_task_interval" toml:"115_task_interval" xml:"115_task_interval" yaml:"115_task_interval"`
 	N115OfflineCID       string            `json:"115_offline_cid" toml:"115_offline_cid" xml:"115_offline_cid" yaml:"115_offline_cid"`
 	N115OfflineFallback  cnfg.Duration     `json:"115_offline_fallback" toml:"115_offline_fallback" xml:"115_offline_fallback" yaml:"115_offline_fallback"`
+	N115TXTScanInterval  cnfg.Duration     `json:"115_txt_scan_interval" toml:"115_txt_scan_interval" xml:"115_txt_scan_interval" yaml:"115_txt_scan_interval"`
 }
 
 type FoldersConfig struct {

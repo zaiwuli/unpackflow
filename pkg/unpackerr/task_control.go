@@ -117,6 +117,8 @@ func (u *Unpackerr) resumeTaskDiscovery() {
 	u.scanExistingFolderArchives()
 	u.poll115RecentOperations()
 	u.scan115FailureFolder()
+	u.triggerPending115OfflineExtractions()
+	if root := u.offlineTXTFolder(); root != "" { u.scan115OfflineTXTFolder(root) }
 	u.cd2Mu.RLock()
 	client := u.cd2Client
 	u.cd2Mu.RUnlock()

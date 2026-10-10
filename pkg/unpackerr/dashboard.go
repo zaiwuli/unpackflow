@@ -882,6 +882,8 @@ func (u *Unpackerr) n115SyncAPI(w http.ResponseWriter, r *http.Request, _ httpro
 		cd2Found = u.cloudDriveFallbackScanPaths(client, cloudDriveManualWatchPaths(u.CloudDrive2), u.CloudDrive2.PathOverrides)
 	}
 	localFound := u.scanExistingFolderArchivesCount()
+	u.triggerPending115OfflineExtractions()
+	if root := u.offlineTXTFolder(); root != "" { u.scan115OfflineTXTFolder(root) }
 	u.Printf("手动全链路刷新完成：115 来源 %d 个，CD2 目录 %d 个，本地发现 %d 个", result.Folders, cd2Paths, localFound)
 	u.writeJSON(w, map[string]any{
 		"success": true, "scan": result,
@@ -1008,6 +1010,13 @@ func (u *Unpackerr) settingsAPI(w http.ResponseWriter, r *http.Request, _ httpro
 		duration, err := time.ParseDuration(overrides.N115OfflineFallback)
 		if err != nil || duration < 0 {
 			http.Error(w, "115 离线兜底间隔格式无效，例如：0s、60m", http.StatusBadRequest)
+			return
+		}
+	}
+	if overrides.N115TXTScanInterval != "" {
+		duration, err := time.ParseDuration(overrides.N115TXTScanInterval)
+		if err != nil || duration < 0 {
+			http.Error(w, "TXT 磁链兜底扫描间隔无效，例如：0s、5m", http.StatusBadRequest)
 			return
 		}
 	}

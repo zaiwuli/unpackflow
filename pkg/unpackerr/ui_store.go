@@ -67,6 +67,7 @@ type UINotificationEvents struct {
 	Complete  bool `json:"complete"`
 	Cleanup   bool `json:"cleanup"`
 	Offline   *bool `json:"offline,omitempty"`
+	Cloud115  *bool `json:"cloud_115,omitempty"`
 }
 
 type notificationStage string
@@ -78,11 +79,12 @@ const (
 	notifyComplete  notificationStage = "complete"
 	notifyCleanup   notificationStage = "cleanup"
 	notifyOffline   notificationStage = "offline"
+	notifyCloud115  notificationStage = "cloud_115"
 )
 
 func defaultNotificationEvents() *UINotificationEvents {
 	enabled := true
-	return &UINotificationEvents{Discovery: true, Cache: true, Extract: true, Complete: true, Cleanup: true, Offline: &enabled}
+	return &UINotificationEvents{Discovery: true, Cache: true, Extract: true, Complete: true, Cleanup: true, Offline: &enabled, Cloud115: &enabled}
 }
 
 func normalizeNotification(settings UINotification) UINotification {
@@ -166,6 +168,8 @@ type UIOverrides struct {
 	N115TaskInterval    string             `json:"115_task_interval,omitempty"`
 	N115OfflineCID      string             `json:"115_offline_cid,omitempty"`
 	N115OfflineFallback string             `json:"115_offline_fallback,omitempty"`
+	N115TXTScanInterval string             `json:"115_txt_scan_interval,omitempty"`
+	N115TXTFolder       string             `json:"115_txt_folder,omitempty"`
 	N115ExtractByDate   *bool              `json:"115_extract_by_date,omitempty"`
 	N115Sources         []N115SourceRule   `json:"115_sources"`
 	N115Failure         *N115FailureRule   `json:"115_failure"`
@@ -378,6 +382,11 @@ func (u *Unpackerr) loadUIStore() error {
 			u.CloudDrive2.N115OfflineFallback.Duration = d
 		}
 	}
+	if store.Overrides.N115TXTScanInterval != "" {
+		if d, e := time.ParseDuration(store.Overrides.N115TXTScanInterval); e == nil && d >= 0 {
+			u.CloudDrive2.N115TXTScanInterval.Duration = d
+		}
+	}
 	if store.Overrides.N115ExtractByDate != nil {
 		u.CloudDrive2.N115ExtractByDate = *store.Overrides.N115ExtractByDate
 	}
@@ -567,6 +576,8 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115TaskInterval:    u.CloudDrive2.N115TaskInterval.Duration.String(),
 		N115OfflineCID:      u.CloudDrive2.N115OfflineCID,
 		N115OfflineFallback: u.CloudDrive2.N115OfflineFallback.Duration.String(),
+		N115TXTScanInterval: u.CloudDrive2.N115TXTScanInterval.Duration.String(),
+		N115TXTFolder:       u.offlineTXTFolder(),
 		N115ExtractByDate:   func() *bool { v := u.CloudDrive2.N115ExtractByDate; return &v }(),
 	}
 	if folder := u.localFolder(); folder != nil {
@@ -1004,6 +1015,11 @@ func (u *Unpackerr) applyCloudDriveUIOverrides(s UIOverrides) {
 			u.CloudDrive2.N115OfflineFallback.Duration = d
 		}
 	}
+	if s.N115TXTScanInterval != "" {
+		if d, err := time.ParseDuration(s.N115TXTScanInterval); err == nil && d >= 0 {
+			u.CloudDrive2.N115TXTScanInterval.Duration = d
+		}
+	}
 	if s.N115ExtractByDate != nil {
 		u.CloudDrive2.N115ExtractByDate = *s.N115ExtractByDate
 	}
@@ -1318,6 +1334,8 @@ func notificationStageEnabled(settings UINotification, stage notificationStage) 
 		return events.Cleanup
 	case notifyOffline:
 		return events.Offline == nil || *events.Offline
+	case notifyCloud115:
+		return events.Cloud115 == nil || *events.Cloud115
 	default:
 		return false
 	}
@@ -1337,6 +1355,8 @@ func notificationStageName(stage notificationStage) string {
 		return "清理"
 	case notifyOffline:
 		return "离线"
+	case notifyCloud115:
+		return "115 云解压"
 	default:
 		return "未知"
 	}

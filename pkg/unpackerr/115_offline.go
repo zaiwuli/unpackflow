@@ -42,6 +42,7 @@ type n115OfflineBatch struct {
 	CheckCount  int                `json:"check_count"`
 	NextCheck   time.Time          `json:"next_check,omitempty"`
 	LastCheck   time.Time          `json:"last_check,omitempty"`
+	HandoffChecks int              `json:"handoff_checks,omitempty"`
 	Tasks       []*n115OfflineTask `json:"tasks"`
 }
 
@@ -188,7 +189,7 @@ func (u *Unpackerr) save115OfflineStoreLocked() error {
 
 func (u *Unpackerr) start115OfflineMonitor() {
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
 			if !u.taskSystemPaused.Load() {
@@ -219,11 +220,21 @@ func (u *Unpackerr) checkDue115OfflineBatches() {
 
 func offlineBatchNeedsCheck(batch *n115OfflineBatch) bool {
 	for _, task := range batch.Tasks {
-		if task.Status == "submitted" || task.Status == "downloading" || task.Status == "unknown" || task.Status == "failed" {
+		if task.Status == "submitted" || task.Status == "downloading" || task.Status == "unknown" || task.Status == "failed" || (task.Status == "success" && task.ExtractedAt.IsZero()) {
 			return true
 		}
 	}
 	return false
+}
+
+func (u *Unpackerr) triggerPending115OfflineExtractions() {
+	u.offlineMu.RLock()
+	ids := make([]string, 0)
+	for id, batch := range u.offlineStore.Batches {
+		if batch.AutoExtract && offlineBatchNeedsCheck(batch) { ids = append(ids, id) }
+	}
+	u.offlineMu.RUnlock()
+	for _, id := range ids { u.trigger115OfflineExtraction(id) }
 }
 
 func (u *Unpackerr) n115OfflineListAPI(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
@@ -242,8 +253,7 @@ func (u *Unpackerr) n115OfflineImportAPI(w http.ResponseWriter, r *http.Request,
 		http.Error(w, "请先启用115并配置Cookie", http.StatusBadRequest)
 		return
 	}
-	parentCID := strings.TrimSpace(u.CloudDrive2.N115OfflineCID)
-	if parentCID == "" {
+	if strings.TrimSpace(u.CloudDrive2.N115OfflineCID) == "" {
 		http.Error(w, "请先配置115离线保存目录CID", http.StatusBadRequest)
 		return
 	}
@@ -263,13 +273,35 @@ func (u *Unpackerr) n115OfflineImportAPI(w http.ResponseWriter, r *http.Request,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
+	result, err := u.import115OfflineLinks(ctx, links, autoExtract)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	u.writeJSON(w, map[string]any{"success": true, "message": fmt.Sprintf("本次导入 %d 条", result.Submitted)})
+}
+
+type offlineImportResult struct {
+	BatchID   string
+	Recognized int
+	Submitted int
+	Duplicates int
+	Failed    int
+}
+
+func (u *Unpackerr) import115OfflineLinks(ctx context.Context, links []string, autoExtract bool) (offlineImportResult, error) {
+	u.offlineImportMu.Lock()
+	defer u.offlineImportMu.Unlock()
+	result := offlineImportResult{Recognized: len(links)}
+	parentCID := strings.TrimSpace(u.CloudDrive2.N115OfflineCID)
+	if parentCID == "" { return result, fmt.Errorf("请先配置115离线保存目录CID") }
 	date := time.Now().Format("2006-01-02")
 	targetCID, err := u.n115DateFolderCID(ctx, parentCID, date)
 	if err != nil {
-		http.Error(w, "创建日期子文件夹失败："+err.Error(), http.StatusBadGateway)
-		return
+		return result, fmt.Errorf("创建日期子文件夹失败：%w", err)
 	}
 	batch := &n115OfflineBatch{ID: time.Now().Format("20060102-150405.000"), CreatedAt: time.Now(), TargetCID: targetCID, TargetName: date, AutoExtract: autoExtract}
+	result.BatchID = batch.ID
 	existing := u.offlineIdentities()
 	unique := make([]string, 0, len(links))
 	for _, link := range links {
@@ -302,8 +334,8 @@ func (u *Unpackerr) n115OfflineImportAPI(w http.ResponseWriter, r *http.Request,
 	if len(batch.Tasks) == 0 {
 		u.Systemf("115离线导入：本次导入 0 条，重复跳过 %d 条", len(links))
 		u.notifyOfflineSummary(batch.ID, 0, len(links), 0)
-		u.writeJSON(w, map[string]any{"success": true, "message": "本次导入 0 条"})
-		return
+		result.Duplicates = len(links)
+		return result, nil
 	}
 	submitted, failed := 0, 0
 	for _, task := range batch.Tasks {
@@ -318,13 +350,13 @@ func (u *Unpackerr) n115OfflineImportAPI(w http.ResponseWriter, r *http.Request,
 	err = u.save115OfflineStoreLocked()
 	u.offlineMu.Unlock()
 	if err != nil {
-		http.Error(w, "保存离线记录失败："+err.Error(), http.StatusInternalServerError)
-		return
+		return result, fmt.Errorf("保存离线记录失败：%w", err)
 	}
 	duplicates := len(links) - len(unique)
+	result.Submitted, result.Duplicates, result.Failed = submitted, duplicates, failed
 	u.Systemf("115离线导入 %s：提交 %d 条，重复 %d 条，失败 %d 条", batch.ID, submitted, duplicates, failed)
 	u.notifyOfflineSummary(batch.ID, submitted, duplicates, failed)
-	u.writeJSON(w, map[string]any{"success": true, "message": fmt.Sprintf("本次导入 %d 条", submitted)})
+	return result, nil
 }
 
 func (u *Unpackerr) notifyOfflineSummary(id string, submitted, duplicates, failed int) {
@@ -457,33 +489,42 @@ func (u *Unpackerr) n115OfflineRetryAPI(w http.ResponseWriter, r *http.Request, 
 		http.Error(w, "缺少批次或任务 ID", http.StatusBadRequest)
 		return
 	}
+	if err := u.retry115OfflineTask(r.Context(), input.BatchID, input.TaskID); err != nil {
+		status := http.StatusBadGateway
+		if err.Error() == "只能重试失败的离线任务" || err.Error() == "离线记录已清空" { status = http.StatusConflict }
+		http.Error(w, err.Error(), status)
+		return
+	}
+	u.notifyOfflineSummary(input.BatchID, 1, 0, 0)
+	u.writeJSON(w, map[string]any{"success": true, "message": "已重新提交"})
+}
+
+func (u *Unpackerr) retry115OfflineTask(parent context.Context, batchID, taskID string) error {
 	u.offlineMu.Lock()
-	batch := u.offlineStore.Batches[input.BatchID]
+	batch := u.offlineStore.Batches[batchID]
 	var task *n115OfflineTask
 	if batch != nil {
 		for _, item := range batch.Tasks {
-			if item.ID == input.TaskID { task = item; break }
+			if item.ID == taskID { task = item; break }
 		}
 	}
 	if task == nil || (task.Status != "failed" && task.Status != "submit_failed") {
 		u.offlineMu.Unlock()
-		http.Error(w, "只能重试失败的离线任务", http.StatusConflict)
-		return
+		return fmt.Errorf("只能重试失败的离线任务")
 	}
 	previous := task.Status
 	task.Status = "submitting"
 	task.UpdatedAt = time.Now()
 	link, targetCID := task.Link, batch.TargetCID
 	u.offlineMu.Unlock()
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 45*time.Second)
 	defer cancel()
 	result, retryErr := u.n115SubmitOfflineBatch(ctx, []string{link}, targetCID)
 	hash := result[offlineLinkIdentity(link)]
 	u.offlineMu.Lock()
-	if u.offlineStore.Batches[input.BatchID] != batch {
+	if u.offlineStore.Batches[batchID] != batch {
 		u.offlineMu.Unlock()
-		http.Error(w, "离线记录已清空", http.StatusConflict)
-		return
+		return fmt.Errorf("离线记录已清空")
 	}
 	task.RetryCount++
 	task.UpdatedAt = time.Now()
@@ -497,17 +538,33 @@ func (u *Unpackerr) n115OfflineRetryAPI(w http.ResponseWriter, r *http.Request, 
 	saveErr := u.save115OfflineStoreLocked()
 	u.offlineMu.Unlock()
 	if saveErr != nil {
-		http.Error(w, saveErr.Error(), http.StatusInternalServerError)
-		return
+		return saveErr
 	}
 	if retryErr != nil {
 		u.Errorf("115离线重试失败：%s：%v", task.Name, retryErr)
-		http.Error(w, retryErr.Error(), http.StatusBadGateway)
-		return
+		return retryErr
 	}
 	u.Systemf("115离线重试已提交：%s", task.Name)
-	u.notifyOfflineSummary(input.BatchID, 1, 0, 0)
-	u.writeJSON(w, map[string]any{"success": true, "message": "已重新提交"})
+	return nil
+}
+
+func (u *Unpackerr) n115OfflineRetryAllAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	type target struct{ batchID, taskID string }
+	u.offlineMu.RLock()
+	targets := make([]target, 0)
+	for batchID, batch := range u.offlineStore.Batches {
+		for _, task := range batch.Tasks {
+			if task.Status == "failed" || task.Status == "submit_failed" { targets = append(targets, target{batchID, task.ID}) }
+		}
+	}
+	u.offlineMu.RUnlock()
+	succeeded, failed := 0, 0
+	for _, item := range targets {
+		if err := u.retry115OfflineTask(r.Context(), item.batchID, item.taskID); err != nil { failed++ } else { succeeded++ }
+	}
+	u.Systemf("115离线一键重试：成功提交 %d 条，仍失败 %d 条", succeeded, failed)
+	u.notifyOfflineSummary("一键重试", succeeded, 0, failed)
+	u.writeJSON(w, map[string]any{"success": failed == 0, "retried": len(targets), "submitted": succeeded, "failed": failed, "message": fmt.Sprintf("本次重试 %d 条，成功提交 %d 条，仍失败 %d 条", len(targets), succeeded, failed)})
 }
 
 func (u *Unpackerr) refresh115OfflineBatch(id string) {
@@ -543,6 +600,7 @@ func (u *Unpackerr) refresh115OfflineBatch(id string) {
 			}
 			before := task.Status
 			task.Status, task.Error, task.UpdatedAt = status.Status, status.Error, now
+			if before != "success" && task.Status == "success" { batch.HandoffChecks = 0 }
 			if before != task.Status && (task.Status == "success" || task.Status == "failed") {
 				u.Systemf("115离线%s：%s %s", map[bool]string{true:"完成", false:"失败"}[task.Status == "success"], task.Name, task.Error)
 				settings := u.notificationSettings()
@@ -659,7 +717,7 @@ func (u *Unpackerr) trigger115OfflineExtraction(batchID string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	files, err := u.n115OfflineArchiveFiles(ctx, targetCID, 5, 5000)
+	files, visibleFiles, err := u.n115OfflineArchiveFiles(ctx, targetCID, 5, 5000)
 	if err != nil {
 		u.Errorf("115离线完成后扫描日期目录失败：%v", err)
 		return
@@ -689,10 +747,28 @@ func (u *Unpackerr) trigger115OfflineExtraction(batchID string) {
 	}
 	if queued > 0 {
 		u.Printf("115离线批次 %s 已发现并提交 %d 个压缩包", batchID, queued)
+		u.notifyEvent(notifyCloud115, "📦", "离线压缩包已交给云解压", "115离线", fmt.Sprintf("批次 %s：%d 个压缩包", batchID, queued))
+	}
+	u.offlineMu.Lock()
+	if current := u.offlineStore.Batches[batchID]; current != nil {
+		current.HandoffChecks++
+		if current.HandoffChecks >= 3 && visibleFiles > 0 {
+			now := time.Now()
+			for _, task := range current.Tasks {
+				if task.Status == "success" && task.ExtractedAt.IsZero() { task.ExtractedAt = now }
+			}
+		}
+		_ = u.save115OfflineStoreLocked()
+	}
+	u.offlineMu.Unlock()
+	if visibleFiles > 0 {
+		if len(files) == 0 { u.Systemf("115离线批次 %s 已成功，未发现压缩包，跳过云解压", batchID) }
+	} else {
+		u.Systemf("115离线批次 %s 已成功，文件暂未可见，下次轮询继续检查", batchID)
 	}
 }
 
-func (u *Unpackerr) n115OfflineArchiveFiles(ctx context.Context, rootCID string, maxDepth, maxFiles int) ([]n115File, error) {
+func (u *Unpackerr) n115OfflineArchiveFiles(ctx context.Context, rootCID string, maxDepth, maxFiles int) ([]n115File, int, error) {
 	type folder struct { cid string; depth int }
 	queue := []folder{{cid: rootCID}}
 	seen := map[string]struct{}{rootCID: {}}
@@ -703,7 +779,7 @@ func (u *Unpackerr) n115OfflineArchiveFiles(ctx context.Context, rootCID string,
 		queue = queue[1:]
 		for offset := 0; visitedFiles < maxFiles; offset += n115ScanPageSize {
 			files, err := u.n115ListFilesAt(ctx, current.cid, offset)
-			if err != nil { return archives, err }
+			if err != nil { return archives, visitedFiles, err }
 			visitedFiles += len(files)
 			for _, file := range files {
 				if file.CID == "" { file.CID = current.cid }
@@ -713,14 +789,14 @@ func (u *Unpackerr) n115OfflineArchiveFiles(ctx context.Context, rootCID string,
 		}
 		if current.depth >= maxDepth { continue }
 		folders, err := u.n115ChildFolderCIDs(ctx, current.cid)
-		if err != nil { return archives, err }
+		if err != nil { return archives, visitedFiles, err }
 		for _, cid := range folders {
 			if _, exists := seen[cid]; exists { continue }
 			seen[cid] = struct{}{}
 			queue = append(queue, folder{cid: cid, depth: current.depth + 1})
 		}
 	}
-	return archives, nil
+	return archives, visitedFiles, nil
 }
 
 func (u *Unpackerr) n115OfflineClearAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {

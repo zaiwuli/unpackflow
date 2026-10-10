@@ -816,6 +816,7 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 			task.CanCloudRetry = false
 		})
 		u.Systemf("115 云解压开始（第 %d/%d 次）：%s", attempt, retries, file.Name)
+		if attempt == 1 { u.notifyEvent(notifyCloud115, "📦", "115 云解压开始", "115 云端", file.Name) }
 		ruleCID := mapping.ruleCID()
 		targetCID := ruleCID
 		if value := strings.TrimSpace(u.CloudDrive2.N115ExtractCIDs[ruleCID]); value != "" {
@@ -845,7 +846,7 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 			u.markProcessed(version)
 			u.cd2Tasks.Delete(version.Key)
 			u.finish115Source(version, file)
-			u.notifyEvent(notifyComplete, "✅", "115 云解压完成", "115 云端", file.Name)
+			u.notifyEvent(notifyCloud115, "✅", "115 云解压完成", "115 云端", file.Name)
 			u.Printf("115 云解压完成：%s", file.Name)
 			return
 		}
@@ -864,10 +865,10 @@ func (u *Unpackerr) run115CloudExtract(mapping N115Mapping, file n115File, versi
 	u.markFailed(version)
 	if n115ServiceFailure(err) {
 		u.cd2Tasks.Delete(version.Key)
-		u.notifyEvent(notifyComplete, "❌", "115 服务异常", "115 云端", file.Name)
+		u.notifyEvent(notifyCloud115, "❌", "115 服务异常", "115 云端", file.Name)
 		return
 	}
-	u.notifyEvent(notifyComplete, "❌", "115 云解压失败", "115 云端", file.Name)
+	u.notifyEvent(notifyCloud115, "❌", "115 云解压失败", "115 云端", file.Name)
 	if !mapping.fallbackEnabled() {
 		u.cd2Tasks.Delete(version.Key)
 		return

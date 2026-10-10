@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestOfflineRetryRejectsNonFailedTask(t *testing.T) {
@@ -30,6 +31,25 @@ func TestLegacyNotificationEnablesOfflineByDefault(t *testing.T) {
 	settings.Events.Offline = &disabled
 	if notificationStageEnabled(settings, notifyOffline) {
 		t.Fatal("explicitly disabled offline notification was ignored")
+	}
+	if !notificationStageEnabled(UINotification{Events: &UINotificationEvents{}}, notifyCloud115) {
+		t.Fatal("legacy notification configuration disabled 115 cloud notifications")
+	}
+}
+
+func TestSuccessfulOfflineTaskWaitsForCloudHandoff(t *testing.T) {
+	batch := &n115OfflineBatch{Tasks: []*n115OfflineTask{{Status: "success"}}}
+	if !offlineBatchNeedsCheck(batch) { t.Fatal("successful task was not retained for cloud handoff") }
+	batch.Tasks[0].ExtractedAt = time.Now()
+	if offlineBatchNeedsCheck(batch) { t.Fatal("handed-off successful task still requested polling") }
+}
+
+func TestOfflineTXTFileFilter(t *testing.T) {
+	for _, name := range []string{"magnets.txt", "MAGNETS.TXT"} {
+		if !isOfflineTXTFile(name) { t.Fatalf("expected TXT file: %s", name) }
+	}
+	for _, name := range []string{".hidden.txt", "~writing.txt", "video.mkv"} {
+		if isOfflineTXTFile(name) { t.Fatalf("unexpected TXT candidate: %s", name) }
 	}
 }
 
