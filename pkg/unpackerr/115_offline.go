@@ -3,7 +3,6 @@ package unpackerr
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -237,10 +236,6 @@ func (u *Unpackerr) n115OfflineListAPI(w http.ResponseWriter, _ *http.Request, _
 }
 
 func (u *Unpackerr) n115OfflineImportAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	if !u.n115OfflineImportAuthorized(r) {
-		http.Error(w, "离线导入令牌无效", http.StatusUnauthorized)
-		return
-	}
 	if !u.CloudDrive2.N115Enabled || strings.TrimSpace(u.CloudDrive2.N115Cookie) == "" {
 		http.Error(w, "请先启用115并配置Cookie", http.StatusBadRequest)
 		return
@@ -316,16 +311,6 @@ func (u *Unpackerr) n115OfflineImportAPI(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	u.writeJSON(w, map[string]any{"success": true, "batch": batch, "recognized": len(links), "submitted": len(batch.Tasks)})
-}
-
-func (u *Unpackerr) n115OfflineImportAuthorized(r *http.Request) bool {
-	if referer := r.Referer(); referer != "" {
-		if parsed, err := url.Parse(referer); err == nil && strings.EqualFold(parsed.Host, r.Host) { return true }
-	}
-	expected := strings.TrimSpace(u.CloudDrive2.N115OfflineToken)
-	provided := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if provided == "" { provided = strings.TrimSpace(r.Header.Get("X-UnpackFlow-Token")) }
-	return expected != "" && len(expected) == len(provided) && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
 }
 
 func readOfflineImport(r *http.Request) (string, bool, error) {

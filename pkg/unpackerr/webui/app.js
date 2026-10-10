@@ -241,7 +241,6 @@ function ensureLocalSettings() {
 		'<h3>115 离线下载</h3>' +
 		'<label class="field"><span>离线保存目录 CID</span><input id="115-offline-cid" type="text" placeholder="填写上方云解压来源中的一个 CID"><small style="color:var(--muted);font-size:12px">离线任务会在该目录下创建 YYYY-MM-DD 子文件夹，并继承这个监控文件夹的解压目标、成功归档和失败兜底规则，不再使用单独的离线路由。</small></label>' +
 		'<label class="field"><span>离线状态兜底复查间隔</span><input id="115-offline-fallback" type="text" placeholder="60m"><small style="color:var(--muted);font-size:12px">前三次按 15s、3m、5m 查询；之后按此间隔复查未完成任务，0s 关闭定时兜底。</small></label>' +
-		'<div class="field"><span>iPhone 快捷指令导入令牌</span><div class="settings-pair"><input id="115-offline-token" type="text" autocomplete="off" placeholder="用于快捷指令调用，不是115 Cookie"><button id="115-offline-token-generate" type="button">生成令牌</button></div><small style="color:var(--muted);font-size:12px">快捷指令只保存此令牌；115 Cookie 始终留在服务器。</small></div>' +
 		'<h3>日常本地下载</h3><div class="field"><div id="115-downloads" class="mapping-list"></div><div class="form-actions"><button id="115-download-add" type="button">添加下载文件夹</button></div><small style="color:var(--muted);font-size:12px">手动将压缩包移入这些 115 文件夹后，工具刷新对应 CD2 路径；每行可选择自动下载或等待批准。</small></div>' +
 		'<h3>CD2 挂载路径映射</h3><div class="field"><div id="path-mappings" class="mapping-list"></div><div class="form-actions"><button id="path-mapping-add" type="button">添加路径映射</button></div></div>';
   workers.insertAdjacentElement('afterend', block);
@@ -257,10 +256,6 @@ function ensureLocalSettings() {
 	$('115-source-add').addEventListener('click', () => addSourceRow());
 	$('115-download-add').addEventListener('click', () => addDownloadRow());
 	$('path-mapping-add').addEventListener('click', () => addPathMappingRow());
-	$('115-offline-token-generate').addEventListener('click', () => {
-		const bytes = new Uint8Array(24); crypto.getRandomValues(bytes);
-		$('115-offline-token').value = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
-	});
 	$('115-success-action').addEventListener('change', update115ArchiveCIDVisibility);
 	$('115-sync').addEventListener('click', sync115Now);
 	buildSettingsSections(block, workers);
@@ -353,10 +348,10 @@ function buildCloudWorkflowTabs(cloud) {
   };
   ['cd2-status','cd2-enabled','cd2-url','cd2-token','refresh-interval','cache-dir','cache-extract-path','keep-cache','cache-delete-delay','copy-timeout','cd2-fallback-enabled','cd2-fallback-interval','path-mappings'].forEach(id => move(id, 'cloud-cd2'));
   ['115-enabled','115-cookie','115-cookie-remark','115-event-enabled','115-event-interval','115-sync','115-sources','115-extract-by-date','115-success-action','115-archive-cid','115-failure-cid','115-failure-path','115-auto-fallback','115-scan-failure','115-retry-count','115-task-interval'].forEach(id => move(id, 'cloud-extract'));
-  ['115-offline-cid','115-offline-fallback','115-offline-token','115-downloads'].forEach(id => move(id, 'cloud-download'));
+  ['115-offline-cid','115-offline-fallback','115-downloads'].forEach(id => move(id, 'cloud-download'));
   const shortcut = document.createElement('section');
   shortcut.className = 'shortcut-card';
-  shortcut.innerHTML = '<div class="panel-heading"><div><h3>iPhone 快捷指令手动配置</h3><p>快捷指令只使用下方接口和独立令牌，不保存115 Cookie。</p></div></div><code id="offline-shortcut-url"></code><ol><li>新建快捷指令，并在“详细信息”中开启“在共享表单中显示”，接收文本、URL和文件。</li><li>添加“如果”判断：共享输入为空时使用“获取剪贴板”；输入为文件时使用“获取文件的文本”。</li><li>添加“获取 URL 内容”，URL 使用上方地址，请求方法选择 POST，请求正文选择 JSON。</li><li>JSON 增加 text＝前一步的文本、auto_extract＝true。</li><li>请求头增加 Authorization，值为 Bearer 加一个空格，再加上方生成并保存的离线导入令牌。</li><li>最后添加“显示结果”，即可从 Safari、文件或其他 App 的分享菜单导入。</li></ol><div class="form-actions"><button id="offline-copy-url" type="button">复制接口地址</button></div>';
+  shortcut.innerHTML = '<div class="panel-heading"><div><h3>iPhone 快捷指令手动配置</h3><p>快捷指令直接请求下方接口，无需密钥或115 Cookie。</p></div></div><code id="offline-shortcut-url"></code><ol><li>新建快捷指令，并在“详细信息”中开启“在共享表单中显示”，接收文本、URL和文件。</li><li>添加“如果”判断：共享输入为空时使用“获取剪贴板”；输入为文件时使用“获取文件的文本”。</li><li>添加“获取 URL 内容”，URL 使用上方地址，请求方法选择 POST，请求正文选择 JSON。</li><li>JSON 增加 text＝前一步的文本、auto_extract＝true，不需要添加任何请求头。</li><li>最后添加“显示结果”，即可从 Safari、文件或其他 App 的分享菜单导入。</li></ol><div class="form-actions"><button id="offline-copy-url" type="button">复制接口地址</button></div>';
   groups['cloud-download'].appendChild(shortcut);
   const shortcutURL = new URL('api/115/offline/import', window.location.href).href;
   $('offline-shortcut-url').textContent = shortcutURL;
@@ -589,8 +584,6 @@ function fillForms(data) {
 	$('115-task-interval').value = (data.settings && data.settings['115_task_interval']) || '30s';
 	$('115-offline-cid').value = (data.settings && data.settings['115_offline_cid']) || '';
 	$('115-offline-fallback').value = (data.settings && data.settings['115_offline_fallback']) || '60m';
-	$('115-offline-token').value = '';
-	$('115-offline-token').placeholder = (data.settings && data.settings['115_offline_token']) ? '已保存，留空表示不修改' : '用于快捷指令调用，不是115 Cookie';
 	fillSourceRows((data.settings && data.settings['115_sources']) || (data.settings && data.settings['115_source_cids']) || [], cidRemarks);
 	fillDownloadRows((data.settings && data.settings['115_download_rules']) || (data.settings && data.settings['115_download_mappings']) || [], cidRemarks);
 	fillPathMappingRows((data.settings && data.settings.path_overrides) || []);
@@ -982,7 +975,6 @@ $('settings-save').addEventListener('click', async () => {
 		'115_task_interval': $('115-task-interval').value.trim(),
 		'115_offline_cid': $('115-offline-cid').value.trim(),
 		'115_offline_fallback': $('115-offline-fallback').value.trim(),
-		'115_offline_token': $('115-offline-token').value.trim(),
 		'115_sources': collectSourceRules(),
 		'115_download_rules': collectDownloadRules(),
 		'115_mappings': [],

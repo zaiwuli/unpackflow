@@ -648,26 +648,26 @@ func TestEmptyCloudSettingsPersistAsExplicitOverrides(t *testing.T) {
 	}
 }
 
-func TestSensitiveSettingsStaySavedAndShortcutTokenIsVisible(t *testing.T) {
+func TestSensitiveSettingsStaySaved(t *testing.T) {
 	dir := t.TempDir()
 	u := New()
 	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
 	if err := u.loadUIStore(); err != nil {
 		t.Fatal(err)
 	}
-	settings := UIOverrides{CD2Token: "cd2-secret", N115Cookie: "115-secret", N115OfflineToken: "shortcut-secret"}
+	settings := UIOverrides{CD2Token: "cd2-secret", N115Cookie: "115-secret"}
 	if err := u.saveUIOverrides(settings); err != nil {
 		t.Fatal(err)
 	}
 	masked := u.uiSettings()
-	if masked.CD2Token != "********" || masked.N115Cookie != "********" || masked.N115OfflineToken != "shortcut-secret" {
+	if masked.CD2Token != "********" || masked.N115Cookie != "********" {
 		t.Fatalf("settings secret display policy is wrong: %#v", masked)
 	}
-	settings.CD2Token, settings.N115Cookie, settings.N115OfflineToken = "********", "********", "********"
+	settings.CD2Token, settings.N115Cookie = "********", "********"
 	if err := u.saveUIOverrides(settings); err != nil {
 		t.Fatal(err)
 	}
-	if u.uiStore.Overrides.CD2Token != "cd2-secret" || u.uiStore.Overrides.N115Cookie != "115-secret" || u.uiStore.Overrides.N115OfflineToken != "shortcut-secret" {
+	if u.uiStore.Overrides.CD2Token != "cd2-secret" || u.uiStore.Overrides.N115Cookie != "115-secret" {
 		t.Fatalf("masked update erased a saved secret: %#v", u.uiStore.Overrides)
 	}
 	restarted := New()
@@ -675,7 +675,7 @@ func TestSensitiveSettingsStaySavedAndShortcutTokenIsVisible(t *testing.T) {
 	if err := restarted.loadUIStore(); err != nil {
 		t.Fatal(err)
 	}
-	if restarted.CloudDrive2.Token != "cd2-secret" || restarted.CloudDrive2.N115Cookie != "115-secret" || restarted.CloudDrive2.N115OfflineToken != "shortcut-secret" {
+	if restarted.CloudDrive2.Token != "cd2-secret" || restarted.CloudDrive2.N115Cookie != "115-secret" {
 		t.Fatalf("secrets were not restored: %#v", restarted.CloudDrive2)
 	}
 }

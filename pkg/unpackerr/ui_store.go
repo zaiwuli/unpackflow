@@ -163,7 +163,6 @@ type UIOverrides struct {
 	N115TaskInterval    string             `json:"115_task_interval,omitempty"`
 	N115OfflineCID      string             `json:"115_offline_cid,omitempty"`
 	N115OfflineFallback string             `json:"115_offline_fallback,omitempty"`
-	N115OfflineToken    string             `json:"115_offline_token,omitempty"`
 	N115ExtractByDate   *bool              `json:"115_extract_by_date,omitempty"`
 	N115Sources         []N115SourceRule   `json:"115_sources"`
 	N115Failure         *N115FailureRule   `json:"115_failure"`
@@ -371,9 +370,6 @@ func (u *Unpackerr) loadUIStore() error {
 		}
 	}
 	u.CloudDrive2.N115OfflineCID = strings.TrimSpace(store.Overrides.N115OfflineCID)
-	if store.Overrides.N115OfflineToken != "" {
-		u.CloudDrive2.N115OfflineToken = strings.TrimSpace(store.Overrides.N115OfflineToken)
-	}
 	if store.Overrides.N115OfflineFallback != "" {
 		if d, e := time.ParseDuration(store.Overrides.N115OfflineFallback); e == nil && d >= 0 {
 			u.CloudDrive2.N115OfflineFallback.Duration = d
@@ -568,10 +564,6 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 		N115TaskInterval:    u.CloudDrive2.N115TaskInterval.Duration.String(),
 		N115OfflineCID:      u.CloudDrive2.N115OfflineCID,
 		N115OfflineFallback: u.CloudDrive2.N115OfflineFallback.Duration.String(),
-		N115OfflineToken: func() string {
-			if strings.TrimSpace(u.CloudDrive2.N115OfflineToken) != "" { return "********" }
-			return ""
-		}(),
 		N115ExtractByDate:   func() *bool { v := u.CloudDrive2.N115ExtractByDate; return &v }(),
 	}
 	if folder := u.localFolder(); folder != nil {
@@ -704,9 +696,6 @@ func (u *Unpackerr) uiSettings() UIOverrides {
 	if overrides.N115OfflineFallback != "" {
 		settings.N115OfflineFallback = overrides.N115OfflineFallback
 	}
-	if overrides.N115OfflineToken != "" {
-		settings.N115OfflineToken = overrides.N115OfflineToken
-	}
 	if overrides.N115ExtractByDate != nil {
 		settings.N115ExtractByDate = overrides.N115ExtractByDate
 	}
@@ -817,9 +806,6 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	}
 	if secretUnchanged(s.N115Cookie) {
 		s.N115Cookie = u.uiStore.Overrides.N115Cookie
-	}
-	if secretUnchanged(s.N115OfflineToken) {
-		s.N115OfflineToken = u.uiStore.Overrides.N115OfflineToken
 	}
 	normalizeStructured115Settings(&s)
 	s.N115SourceCIDs = clean115CIDs(s.N115SourceCIDs)
@@ -1010,9 +996,6 @@ func (u *Unpackerr) applyCloudDriveUIOverrides(s UIOverrides) {
 		}
 	}
 	u.CloudDrive2.N115OfflineCID = strings.TrimSpace(s.N115OfflineCID)
-	if token := strings.TrimSpace(s.N115OfflineToken); token != "" && !strings.Contains(token, "*") {
-		u.CloudDrive2.N115OfflineToken = token
-	}
 	if s.N115OfflineFallback != "" {
 		if d, err := time.ParseDuration(s.N115OfflineFallback); err == nil && d >= 0 {
 			u.CloudDrive2.N115OfflineFallback.Duration = d
