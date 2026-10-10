@@ -648,6 +648,58 @@ func TestEmptyCloudSettingsPersistAsExplicitOverrides(t *testing.T) {
 	}
 }
 
+func TestSensitiveSettingsStaySavedAndShortcutTokenIsVisible(t *testing.T) {
+	dir := t.TempDir()
+	u := New()
+	u.ConfigFile = filepath.Join(dir, "unpackerr.conf")
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	settings := UIOverrides{CD2Token: "cd2-secret", N115Cookie: "115-secret", N115OfflineToken: "shortcut-secret"}
+	if err := u.saveUIOverrides(settings); err != nil {
+		t.Fatal(err)
+	}
+	masked := u.uiSettings()
+	if masked.CD2Token != "********" || masked.N115Cookie != "********" || masked.N115OfflineToken != "shortcut-secret" {
+		t.Fatalf("settings secret display policy is wrong: %#v", masked)
+	}
+	settings.CD2Token, settings.N115Cookie, settings.N115OfflineToken = "********", "********", "********"
+	if err := u.saveUIOverrides(settings); err != nil {
+		t.Fatal(err)
+	}
+	if u.uiStore.Overrides.CD2Token != "cd2-secret" || u.uiStore.Overrides.N115Cookie != "115-secret" || u.uiStore.Overrides.N115OfflineToken != "shortcut-secret" {
+		t.Fatalf("masked update erased a saved secret: %#v", u.uiStore.Overrides)
+	}
+	restarted := New()
+	restarted.ConfigFile = u.ConfigFile
+	if err := restarted.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	if restarted.CloudDrive2.Token != "cd2-secret" || restarted.CloudDrive2.N115Cookie != "115-secret" || restarted.CloudDrive2.N115OfflineToken != "shortcut-secret" {
+		t.Fatalf("secrets were not restored: %#v", restarted.CloudDrive2)
+	}
+}
+
+func TestNotificationAPIKeyStaysSavedWhenMaskedValueIsSubmitted(t *testing.T) {
+	u := New()
+	u.ConfigFile = filepath.Join(t.TempDir(), "unpackerr.conf")
+	if err := u.loadUIStore(); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.saveNotification(UINotification{Provider: "ms", APIKey: "notify-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := u.notificationSettings().APIKey; got != "notify-secret" {
+		t.Fatalf("notification API key was not returned: %q", got)
+	}
+	if err := u.saveNotification(UINotification{Provider: "ms", APIKey: "********"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := u.uiStore.Notification.APIKey; got != "notify-secret" {
+		t.Fatalf("masked notification update erased API key: %q", got)
+	}
+}
+
 func TestChangingCloudRulesRemovesStalePendingPaths(t *testing.T) {
 	dir := t.TempDir()
 	u := New()

@@ -797,7 +797,7 @@ func (u *Unpackerr) saveNotification(s UINotification) error {
 	if s.Provider == "" {
 		s.Provider = current.Provider
 	}
-	if s.APIKey == "" {
+	if secretUnchanged(s.APIKey) {
 		s.APIKey = current.APIKey
 	}
 	s = normalizeNotification(s)
@@ -812,13 +812,13 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	// The API intentionally never returns the CD2 token to the browser. An empty
 	// token submitted while editing another setting therefore means "keep the
 	// existing token", not "erase it".
-	if strings.TrimSpace(s.CD2Token) == "" || strings.TrimSpace(s.CD2Token) == "********" {
+	if secretUnchanged(s.CD2Token) {
 		s.CD2Token = u.uiStore.Overrides.CD2Token
 	}
-	if strings.TrimSpace(s.N115Cookie) == "" {
+	if secretUnchanged(s.N115Cookie) {
 		s.N115Cookie = u.uiStore.Overrides.N115Cookie
 	}
-	if strings.TrimSpace(s.N115OfflineToken) == "" || strings.TrimSpace(s.N115OfflineToken) == "********" {
+	if secretUnchanged(s.N115OfflineToken) {
 		s.N115OfflineToken = u.uiStore.Overrides.N115OfflineToken
 	}
 	normalizeStructured115Settings(&s)
@@ -833,6 +833,11 @@ func (u *Unpackerr) saveUIOverrides(s UIOverrides) error {
 	}
 	u.applyCloudDriveUIOverrides(s)
 	return nil
+}
+
+func secretUnchanged(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "" || value == "********"
 }
 
 func normalizeStructured115Settings(s *UIOverrides) {
