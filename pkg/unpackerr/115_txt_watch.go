@@ -18,7 +18,9 @@ const offlineTXTFolderName = "离线磁链"
 func (u *Unpackerr) offlineTXTFolder() string {
 	folder := u.localFolder()
 	if folder == nil || strings.TrimSpace(folder.Path) == "" { return "" }
-	return filepath.Join(folder.Path, offlineTXTFolderName)
+	// Keep TXT link intake beside the archive watch directory, never inside it.
+	// This prevents the archive watcher and the TXT watcher from sharing inputs.
+	return filepath.Join(filepath.Dir(filepath.Clean(folder.Path)), offlineTXTFolderName)
 }
 
 func (u *Unpackerr) n115OfflineTXTScanAPI(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
@@ -32,6 +34,15 @@ func (u *Unpackerr) n115OfflineTXTScanAPI(w http.ResponseWriter, _ *http.Request
 func (u *Unpackerr) start115OfflineTXTMonitor() {
 	root := u.offlineTXTFolder()
 	if root == "" { return }
+	if folder := u.localFolder(); folder != nil {
+		legacy := filepath.Join(folder.Path, offlineTXTFolderName)
+		if filepath.Clean(legacy) != filepath.Clean(root) {
+			if err := migrateOfflineTXTDirectory(legacy, root); err != nil {
+				u.Errorf("迁移旧离线磁链目录失败：%v", err)
+				return
+			}
+		}
+	}
 	if err := createOfflineTXTDirectories(root); err != nil {
 		u.Errorf("创建离线磁链目录失败：%v", err)
 		return
@@ -65,6 +76,35 @@ func (u *Unpackerr) start115OfflineTXTMonitor() {
 			}
 		}()
 	}
+}
+
+func migrateOfflineTXTDirectory(oldRoot, newRoot string) error {
+	if _, err := os.Stat(oldRoot); os.IsNotExist(err) { return nil } else if err != nil { return err }
+	if _, err := os.Stat(newRoot); os.IsNotExist(err) {
+		if err := os.Rename(oldRoot, newRoot); err == nil { return nil }
+	}
+	if err := createOfflineTXTDirectories(newRoot); err != nil { return err }
+	return moveOfflineTXTEntries(oldRoot, newRoot)
+}
+
+func moveOfflineTXTEntries(source, target string) error {
+	entries, err := os.ReadDir(source)
+	if err != nil { return err }
+	for _, entry := range entries {
+		from := filepath.Join(source, entry.Name())
+		to := filepath.Join(target, entry.Name())
+		if entry.IsDir() {
+			if err := os.MkdirAll(to, 0o755); err != nil { return err }
+			if err := moveOfflineTXTEntries(from, to); err != nil { return err }
+			continue
+		}
+		if _, err := os.Stat(to); err == nil {
+			ext := filepath.Ext(to)
+			to = strings.TrimSuffix(to, ext) + "-" + time.Now().Format("20060102-150405.000") + ext
+		}
+		if err := os.Rename(from, to); err != nil { return err }
+	}
+	return os.Remove(source)
 }
 
 func createOfflineTXTDirectories(root string) error {

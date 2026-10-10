@@ -53,6 +53,16 @@ func TestOfflineTXTFileFilter(t *testing.T) {
 	}
 }
 
+func TestOfflineTXTFolderIsSiblingOfArchiveWatch(t *testing.T) {
+	root := t.TempDir()
+	u := New()
+	u.Folders = []*FolderConfig{{Path: filepath.Join(root, "压缩包监控")}}
+	want := filepath.Join(root, offlineTXTFolderName)
+	if got := u.offlineTXTFolder(); got != want {
+		t.Fatalf("TXT folder mixed into archive watch directory: got %q want %q", got, want)
+	}
+}
+
 func TestOfflineMappingUsesParentRuleAndActualSource(t *testing.T) {
 	cfg := CloudDriveConfig{N115OfflineCID: "monitor-parent", N115FailureCID: "failed", N115FailureCD2Path: "/failed"}
 	mapping := n115OfflineMapping(cfg, "dated-child")
