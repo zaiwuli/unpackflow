@@ -95,6 +95,7 @@ type DashboardTask struct {
 	Speed         int64    `json:"speed,omitempty"`
 	ETASeconds    int64    `json:"eta_seconds,omitempty"`
 	Error         string   `json:"error,omitempty"`
+	CanRetry      bool     `json:"can_retry,omitempty"`
 	CanFallback   bool     `json:"can_fallback,omitempty"`
 	CanCloudRetry bool     `json:"can_cloud_retry,omitempty"`
 	StartedAt     string   `json:"started_at,omitempty"`
@@ -172,11 +173,13 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			OutputPath: item.OutputPath,
 		}
 		if item.Status == EXTRACTFAILED && u.folders != nil {
+			task.CanRetry = true
+			if item.Resp != nil && item.Resp.Error != nil { task.Error = item.Resp.Error.Error() }
 			if folder := u.folders.Folders[name]; folder != nil {
 				if folder.status <= EXTRACTING {
 					task.Status = statusName(folder.status)
 				} else if u.MaxRetries == 0 || folder.retries < u.MaxRetries {
-					task.Status = "解压失败，等待自动重试"
+					task.Status = "首次解压失败，等待自动重试"
 				}
 			}
 		}
@@ -207,7 +210,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 			if transfer.Source != "" {
 				task.Source = transfer.Source
 			}
-			task.Error = transfer.Error
+			if transfer.Error != "" { task.Error = transfer.Error }
 		}
 		mergeTask(task)
 	}
@@ -234,7 +237,7 @@ func (u *Unpackerr) dashboardSnapshot() DashboardSnapshot {
 				if folder.status <= EXTRACTING {
 					status = statusName(folder.status)
 				} else if u.MaxRetries == 0 || folder.retries < u.MaxRetries {
-					status = "解压失败，等待自动重试"
+					status = "首次解压失败，等待自动重试"
 				}
 			}
 		}
@@ -479,6 +482,7 @@ func mergeDashboardTask(current, incoming DashboardTask) DashboardTask {
 	}
 	result.CanFallback = current.CanFallback || incoming.CanFallback
 	result.CanCloudRetry = current.CanCloudRetry || incoming.CanCloudRetry
+	result.CanRetry = current.CanRetry || incoming.CanRetry
 	if strings.Contains(current.Source, "115") || strings.Contains(incoming.Source, "115") {
 		if strings.Contains(incoming.Source, "115") {
 			result.Source = incoming.Source

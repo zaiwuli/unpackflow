@@ -671,7 +671,7 @@ function renderTask(task) {
     (hasCopyProgress ? '<div class="copy-bar"><i style="width:' + percent + '%"></i></div>' : '') +
     (task.error ? '<div class="progress" style="color:var(--red)">' + esc(task.error) + '</div>' : '') +
     renderTaskDetails(task) +
-    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_cloud_retry ? '<button data-cloud-retry-task="' + esc(task.fallback_key || task.key) + '" type="button"' + disabled + '>重试云解压</button>' : '') + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button"' + disabled + '>批准下载</button>' : '') + (canIgnore ? '<button data-ignore-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>忽略</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>取消</button>' : '') + '</div></article>';
+    '</div><div class="task-side"><span class="badge">' + esc(task.status) + '</span>' + (task.can_retry ? '<button data-local-retry-task="' + esc(task.key) + '" type="button"' + disabled + '>重试解压</button>' : '') + (task.can_cloud_retry ? '<button data-cloud-retry-task="' + esc(task.fallback_key || task.key) + '" type="button"' + disabled + '>重试云解压</button>' : '') + (task.can_fallback ? '<button data-fallback-task="' + esc(task.fallback_key || task.key) + '" type="button"' + disabled + '>批准下载</button>' : '') + (canIgnore ? '<button data-ignore-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>忽略</button>' : '') + (canCancel ? '<button data-cancel-task="' + esc(task.cancel_key || task.key) + '" type="button"' + disabled + '>取消</button>' : '') + '</div></article>';
 }
 
 function renderStatus(data) {
@@ -779,7 +779,8 @@ function renderOfflineTaskRecords() {
   });
   renderList(container, filtered, row => {
     const task = row.task, batch = row.batch;
-    return '<article class="task offline-record-card"><div class="task-content"><div class="task-name" title="' + esc(task.name) + '">' + esc(task.name) + '</div><div class="task-meta"><span class="offline-source-mark">115离线</span> · ' + esc(task.kind.toUpperCase()) + ' · ' + esc(batch.target_name) + '</div><div class="progress">' + esc(task.error || task.info_hash || '等待115返回任务信息') + '</div><details class="task-details"><summary>查看详情</summary><dl><dt>导入时间</dt><dd>' + esc(new Date(task.created_at).toLocaleString()) + '</dd><dt>目标目录 CID</dt><dd>' + esc(batch.target_cid) + '</dd><dt>重试次数</dt><dd>' + esc(task.retry_count || 0) + '</dd><dt>下次复查</dt><dd>' + esc(batch.next_check ? new Date(batch.next_check).toLocaleString() : '无需自动复查') + '</dd></dl></details></div><div class="task-side"><span class="badge offline-badge">' + esc(labels[task.status] || task.status) + '</span>' + (['failed','submit_failed'].includes(task.status) ? '<button type="button" data-offline-retry="' + esc(batch.id) + '" data-offline-task="' + esc(task.id) + '">重试离线</button>' : '') + '</div></article>';
+    const detail = task.error ? task.error : task.pipeline_status ? task.pipeline_status : task.info_hash ? task.info_hash : '等待115返回任务信息';
+    return '<article class="task offline-record-card"><div class="task-content"><div class="task-name" title="' + esc(task.name) + '">' + esc(task.name) + '</div><div class="task-meta"><span class="offline-source-mark">115离线</span> · ' + esc(task.kind.toUpperCase()) + ' · ' + esc(batch.target_name) + '</div><div class="progress">' + esc(detail) + '</div><details class="task-details"><summary>查看详情</summary><dl><dt>原始链接</dt><dd>' + esc(task.link) + '</dd><dt>文件 Hash</dt><dd>' + esc(task.info_hash || '暂无') + '</dd><dt>文件大小</dt><dd>' + esc(task.size ? formatBytes(task.size) : '暂无') + '</dd><dt>离线状态</dt><dd>' + esc(labels[task.status] || task.status) + '</dd><dt>当前阶段</dt><dd>' + esc(task.pipeline_status || '尚未进入解压链路') + '</dd><dt>关联压缩包</dt><dd>' + esc(task.archive_name || '尚未关联') + '</dd><dt>压缩包任务标识</dt><dd>' + esc(task.archive_task_key || '尚未关联') + '</dd><dt>导入时间</dt><dd>' + esc(new Date(task.created_at).toLocaleString()) + '</dd><dt>离线日期目录</dt><dd>' + esc(batch.target_name) + '</dd><dt>离线目录 CID</dt><dd>' + esc(batch.target_cid) + '</dd><dt>重试次数</dt><dd>' + esc(task.retry_count || 0) + '</dd><dt>下次复查</dt><dd>' + esc(batch.next_check ? new Date(batch.next_check).toLocaleString() : '无需自动复查') + '</dd></dl></details></div><div class="task-side"><span class="badge offline-badge">' + esc(labels[task.status] || task.status) + '</span>' + (['failed','submit_failed'].includes(task.status) ? '<button type="button" data-offline-retry="' + esc(batch.id) + '" data-offline-task="' + esc(task.id) + '">重试离线</button>' : '') + '<button type="button" data-offline-delete="' + esc(batch.id) + '" data-offline-task="' + esc(task.id) + '">删除记录</button></div></article>';
   }, '暂无离线记录');
 }
 
@@ -947,9 +948,9 @@ $('history').addEventListener('click', async event => {
 
 $('tasks').addEventListener('click', async event => {
   const data = event.target.dataset;
-  const key = data.ignoreTask || data.cloudRetryTask || data.fallbackTask || data.cancelTask;
+  const key = data.localRetryTask || data.ignoreTask || data.cloudRetryTask || data.fallbackTask || data.cancelTask;
   if (!key) return;
-  await runTaskAction(key, data.cloudRetryTask || data.fallbackTask ? 'api/115/fallback' : 'api/tasks/cancel', data.ignoreTask ? 'ignore' : data.cloudRetryTask ? 'retry_cloud' : data.fallbackTask ? 'approve' : 'cancel', event.target);
+  await runTaskAction(key, data.localRetryTask ? 'api/history/delete' : data.cloudRetryTask || data.fallbackTask ? 'api/115/fallback' : 'api/tasks/cancel', data.localRetryTask ? 'retry' : data.ignoreTask ? 'ignore' : data.cloudRetryTask ? 'retry_cloud' : data.fallbackTask ? 'approve' : 'cancel', event.target);
 });
 
 $('notify-save').addEventListener('click', async () => {
@@ -1060,6 +1061,15 @@ function offlineLinkCount(text) {
 }
 
 async function retryOfflineTask(event) {
+  const deleteButton = event.target.closest('[data-offline-delete]');
+  if (deleteButton) {
+    if (!window.confirm('只删除这条本地离线记录，不会删除115中的任务或文件。确定继续吗？')) return;
+    deleteButton.disabled = true;
+    const response = await fetch('api/115/offline/clear', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({batch_id:deleteButton.dataset.offlineDelete, task_id:deleteButton.dataset.offlineTask})});
+    if ($('offline-message')) $('offline-message').textContent = response.ok ? '离线记录已删除' : await response.text();
+    await loadOfflineBatches();
+    return;
+  }
   const button = event.target.closest('[data-offline-retry]');
   if (!button) return;
   button.disabled = true;
@@ -1124,7 +1134,7 @@ async function loadOfflineBatches(silent) {
     if ($('offline-batches')) $('offline-batches').innerHTML = batches.length ? batches.map(batch => {
       const counts = {}; (batch.tasks || []).forEach(task => counts[task.status] = (counts[task.status] || 0) + 1);
       const next = batch.next_check ? new Date(batch.next_check).toLocaleString() : '无需复查';
-      return '<details class="offline-batch"><summary>' + esc(batch.target_name) + ' · ' + batch.tasks.length + '条 · 成功' + (counts.success || 0) + ' · 进行中' + ((counts.submitted || 0)+(counts.downloading || 0)+(counts.unknown || 0)) + ' · 失败' + ((counts.failed || 0)+(counts.submit_failed || 0)) + '</summary><p class="form-message">已查询 ' + batch.check_count + ' 次，下次：' + esc(next) + '</p>' + batch.tasks.map(task => '<div class="offline-task"><div>' + esc(task.name) + '<small>' + esc(task.kind.toUpperCase()) + ' · ' + esc(task.error || task.info_hash || '') + '</small></div><strong>' + esc(task.status) + '</strong></div>').join('') + '</details>';
+      return '<details class="offline-batch"><summary>' + esc(batch.target_name) + ' · ' + batch.tasks.length + '条 · 成功' + (counts.success || 0) + ' · 进行中' + ((counts.submitted || 0)+(counts.downloading || 0)+(counts.unknown || 0)) + ' · 失败' + ((counts.failed || 0)+(counts.submit_failed || 0)) + '</summary><p class="form-message">已查询 ' + batch.check_count + ' 次，下次：' + esc(next) + '</p>' + batch.tasks.map(task => { const detail = task.error && task.error !== '<nil>' ? task.error : task.info_hash && task.info_hash !== '<nil>' ? task.info_hash : ''; return '<div class="offline-task"><div>' + esc(task.name) + '<small>' + esc(task.kind.toUpperCase()) + (detail ? ' · ' + esc(detail) : '') + '</small></div><strong>' + esc(task.status) + '</strong></div>'; }).join('') + '</details>';
     }).join('') : '<p class="empty">暂无离线记录</p>';
   } catch (_) { if (!silent && $('offline-batches')) $('offline-batches').innerHTML = '<p class="empty">读取离线记录失败</p>'; }
 }

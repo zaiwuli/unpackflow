@@ -132,7 +132,7 @@ func (u *Unpackerr) historyRetryActive(item ProcessedSource) bool {
 		}
 		if u.folders != nil {
 			if folder := u.folders.Folders[path]; folder != nil {
-				if folder.status <= EXTRACTING || (folder.status == EXTRACTFAILED && (u.MaxRetries == 0 || folder.retries < u.MaxRetries)) {
+				if folder.status <= EXTRACTING {
 					return true
 				}
 			}

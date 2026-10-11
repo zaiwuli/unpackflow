@@ -106,3 +106,64 @@ func TestParseOfflineLinksMixedTextAndDeduplicates(t *testing.T) {
 		t.Fatalf("unexpected ed2k name: %q", offlineLinkName(links[0]))
 	}
 }
+
+func TestOfflineStringValueNeverReturnsNilMarker(t *testing.T) {
+	item := map[string]any{"info_hash": nil, "hash": "ABC123"}
+	if got := offlineStringValue(item, "info_hash", "hash"); got != "ABC123" {
+		t.Fatalf("fallback hash = %q, want ABC123", got)
+	}
+	if got := offlineStringValue(map[string]any{"info_hash": nil}, "info_hash"); got != "" {
+		t.Fatalf("nil marker leaked as %q", got)
+	}
+}
+
+func TestOfflineLinkHash(t *testing.T) {
+	if got := offlineLinkHash("ed2k://|file|0.zip|123|ABCDEF|/"); got != "abcdef" {
+		t.Fatalf("ed2k hash = %q, want abcdef", got)
+	}
+	if got := offlineLinkHash("magnet:?xt=urn:btih:1122AABB&dn=0.zip"); got != "1122aabb" {
+		t.Fatalf("magnet hash = %q, want 1122aabb", got)
+	}
+}
+
+func TestOfflineLinkSize(t *testing.T) {
+	if got := offlineLinkSize("ed2k://|file|0.zip|123456|ABCDEF|/"); got != 123456 {
+		t.Fatalf("ed2k size = %d, want 123456", got)
+	}
+	if got := offlineLinkSize("magnet:?xt=urn:btih:1122AABB"); got != 0 {
+		t.Fatalf("magnet size = %d, want 0", got)
+	}
+}
+
+func TestBindOfflineArchiveUsesExactNameAndSize(t *testing.T) {
+	u := New()
+	u.ConfigFile = filepath.Join(t.TempDir(), "unpackerr.conf")
+	if err := u.load115OfflineStore(); err != nil { t.Fatal(err) }
+	u.offlineStore.Batches["batch"] = &n115OfflineBatch{ID: "batch", Tasks: []*n115OfflineTask{
+		{ID: "first", Name: "0.zip", Size: 123, Status: "success"},
+		{ID: "wrong-size", Name: "1.zip", Size: 456, Status: "success"},
+	}}
+	u.bind115OfflineArchive("batch", n115File{FID: "fid", CID: "cid", Name: "0.zip", Size: 123}, "115|cid|fid|123")
+	first := u.offlineStore.Batches["batch"].Tasks[0]
+	if first.ArchiveTaskKey != "115|cid|fid|123" || first.ArchiveFID != "fid" || first.ExtractedAt.IsZero() {
+		t.Fatalf("archive association missing: %#v", first)
+	}
+	second := u.offlineStore.Batches["batch"].Tasks[1]
+	if second.ArchiveTaskKey != "" || !second.ExtractedAt.IsZero() {
+		t.Fatalf("wrong archive was associated: %#v", second)
+	}
+}
+
+func TestOfflineStatusesIndexSuccessfulTaskByHashLinkAndName(t *testing.T) {
+	link := "ed2k://|file|0.zip|123|ABCDEF|/"
+	statuses := offlineStatuses(map[string]any{"data": map[string]any{"tasks": []any{map[string]any{
+		"infoHash": "ABC123", "url": link, "name": "0.zip", "status": float64(2), "error_msg": nil,
+	}}}})
+	for label, found := range map[string]bool{
+		"hash": statuses.byHash["abc123"].Status == "success",
+		"link": statuses.byLink[offlineLinkIdentity(link)].Status == "success",
+		"name": statuses.byName["0.zip"].Status == "success",
+	} {
+		if !found { t.Fatalf("successful offline task not indexed by %s", label) }
+	}
+}

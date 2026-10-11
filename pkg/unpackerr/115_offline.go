@@ -52,6 +52,12 @@ type n115OfflineTask struct {
 	Name        string    `json:"name"`
 	Kind        string    `json:"kind"`
 	InfoHash    string    `json:"info_hash,omitempty"`
+	Size           int64     `json:"size,omitempty"`
+	ArchiveTaskKey string    `json:"archive_task_key,omitempty"`
+	ArchiveName    string    `json:"archive_name,omitempty"`
+	ArchiveCID     string    `json:"archive_cid,omitempty"`
+	ArchiveFID     string    `json:"archive_fid,omitempty"`
+	PipelineStatus string    `json:"pipeline_status,omitempty"`
 	Status      string    `json:"status"`
 	Error       string    `json:"error,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -103,6 +109,36 @@ func offlineLinkIdentity(link string) string {
 	}
 	sum := sha256.Sum256([]byte(lower))
 	return hex.EncodeToString(sum[:])
+}
+
+func offlineLinkHash(link string) string {
+	value := strings.TrimSpace(link)
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "ed2k://") {
+		parts := strings.Split(value, "|")
+		if len(parts) >= 6 {
+			return strings.ToLower(strings.TrimSpace(parts[4]))
+		}
+	}
+	if strings.HasPrefix(lower, "magnet:?") {
+		if parsed, err := url.Parse(value); err == nil {
+			for _, xt := range parsed.Query()["xt"] {
+				const prefix = "urn:btih:"
+				if strings.HasPrefix(strings.ToLower(xt), prefix) {
+					return strings.ToLower(strings.TrimSpace(xt[len(prefix):]))
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func offlineLinkSize(link string) int64 {
+	value := strings.TrimSpace(link)
+	if !strings.HasPrefix(strings.ToLower(value), "ed2k://") { return 0 }
+	parts := strings.Split(value, "|")
+	if len(parts) < 6 { return 0 }
+	return int115Value(strings.TrimSpace(parts[3]))
 }
 
 func offlineLinkName(link string) string {
@@ -239,10 +275,19 @@ func (u *Unpackerr) triggerPending115OfflineExtractions() {
 
 func (u *Unpackerr) n115OfflineListAPI(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
 	u.offlineMu.RLock()
-	defer u.offlineMu.RUnlock()
 	batches := make([]*n115OfflineBatch, 0, len(u.offlineStore.Batches))
 	for _, batch := range u.offlineStore.Batches {
-		batches = append(batches, batch)
+		copyBatch := *batch
+		copyBatch.Tasks = make([]*n115OfflineTask, 0, len(batch.Tasks))
+		for _, task := range batch.Tasks {
+			copyTask := *task
+			copyBatch.Tasks = append(copyBatch.Tasks, &copyTask)
+		}
+		batches = append(batches, &copyBatch)
+	}
+	u.offlineMu.RUnlock()
+	for _, batch := range batches {
+		for _, task := range batch.Tasks { task.PipelineStatus = u.offlinePipelineStatus(task) }
 	}
 	sort.Slice(batches, func(i, j int) bool { return batches[i].CreatedAt.After(batches[j].CreatedAt) })
 	u.writeJSON(w, map[string]any{"success": true, "batches": batches})
@@ -314,11 +359,12 @@ func (u *Unpackerr) import115OfflineLinks(ctx context.Context, links []string, a
 		results, submitErr := u.n115SubmitOfflineBatch(ctx, unique[start:end], targetCID)
 		for _, link := range unique[start:end] {
 			identity := offlineLinkIdentity(link)
-			task := &n115OfflineTask{ID: identity, Link: link, Name: offlineLinkName(link), Kind: offlineLinkKind(link), Status: "submitted", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+			task := &n115OfflineTask{ID: identity, Link: link, Name: offlineLinkName(link), Kind: offlineLinkKind(link), Size: offlineLinkSize(link), Status: "submitted", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 			if submitErr != nil {
 				task.Status, task.Error = "submit_failed", submitErr.Error()
 			} else {
 				task.InfoHash = results[identity]
+				if task.InfoHash == "" { task.InfoHash = offlineLinkHash(link) }
 			}
 			batch.Tasks = append(batch.Tasks, task)
 			existing[identity] = struct{}{}
@@ -454,11 +500,12 @@ func (u *Unpackerr) n115SubmitOfflineBatch(ctx context.Context, links []string, 
 		return nil, err
 	}
 	result := make(map[string]string, len(links))
-	if rows, ok := response["result"].([]any); ok && len(rows) > 0 {
+	rows := offlineResponseRows(response)
+	if len(rows) > 0 {
 		for index, raw := range rows {
 			item, ok := raw.(map[string]any)
 			if ok && index < len(links) {
-				result[offlineLinkIdentity(links[index])] = fmt.Sprint(item["info_hash"])
+				result[offlineLinkIdentity(links[index])] = offlineStringValue(item, "info_hash", "infoHash", "hash")
 			}
 		}
 	}
@@ -531,6 +578,7 @@ func (u *Unpackerr) retry115OfflineTask(parent context.Context, batchID, taskID 
 	if retryErr != nil {
 		task.Status, task.Error = previous, retryErr.Error()
 	} else {
+		if hash == "" { hash = offlineLinkHash(link) }
 		task.Status, task.Error, task.InfoHash = "submitted", "", hash
 		task.NotifiedStatus = ""
 		batch.NextCheck = time.Now().Add(15 * time.Second)
@@ -594,12 +642,15 @@ func (u *Unpackerr) refresh115OfflineBatch(id string) {
 		}
 	} else {
 		for _, task := range batch.Tasks {
-			status, exists := statuses[strings.ToLower(task.InfoHash)]
-			if !exists || task.InfoHash == "" {
+			status, exists := statuses.byHash[strings.ToLower(strings.TrimSpace(task.InfoHash))]
+			if !exists { status, exists = statuses.byLink[offlineLinkIdentity(task.Link)] }
+			if !exists { status, exists = statuses.byName[strings.ToLower(strings.TrimSpace(task.Name))] }
+			if !exists {
 				continue
 			}
 			before := task.Status
 			task.Status, task.Error, task.UpdatedAt = status.Status, status.Error, now
+			if task.Status == "success" && !xtractr.IsArchiveFile(task.Name) { task.ExtractedAt = now }
 			if before != "success" && task.Status == "success" { batch.HandoffChecks = 0 }
 			if before != task.Status && (task.Status == "success" || task.Status == "failed") {
 				u.Systemf("115离线%s：%s %s", map[bool]string{true:"完成", false:"失败"}[task.Status == "success"], task.Name, task.Error)
@@ -631,28 +682,36 @@ func (u *Unpackerr) refresh115OfflineBatch(id string) {
 }
 
 type offlineRemoteStatus struct{ Status, Error string }
+type offlineRemoteStatuses struct {
+	byHash map[string]offlineRemoteStatus
+	byLink map[string]offlineRemoteStatus
+	byName map[string]offlineRemoteStatus
+}
 
-func (u *Unpackerr) n115OfflineStatuses(ctx context.Context) (map[string]offlineRemoteStatus, error) {
+func (u *Unpackerr) n115OfflineStatuses(ctx context.Context) (offlineRemoteStatuses, error) {
+	empty := newOfflineRemoteStatuses()
 	space, err := u.n115Request(ctx, http.MethodGet, n115OfflineSpace, url.Values{"ct": {"offline"}, "ac": {"space"}, "_": {fmt.Sprint(time.Now().UnixMilli())}})
-	if err != nil { return nil, err }
+	if err != nil { return empty, err }
 	sign, timestamp := fmt.Sprint(space["sign"]), fmt.Sprint(space["time"])
 	if data, ok := space["data"].(map[string]any); ok {
 		if sign == "" || sign == "<nil>" { sign = fmt.Sprint(data["sign"]) }
 		if timestamp == "" || timestamp == "<nil>" { timestamp = fmt.Sprint(data["time"]) }
 	}
 	uid := n115CookieUID(u.CloudDrive2.N115Cookie)
-	if uid == "" || sign == "" || sign == "<nil>" { return nil, fmt.Errorf("无法取得115离线查询凭据") }
-	all := make(map[string]offlineRemoteStatus)
+	if uid == "" || sign == "" || sign == "<nil>" { return empty, fmt.Errorf("无法取得115离线查询凭据") }
+	all := newOfflineRemoteStatuses()
 	for page := 1; page <= 10; page++ {
 		response, err := u.n115Request(ctx, http.MethodPost, n115OfflineBase+"?ct=lixian&ac=task_lists", url.Values{"page": {fmt.Sprint(page)}, "uid": {uid}, "sign": {sign}, "time": {timestamp}})
-		if err != nil { return nil, err }
+		if err != nil { return empty, err }
 		pageStatuses := offlineStatuses(response)
-		for key, value := range pageStatuses { all[key] = value }
+		for key, value := range pageStatuses.byHash { all.byHash[key] = value }
+		for key, value := range pageStatuses.byLink { all.byLink[key] = value }
+		for key, value := range pageStatuses.byName { all.byName[key] = value }
 		pageCount := int(int115Value(response["page_count"]))
 		if pageCount == 0 {
 			if data, ok := response["data"].(map[string]any); ok { pageCount = int(int115Value(data["page_count"])) }
 		}
-		if len(pageStatuses) == 0 || (pageCount > 0 && page >= pageCount) || (pageCount == 0 && len(pageStatuses) < 30) { break }
+		if pageStatuses.count() == 0 || (pageCount > 0 && page >= pageCount) || (pageCount == 0 && pageStatuses.count() < 30) { break }
 	}
 	return all, nil
 }
@@ -666,27 +725,15 @@ func n115CookieUID(cookie string) string {
 	return ""
 }
 
-func offlineStatuses(response map[string]any) map[string]offlineRemoteStatus {
-	result := make(map[string]offlineRemoteStatus)
-	var rows []any
-	for _, key := range []string{"tasks", "data", "result"} {
-		if values, ok := response[key].([]any); ok {
-			rows = values
-			break
-		}
-		if wrapper, ok := response[key].(map[string]any); ok {
-			if values, ok := wrapper["tasks"].([]any); ok {
-				rows = values
-				break
-			}
-		}
-	}
+func offlineStatuses(response map[string]any) offlineRemoteStatuses {
+	result := newOfflineRemoteStatuses()
+	rows := offlineResponseRows(response)
 	for _, raw := range rows {
 		item, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		hash := strings.ToLower(fmt.Sprint(item["info_hash"]))
+		hash := strings.ToLower(offlineStringValue(item, "info_hash", "infoHash", "hash"))
 		statusValue := int115Value(item["status"])
 		status := "downloading"
 		if statusValue == 2 || fmt.Sprint(item["percentDone"]) == "100" || fmt.Sprint(item["percent_done"]) == "100" {
@@ -694,9 +741,48 @@ func offlineStatuses(response map[string]any) map[string]offlineRemoteStatus {
 		} else if statusValue < 0 {
 			status = "failed"
 		}
-		result[hash] = offlineRemoteStatus{Status: status, Error: fmt.Sprint(item["error_msg"])}
+		errorText := ""
+		if value := item["error_msg"]; value != nil {
+			errorText = strings.TrimSpace(fmt.Sprint(value))
+			if errorText == "<nil>" { errorText = "" }
+		}
+		remote := offlineRemoteStatus{Status: status, Error: errorText}
+		if hash != "" { result.byHash[hash] = remote }
+		if link := offlineStringValue(item, "url", "source_url", "task_url"); link != "" { result.byLink[offlineLinkIdentity(link)] = remote }
+		if name := offlineStringValue(item, "name", "file_name", "title"); name != "" { result.byName[strings.ToLower(name)] = remote }
 	}
 	return result
+}
+
+func newOfflineRemoteStatuses() offlineRemoteStatuses {
+	return offlineRemoteStatuses{byHash: make(map[string]offlineRemoteStatus), byLink: make(map[string]offlineRemoteStatus), byName: make(map[string]offlineRemoteStatus)}
+}
+
+func (s offlineRemoteStatuses) count() int { return max(len(s.byHash), len(s.byLink), len(s.byName)) }
+
+func cleanOfflineValue(value string) string {
+	return strings.TrimSpace(value)
+}
+
+func offlineStringValue(item map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, exists := item[key]; exists && value != nil {
+			if text := cleanOfflineValue(fmt.Sprint(value)); text != "" { return text }
+		}
+	}
+	return ""
+}
+
+func offlineResponseRows(response map[string]any) []any {
+	for _, key := range []string{"tasks", "result", "data"} {
+		if values, ok := response[key].([]any); ok { return values }
+		if wrapper, ok := response[key].(map[string]any); ok {
+			for _, nested := range []string{"tasks", "result", "data"} {
+				if values, ok := wrapper[nested].([]any); ok { return values }
+			}
+		}
+	}
+	return nil
 }
 
 func (u *Unpackerr) trigger115OfflineExtraction(batchID string) {
@@ -730,6 +816,7 @@ func (u *Unpackerr) trigger115OfflineExtraction(batchID string) {
 		sourceCID := file.CID
 		if sourceCID == "" { sourceCID = targetCID }
 		version := ProcessedSource{Key: n115FileKey(sourceCID, file), Source: "115离线", Path: file.Name, Size: file.Size, ModifiedNS: file.MTime, SourceCID: sourceCID, CloudFile: &file}
+		u.bind115OfflineArchive(batchID, file, version.Key)
 		if u.wasProcessed(version) || u.hasFailedVersion(version) || u.hasPending115Task(version.Key) {
 			continue
 		}
@@ -750,22 +837,57 @@ func (u *Unpackerr) trigger115OfflineExtraction(batchID string) {
 		u.notifyEvent(notifyCloud115, "📦", "离线压缩包已交给云解压", "115离线", fmt.Sprintf("批次 %s：%d 个压缩包", batchID, queued))
 	}
 	u.offlineMu.Lock()
-	if current := u.offlineStore.Batches[batchID]; current != nil {
-		current.HandoffChecks++
-		if current.HandoffChecks >= 3 && visibleFiles > 0 {
-			now := time.Now()
-			for _, task := range current.Tasks {
-				if task.Status == "success" && task.ExtractedAt.IsZero() { task.ExtractedAt = now }
-			}
-		}
-		_ = u.save115OfflineStoreLocked()
-	}
+	if current := u.offlineStore.Batches[batchID]; current != nil { current.HandoffChecks++; _ = u.save115OfflineStoreLocked() }
 	u.offlineMu.Unlock()
 	if visibleFiles > 0 {
 		if len(files) == 0 { u.Systemf("115离线批次 %s 已成功，未发现压缩包，跳过云解压", batchID) }
 	} else {
 		u.Systemf("115离线批次 %s 已成功，文件暂未可见，下次轮询继续检查", batchID)
 	}
+}
+
+func (u *Unpackerr) bind115OfflineArchive(batchID string, file n115File, taskKey string) {
+	u.offlineMu.Lock()
+	defer u.offlineMu.Unlock()
+	batch := u.offlineStore.Batches[batchID]
+	if batch == nil { return }
+	for _, task := range batch.Tasks {
+		if task.Status != "success" || task.ArchiveTaskKey != "" { continue }
+		if !strings.EqualFold(strings.TrimSpace(task.Name), strings.TrimSpace(file.Name)) { continue }
+		if task.Size <= 0 || file.Size <= 0 || task.Size != file.Size { continue }
+		task.ArchiveTaskKey, task.ArchiveName = taskKey, file.Name
+		task.ArchiveCID, task.ArchiveFID = file.CID, file.FID
+		task.ExtractedAt, task.UpdatedAt = time.Now(), time.Now()
+		u.Systemf("115离线任务已关联云解压：%s → %s", task.Name, file.Name)
+		_ = u.save115OfflineStoreLocked()
+		return
+	}
+}
+
+func (u *Unpackerr) offlinePipelineStatus(task *n115OfflineTask) string {
+	if task.ArchiveTaskKey == "" {
+		if task.Status == "success" && xtractr.IsArchiveFile(task.Name) { return "离线成功，等待发现压缩包" }
+		return ""
+	}
+	if value, ok := u.cd2Tasks.Load(task.ArchiveTaskKey); ok {
+		if transfer, valid := value.(*CD2Transfer); valid && transfer != nil { return transfer.State }
+	}
+	if u.state != nil {
+		u.state.mu.RLock()
+		defer u.state.mu.RUnlock()
+		if item, ok := u.state.Failed[task.ArchiveTaskKey]; ok {
+			if item.Error != "" { return "处理失败：" + item.Error }
+			return "处理失败"
+		}
+		if _, ok := u.state.Processed[task.ArchiveTaskKey]; ok { return "云解压已完成" }
+		for _, item := range u.state.Fallback115 {
+			if item.TaskKey == task.ArchiveTaskKey {
+				if item.Approval { return "云解压失败，等待批准本地下载" }
+				return "云解压失败，等待本地处理"
+			}
+		}
+	}
+	return "已交给115云解压"
 }
 
 func (u *Unpackerr) n115OfflineArchiveFiles(ctx context.Context, rootCID string, maxDepth, maxFiles int) ([]n115File, int, error) {
@@ -800,10 +922,23 @@ func (u *Unpackerr) n115OfflineArchiveFiles(ctx context.Context, rootCID string,
 }
 
 func (u *Unpackerr) n115OfflineClearAPI(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	var input struct{ Scope string `json:"scope"` }
+	var input struct{ Scope string `json:"scope"`; BatchID string `json:"batch_id"`; TaskID string `json:"task_id"` }
 	_ = json.NewDecoder(r.Body).Decode(&input)
 	u.offlineMu.Lock()
 	cleared := 0
+	if input.BatchID != "" && input.TaskID != "" {
+		batch := u.offlineStore.Batches[input.BatchID]
+		if batch == nil { u.offlineMu.Unlock(); http.Error(w, "离线批次不存在", http.StatusNotFound); return }
+		kept := batch.Tasks[:0]
+		for _, task := range batch.Tasks { if task.ID == input.TaskID { cleared++ } else { kept = append(kept, task) } }
+		batch.Tasks = kept
+		if len(batch.Tasks) == 0 { delete(u.offlineStore.Batches, input.BatchID) }
+		err := u.save115OfflineStoreLocked()
+		u.offlineMu.Unlock()
+		if err != nil { http.Error(w, err.Error(), http.StatusInternalServerError); return }
+		u.writeJSON(w, map[string]any{"success": true, "cleared": cleared})
+		return
+	}
 	for id, batch := range u.offlineStore.Batches {
 		remove := input.Scope == "all"
 		if input.Scope == "completed" {
